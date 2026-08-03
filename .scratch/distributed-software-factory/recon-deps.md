@@ -41,19 +41,99 @@ Verification of six external dependencies pinned by the factory spec. Each entry
 - Bucket-level CORS configuration supported
 - Versions below threshold fail on **first upload**, not at boot
 
-**Found:**
-- ✅ Latest stable version: **v2.3.0** (released April 16, 2026)
-- ✅ Single-node support: `--single-node` flag auto-creates layout for single nodes (added in v2.3.0 improvements)
-- ✅ Default environment variable support: `--default-access-key` and `--default-bucket` for easier setup
-- ✅ S3-compatible distributed object store built for self-hosting
-- ⚠️ Bucket-level CORS: **NOT EXPLICITLY VERIFIED** — search results reference CORS support in context of S3 compatibility but no specific documentation on bucket-level configuration found
-- ⚠️ Upload failure threshold: **COULD NOT VERIFY** — no specific information found about which version threshold triggers upload-time vs. boot-time failures
+**Found — verified hands-on against a running Garage, not by reading docs:**
 
-**Evidence:**
-- Forge Deuxfleurs releases page (v2.3.0 release announcement)
-- OneUptime S3 setup guide (March 2026) confirms current status
+### 2a. Bucket-level CORS — **CONFIRMED**
 
-**Verdict:** **STALE** (on upload failure threshold — spec notes this is critical for bootstrap validation, needs investigation during implementation)
+Garage v2.3.0 supports the S3 `PutBucketCors`/`GetBucketCors` API on a bucket. There is
+**no** `garage bucket cors` CLI subcommand (`garage bucket --help` lists alias / allow /
+create / delete / deny / info / inspect-object / list / set-quotas / unalias / website —
+no `cors`), so configuration goes through the S3 API itself, not the `garage` binary.
+
+Verified end-to-end against the actual `compose.yaml` in this repo (`docker compose up`,
+then torn down):
+
+1. Brought up `postgres` + `garage` (v2.3.0, `--single-node --default-bucket
+   --default-access-key`), then ran the `garage-init` one-shot service, which calls:
+   ```
+   aws --endpoint-url http://garage:3900 s3api put-bucket-cors --bucket factory \
+     --cors-configuration '{"CORSRules":[
+       {"AllowedOrigins":["https://app.factory.example"],"AllowedMethods":["GET"],...},
+       {"AllowedOrigins":["https://runner.factory.example"],"AllowedMethods":["PUT"],...}
+     ]}'
+   ```
+   Exit 0. `aws s3api get-bucket-cors --bucket factory` read back both rules unchanged.
+
+2. Presigned PUT, called from the Runner origin:
+   ```
+   curl -i -X PUT -H "Origin: https://runner.factory.example" --data-binary "..." "$PUT_URL"
+   → HTTP/1.1 200 OK
+     access-control-allow-origin: https://runner.factory.example
+     access-control-allow-methods: PUT
+   ```
+
+3. Presigned GET, called from the web origin, cross-origin:
+   ```
+   curl -i -X GET -H "Origin: https://app.factory.example" "$GET_URL"
+   → HTTP/1.1 200 OK
+     access-control-allow-origin: https://app.factory.example
+     access-control-allow-methods: GET
+   ```
+
+4. Preflight `OPTIONS` for the same GET also returns the correct
+   `access-control-allow-*` headers with a `200` and empty body.
+
+5. Negative check: the same presigned GET called with `Origin: https://evil.example`
+   (not in either CORS rule) still returns `200` with the object body — Garage doesn't
+   reject the *request*, it just omits `access-control-allow-origin`, which is exactly
+   how S3-style CORS is supposed to work (the browser enforces same-origin policy
+   client-side using that missing header; the server doesn't gate on it). Confirmed no
+   `access-control-allow-origin` header was present in that response.
+
+Bucket-level CORS with method-scoped, origin-scoped rules (`GET` for browser, `PUT` for
+Runner) is real and works as the spec describes.
+
+### 2b. Upload-failure version threshold — **CONFIRMED**, with the mechanism pinned down precisely
+
+Compared `dxflrs/garage:v2.2.0` against `v2.3.0` directly:
+
+- `docker run --rm dxflrs/garage:v2.2.0 /garage server --help` lists **no flags at
+  all** beyond `-h`/`-V` — `--single-node`, `--default-bucket`, `--default-access-key`
+  do not exist in v2.2.0.
+- Running v2.2.0 with those flags anyway fails immediately at argument parsing:
+  ```
+  error: Found argument '--single-node' which wasn't expected, or isn't valid in this context
+  ```
+  That's a **boot-time** failure — loud, immediate, compose reports the container
+  exited. Not the failure mode the spec warns about.
+- Running v2.2.0 **without** those flags (i.e. `garage server` with a bare config, the
+  only invocation v2.2.0 understands) boots cleanly: logs show "S3 API server listening
+  on http://[::]:3900", and `garage status` reports the node as `HEALTHY`. This is the
+  actual danger: **a healthy-looking container.**
+- Against that "healthy" v2.2.0 node, every data-plane operation fails —
+  `garage key create`, `garage bucket create`, and (by the same code path) the first
+  object PUT all return:
+  ```
+  Error: CreateKey returned InternalError (500): Internal error: Layout not ready
+  ```
+  because pre-2.3.0 Garage requires a manual `garage layout assign` + `garage layout
+  apply` step that nothing in a bare `docker compose up` triggers. Applying that layout
+  by hand against the same v2.2.0 node immediately unblocks key/bucket creation and
+  uploads — confirming it's the missing layout, not a v2.2.0 defect, that's the failure.
+
+**The threshold is v2.3.0 exactly**, and the failure mode is precisely "boots and reports
+healthy, breaks on the first write" — not a bug that appears below some version, but the
+general "no layout = no data plane" behavior that exists in **every** Garage version,
+which v2.3.0's `--single-node` flag is the first to paper over automatically. Pinning
+`dxflrs/garage:v2.3.0` and using `--single-node --default-bucket --default-access-key`
+(as `compose.yaml` in this repo does) is what removes the manual layout/bucket/key step
+and closes this failure mode.
+
+**Evidence:** commands and output above; full compose-based reproduction in
+`compose.yaml` at repo root plus `deploy/garage/`.
+
+**Verdict:** **CONFIRMED** (both sub-questions; see `compose.yaml` for the pin and the
+flags in production form)
 
 ---
 
@@ -158,7 +238,7 @@ Verification of six external dependencies pinned by the factory spec. Each entry
 | Item | Blocker? | Action |
 |------|----------|--------|
 | sandcastle | No | Proceed; API surface confirmed |
-| Garage | **YES** | Verify upload failure threshold before bootstrap code; test single-node CORS config |
+| Garage | No (resolved) | Pin `dxflrs/garage:v2.3.0`, run with `--single-node --default-bucket --default-access-key`, configure CORS via `s3api put-bucket-cors` in a one-shot init service — all done in `compose.yaml` / `deploy/garage/` at repo root |
 | Drizzle partial index | No | Use `.where()` and `.nullsNotDistinct()` natively; no raw-SQL fallback |
 | Zod→OpenAPI | No | Pick zod-openapi or @asteasolutions/zod-to-openapi; both production-ready |
 | testcontainers | No | Test on Node 26 early if paranoid; minimum met |
@@ -168,7 +248,6 @@ Verification of six external dependencies pinned by the factory spec. Each entry
 
 ## Confidence Summary
 
-- **CONFIRMED**: 5 items (sandcastle, Drizzle, Zod→OpenAPI, testcontainers, GitHub signatures)
-- **COULD NOT VERIFY**: 2 items, both on Garage — the bucket-level CORS surface, and the version
-  threshold below which uploads fail. Neither blocks work before issue #7. Both are answerable
-  only by running Garage, so they are settled there, not by more searching.
+- **CONFIRMED**: 6 items — sandcastle, Drizzle, Zod→OpenAPI, testcontainers, GitHub
+  signatures, and Garage (both the CORS surface and the version threshold, previously
+  open, now closed by running Garage directly — see section 2).

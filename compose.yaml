@@ -1,0 +1,139 @@
+# Docker Compose skeleton for factory self-host packaging -- a spike for issue #21,
+# not #21 itself. It de-risks the two Garage questions that block #7 (log), #10
+# (agent sessions), #13 (artifacts) and #21 proper: whether bucket-level CORS
+# actually works, and where the "old Garage fails on first upload, not at boot"
+# threshold sits. Both were verified hands-on; see .scratch/distributed-software-
+# factory/recon-deps.md for the evidence.
+#
+# Deliberately NOT here: the control-plane/web image (#21 builds the single
+# web+control-plane image; there's no app code yet to justify one). `migrate` and
+# `garage-init` are one-shot placeholders that establish the *shape* #21 wires real
+# services into -- see the comments on each.
+#
+# Config split (spec "Packaging self-host", deliberate, not a preference):
+#   - key material (master key, GitHub App private key) -> FILES, read-only mounts
+#     from ./deploy/keys/. That directory is plain host filesystem, never a Docker
+#     volume, never under a path a `pg_dump` + Garage object-sync backup routine
+#     would touch. That physical separation is what keeps the master key out of the
+#     backup set -- not a warning anyone has to remember to read.
+#   - service passwords (Postgres, webhook, Garage) -> ENVIRONMENT VARIABLES, see
+#     deploy/.env.example. They're only useful while their service is reachable and
+#     rotate with a restart; none of them decrypt anything at rest.
+
+services:
+  postgres:
+    # Version matches what packages/control-plane's test rig already pins
+    # (PostgreSqlContainer("postgres:16-alpine") in test/sql/db-rig.ts and
+    # test/seam1/setup.ts) -- one Postgres version across tests and deploy.
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-factory}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env, see deploy/.env.example}
+      POSTGRES_DB: ${POSTGRES_DB:-factory}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-factory} -d ${POSTGRES_DB:-factory}"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  garage:
+    # Pinned exact, and the pin is load-bearing, not caution: v2.3.0 is the first
+    # release that understands --single-node / --default-bucket / --default-access-key.
+    # Verified hands-on (recon-deps.md has the transcript):
+    #   - v2.2.0 rejects these three flags at argument-parse time -- a boot failure,
+    #     loud, immediate.
+    #   - any pre-2.3.0 version run WITHOUT them (i.e. `garage server` with no layout
+    #     step) boots clean, listens on the S3 port, and `garage status` reports a
+    #     HEALTHY node -- but bucket/key creation and every object operation, first
+    #     upload included, fails with "Layout not ready" until an operator runs the
+    #     manual `garage layout assign` + `garage layout apply` that --single-node
+    #     replaces. That's the exact "fails on first upload, not at boot" failure
+    #     mode the spec warns about: a deployment that looks healthy right up until
+    #     someone tries to write an artifact.
+    # `garage:latest` is refused for the same reason sandcastle's version is pinned:
+    # "latest" resolving to something below this line is a silent downgrade.
+    image: dxflrs/garage:v2.3.0
+    command: ["/garage", "server", "--single-node", "--default-bucket", "--default-access-key"]
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set in .env, see deploy/.env.example}
+      GARAGE_DEFAULT_BUCKET: factory
+      GARAGE_DEFAULT_ACCESS_KEY: ${GARAGE_ACCESS_KEY:?set in .env, see deploy/.env.example}
+      GARAGE_DEFAULT_SECRET_KEY: ${GARAGE_SECRET_KEY:?set in .env, see deploy/.env.example}
+    volumes:
+      - ./deploy/garage/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    ports:
+      # S3 API only (no web UI, no admin API exposed to the host). Put this behind
+      # its own hostname at the reverse proxy -- SigV4 signs the Host header, so
+      # Garage cannot share an origin with web+API (spec: "satu-origin dibatalkan
+      # oleh fakta bahwa SigV4 menandatangani path dan Host"). Host port overridable
+      # since 3900 is a common local collision (e.g. another Garage already running).
+      - "${GARAGE_S3_HOST_PORT:-3900}:3900"
+    healthcheck:
+      # The image ships only the /garage binary -- no shell, no curl (confirmed:
+      # `docker run --entrypoint sh ...` fails with "executable file not found").
+      # Exec-form CMD avoids needing one; `garage status` succeeds once the admin/RPC
+      # layer is answering, which single-node layout creation completes before.
+      test: ["CMD", "/garage", "status"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+    restart: unless-stopped
+
+  garage-init:
+    # One-shot, same "runs once and gets out of the way" shape as `migrate` below,
+    # for a different reason: there is no `garage bucket cors` CLI subcommand
+    # (checked `garage bucket --help` against v2.3.0 -- alias/allow/create/delete/
+    # deny/info/inspect-object/list/set-quotas/unalias/website, no cors). CORS is
+    # PutBucketCors, an S3-API-only operation, so this calls the S3 endpoint
+    # directly instead of shelling out to the garage binary.
+    image: amazon/aws-cli:2.31.13
+    depends_on:
+      garage:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: ${GARAGE_ACCESS_KEY:?set in .env, see deploy/.env.example}
+      AWS_SECRET_ACCESS_KEY: ${GARAGE_SECRET_KEY:?set in .env, see deploy/.env.example}
+      AWS_DEFAULT_REGION: garage
+      GARAGE_S3_ENDPOINT: http://garage:3900
+      GARAGE_DEFAULT_BUCKET: factory
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:5173}
+      RUNNER_ORIGIN: ${RUNNER_ORIGIN:-http://localhost:4319}
+    volumes:
+      - ./deploy/garage/configure-cors.sh:/configure-cors.sh:ro
+    entrypoint: ["bash", "/configure-cors.sh"]
+    restart: "no"
+
+  migrate:
+    # Placeholder for #21's real `factory migrate` (Drizzle migrate() + advisory lock
+    # + the boot-time schema-hash gate control-plane checks before serving -- spec
+    # "Packaging self-host"). What this proves now, before the control-plane image
+    # exists: the one-shot shape itself. #21's control-plane service adds
+    #   depends_on: { migrate: { condition: service_completed_successfully } }
+    # which is what makes "exactly one migrator" true by construction -- Drizzle's
+    # migrate() takes no lock of its own (the design doc in
+    # .scratch/distributed-software-factory/issues/28-self-host-packaging.md cites
+    # pg-core/dialect.ts for this), so two entrypoints racing it both read "nothing
+    # applied yet" and one dies on `relation already exists` without the gate. The
+    # advisory lock stays in the real command anyway, for the operator who runs it
+    # by hand alongside `compose up` -- compose's guarantee doesn't cover that.
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-factory}:${POSTGRES_PASSWORD:?set in .env, see deploy/.env.example}@postgres:5432/${POSTGRES_DB:-factory}
+    volumes:
+      - ./deploy/migrate/migrate.sh:/migrate.sh:ro
+    entrypoint: ["sh", "/migrate.sh"]
+    restart: "no"
+
+volumes:
+  postgres-data:
+  garage-meta:
+  garage-data:

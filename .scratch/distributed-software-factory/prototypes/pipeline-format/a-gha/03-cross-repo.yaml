@@ -1,0 +1,41 @@
+# GAYA A — lintas repo. Tuan rumah: repo config Project.
+# Fan-out ber-Key nama repo (ticket 08). Satu StepRun tetap satu repo.
+
+version: 1
+name: Ubah kontrak API, implement di dua repo
+repo: infra # repo config Project — tuan rumah definisi ini
+
+steps:
+  contract:
+    agent: claude
+    promptFile: prompts/api-contract.md
+    timeout: 30m
+    outputs:
+      spec: { type: string } # path file OpenAPI di dalam ref-nya
+
+  implement:
+    needs: [contract]
+    over:
+      - key: frontend # Key = nama repo, terbaca manusia
+        repo: frontend
+      - key: backend
+        repo: backend
+      overrides: [repo] # tanpa ini, elemen tidak boleh menyentuh `repo:`
+    minBranches: 1
+    agent: claude
+    promptFile: prompts/implement-from-contract.md
+    runsOn: [exec:docker]
+    timeout: 45m
+
+  open-prs:
+    needs: [implement]
+    join: all
+    repo: infra # LUBANG (ticket 21): Join tidak bisa fetch kode cabang —
+    run: node scripts/open-prs.mjs # cabangnya ada di repo lain. Ia hanya baca manifest.
+    timeout: 10m
+# `over:` di sini bercampur: dua elemen daftar plus satu bidang `overrides:`
+# di list yang sama. YAML mengizinkannya hanya kalau `over:` mapping, bukan
+# sequence — jadi bentuk di atas sebenarnya TIDAK VALID sebagai YAML.
+# Itu temuan, bukan kelalaian: gaya A memaksa `over:` punya dua bentuk
+# (mapping saat `fromOutput`, sequence saat konstanta), dan `overrides:` tidak
+# punya tempat yang sah di bentuk kedua.

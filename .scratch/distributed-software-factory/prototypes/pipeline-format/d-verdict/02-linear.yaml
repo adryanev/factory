@@ -1,0 +1,28 @@
+# HASIL — rantai lurus. Uji keringkasan ticket 09.
+
+version: 1
+name: Lint, build, test
+repo: frontend
+
+steps:
+  lint:
+    run: pnpm lint
+
+  build:
+    after: [lint]
+    run: pnpm build
+    timeout: 15m
+
+  test:
+    after: [build]
+    run: pnpm test
+    timeout: 20m
+# Dua hal yang diminta ticket 09 dan keduanya lolos:
+#
+#   - Tidak ada satu pun bidang HITL. `ask:`, `onReject:`, `humanTimeout:`, dan
+#     `onHumanTimeout:` semuanya punya bawaan dan tidak muncul di Step non-interaktif.
+#   - Tidak ada satu pun `repo:` di level Step. Pipeline satu repo menulisnya sekali.
+#
+# Harga yang dibayar sadar: dua baris `after:` yang isinya "yang sebelumnya".
+# Itu ongkos dari memilih urutan file sebagai kosmetik — dan ongkos itu diterima
+# supaya tidak ada Graph yang berubah tanpa bentuk baris berubah.

@@ -1,0 +1,52 @@
+# GAYA B — lintas repo. Tuan rumah: repo config Project.
+
+version: 1
+name: Ubah kontrak API, implement di dua repo
+repo: infra
+
+templates:
+  contract:
+    agent: claude
+    promptFile: prompts/api-contract.md
+    timeout: 30m
+    outputs:
+      spec: { type: string }
+
+  # Satu templat, dipakai dua cabang. Yang berbeda cuma repo, dan repo
+  # ditulis di elemen `over:` — bukan di templat.
+  implement:
+    agent: claude
+    promptFile: prompts/implement-from-contract.md
+    runsOn: [exec:docker]
+    timeout: 45m
+
+  open-prs:
+    run: node scripts/open-prs.mjs
+    timeout: 10m
+
+dag:
+  - task: contract
+    template: contract
+
+  - task: implement
+    dependsOn: [contract]
+    minBranches: 1
+    over:
+      - { key: frontend, repo: frontend, template: implement }
+      - { key: backend, repo: backend, template: implement }
+
+  - task: open-prs
+    dependsOn: [implement]
+    template: open-prs
+    join: all
+    # LUBANG (ticket 21): cabangnya di repo lain, jadi Step ini tidak bisa
+    # fetch kode mereka. Ia jalan di `repo: infra` warisan Pipeline dan hanya
+    # membaca manifest JSON. Gaya B membuat lubang ini paling kelihatan,
+    # karena `repo:` absen dari elemen `over:` untuk task ini.
+# Di sini gaya B menang telak atas gaya A: `over:` tetap satu bentuk, dan
+# `repo:` per elemen adalah data biasa — tidak butuh `overrides:` untuk
+# menahannya supaya bukan ekspresi.
+#
+# Tapi perhatikan: `repo:` dan `template:` sekarang duduk bersebelahan di
+# elemen yang sama, padahal yang pertama data cabang dan yang kedua rujukan
+# definisi. Satu bidang, dua jenis. Itu tempat gaya ini akan retak berikutnya.

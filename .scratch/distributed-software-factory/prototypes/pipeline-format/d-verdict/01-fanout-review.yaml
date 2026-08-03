@@ -1,0 +1,79 @@
+# HASIL — rangka gaya A, cabang gaya C.
+#
+# Empat keputusan yang membentuknya:
+#   1. `steps:` mapping bernama. Id duplikat mustahil ditulis.
+#   2. `after:` selalu eksplisit. Urutan file murni kosmetik.
+#   3. Cabang adalah daftar Step (`branches:`), bukan substitusi ke satu Step.
+#   4. Rujukan Output berbentuk data. Tidak ada satu pun nilai yang di-parse.
+
+version: 1
+name: Rencana, tiga varian, review manusia
+repo: backend # bawaan Pipeline; Step dan cabang boleh menimpa
+unschedulableAfter: 2h # milik Pipeline (ticket 06)
+
+steps:
+  plan:
+    promptFile: .factory/prompts/plan.md
+    timeout: 30m
+    outputs: # kontrak Output — hanya ini yang mengalir
+      variants:
+        type: array
+        items: { key: string, brief: string }
+
+  implement:
+    after: [plan]
+    branches: # daftar konstanta: tiap cabang Step utuh
+      - key: agent-a
+        agent: claude
+      - key: agent-b
+        agent: codex
+      - key: agent-c
+        agent: cursor
+    minBranches: 1
+    promptFile: .factory/prompts/implement.md # bawaan semua cabang
+    runsOn: [exec:docker]
+    timeout: 45m
+    attempts: 2
+
+  pick-best:
+    after: [implement]
+    join: all # all (bawaan) | any | { min: 2 } — milik Join, ticket 06
+    promptFile: .factory/prompts/pick-best.md
+    timeout: 20m
+
+  review:
+    after: [pick-best]
+    promptFile: .factory/prompts/review.md
+    timeout: 30m # jam agent, per giliran — bukan jam manusia
+    ask: # kehadirannya yang membuat Step ini interaktif
+      group: reviewer
+      kind: approval
+    onReject: fail # fail | continue (bawaan) — bukan kegagalan step
+    humanTimeout: 7d # none (bawaan)
+    onHumanTimeout: fail
+
+  test:
+    after: [review]
+    run: pnpm test
+    runsOn: [exec:host, macos]
+    timeout: 20m
+    attempts: 3
+# Bentuk dinamis dari `branches:` — daftar cabang datang dari Output:
+#
+#   implement:
+#     after: [plan]
+#     branchesFrom:
+#       step: plan
+#       output: variants
+#     minBranches: 1
+#     promptFile: .factory/prompts/implement.md
+#
+# `branches:` dan `branchesFrom:` tidak pernah ditulis bersamaan.
+#
+# Yang harus ditegakkan skema Zod, karena YAML tidak menegakkannya:
+#   - `branches:` XOR `branchesFrom:`
+#   - `agent:`/`prompt:`/`promptFile:` XOR `run:`
+#   - `prompt:` XOR `promptFile:`
+#   - `key` unik di dalam `branches:` (duplikat menggagalkan Run — ticket 06)
+#   - `after:` menunjuk id yang ada, dan Graph-nya asiklik
+#   - `onHumanTimeout:` hanya bermakna kalau `humanTimeout:` bukan `none`

@@ -1,0 +1,84 @@
+# GAYA C — ditulis hanya untuk kasus ini, tanpa meniru siapa pun.
+#
+# Tiga taruhan yang membentuk seluruh gaya:
+#   1. `steps:` adalah sequence. Bawaan dependensi = step sebelumnya di daftar.
+#      `after:` hanya ditulis ketika Graph menyimpang dari urutan tulisan.
+#   2. Cabang bukan konfigurasi di atas satu Step — cabang ADALAH daftar Step.
+#      Jadi tidak ada substitusi, tidak ada templat, tidak ada `overrides:`.
+#   3. Kehadiran sebuah bidang yang menentukan jenis Step. `ask:` membuatnya
+#      interaktif, `run:` membuatnya non-agent. Tidak ada bidang `type:`.
+
+version: 1
+name: Rencana, tiga varian, review manusia
+repo: backend
+unschedulableAfter: 2h
+
+steps:
+  - id: plan
+    promptFile: .factory/prompts/plan.md
+    timeout: 30m
+    outputs:
+      variants:
+        type: array
+        items: { key: string, brief: string }
+
+  - id: implement
+    minBranches: 1
+    branches: # daftar cabang ditulis penuh: tiap cabang Step utuh
+      - key: agent-a
+        agent: claude
+      - key: agent-b
+        agent: codex
+      - key: agent-c
+        agent: cursor
+    # bidang di bawah ini bawaan untuk semua cabang di atas
+    promptFile: .factory/prompts/implement.md
+    runsOn: [exec:docker]
+    timeout: 45m
+    attempts: 2
+
+  - id: pick-best
+    join: all # all (bawaan) | any | { min: 2 }
+    promptFile: .factory/prompts/pick-best.md
+    timeout: 20m
+
+  - id: review
+    promptFile: .factory/prompts/review.md
+    timeout: 30m # jam agent, per giliran
+    ask: { group: reviewer, kind: approval }
+    onReject: fail
+    humanTimeout: 7d
+    onHumanTimeout: fail
+
+  - id: test
+    run: pnpm test
+    runsOn: [exec:host, macos]
+    timeout: 20m
+    attempts: 3
+# Bentuk dinamis dari `branches:` — daftarnya datang dari Output, bukan ditulis:
+#
+#   - id: implement
+#     branchesFrom: plan.variants
+#     minBranches: 1
+#     promptFile: .factory/prompts/implement.md
+#
+# Dua bidang, dua sumber, tidak pernah dipakai bersamaan. Ini pemisahan yang
+# sama seperti `prompt:` versus `promptFile:` di sandcastle — dan itu justru
+# yang membuatnya terbaca, bukan yang membuatnya berlebihan.
+#
+# Catatan gaya C
+#
+# + `branches:` menyelesaikan "cabang beda agent" tanpa mekanisme apa pun.
+#   Sebuah cabang adalah Step; Step punya `agent:`; selesai.
+# + `over:` tidak pernah punya dua bentuk, karena `over:` tidak ada.
+# + Rantai lurus (lihat 02) turun ke nyaris nol basa-basi.
+#
+# - `agent:` bisa ditulis di dua tempat (bawaan Step, atau per cabang), dan
+#   aturan penimpaannya harus dinyatakan di skema. Sama seperti `repo:` yang
+#   bisa ditulis di Pipeline atau di Step.
+# - Dependensi tersirat berarti menukar urutan dua baris mengubah Graph diam-diam.
+#   Itu bahaya nyata, dan pertahanannya cuma satu: `after:` wajib ditulis kalau
+#   step lain sudah bergantung padanya secara eksplisit.
+# - `branchesFrom:` ditulis `plan.variants` — string ber-titik yang harus
+#   di-parse. Itu ekspresi terkecil yang masih mungkin, dan mungkin terlalu kecil
+#   untuk diributkan, tapi ia tetap sesuatu yang dievaluasi.

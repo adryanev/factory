@@ -1,0 +1,67 @@
+# GAYA A — menyerupai GitHub Actions.
+# Step adalah mapping bernama; dependensi lewat `needs:`.
+
+version: 1
+name: Rencana, tiga varian, review manusia
+repo: backend # bawaan seluruh Pipeline; Step boleh menimpa
+unschedulableAfter: 2h # milik Pipeline (ticket 06), bukan milik Step
+
+steps:
+  plan:
+    agent: claude
+    promptFile: .factory/prompts/plan.md
+    timeout: 30m
+    outputs: # kontrak Output — inilah yang mengalir
+      variants:
+        type: array
+        items: { key: string, brief: string }
+
+  implement:
+    needs: [plan]
+    over:
+      fromOutput: plan.variants # rujukan data, bukan `${{ }}`
+      overrides: [agent] # bidang yang elemen boleh timpa (daftar tertutup)
+    minBranches: 1
+    agent: claude # bawaan cabang; elemen boleh menimpa
+    promptFile: .factory/prompts/implement.md
+    runsOn: [exec:docker]
+    timeout: 45m
+    attempts: 2
+
+  pick-best:
+    needs: [implement]
+    join: all # all (bawaan) | any | { min: 2 }
+    agent: claude
+    promptFile: .factory/prompts/pick-best.md
+    timeout: 20m
+
+  review:
+    needs: [pick-best]
+    agent: claude
+    promptFile: .factory/prompts/review.md
+    timeout: 30m # jam agent per giliran
+    ask: # kehadiran `ask:` yang membuat Step ini interaktif
+      group: reviewer
+      kind: approval
+    onReject: fail # fail | continue (bawaan)
+    humanTimeout: 7d # none (bawaan)
+    onHumanTimeout: fail # fail | continue
+
+  test:
+    needs: [review]
+    run: pnpm test
+    runsOn: [exec:host, macos]
+    timeout: 20m
+    attempts: 3 # step non-agent murah diulang
+# Catatan gaya A
+#
+# + `needs:` sudah dikenal semua orang; Graph terbaca dari satu bidang.
+# + `timeout:` dan `humanTimeout:` tidak pernah bisa tertukar — beda nama, beda baris.
+# + `onReject:` duduk jauh dari `attempts:`, jadi tidak terbaca sebagai kegagalan.
+#
+# - `over.overrides` adalah bidang yang menjelaskan bidang lain. Ia ada semata
+#   untuk menahan substitusi supaya tidak menjadi ekspresi. Ini bau.
+# - Mapping bernama berarti urutan file tidak berarti apa-apa; membaca rantai
+#   lurus menuntut mata melompat-lompat lewat `needs:`.
+# - `run:` versus `agent:` dibedakan hanya oleh bidang mana yang ada. Tidak ada
+#   yang mencegah keduanya ditulis sekaligus kecuali skema.

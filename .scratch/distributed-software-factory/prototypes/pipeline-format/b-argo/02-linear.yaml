@@ -1,0 +1,31 @@
+# GAYA B — rantai lurus. Di sinilah pajak dua-bagiannya paling terasa.
+
+version: 1
+name: Lint, build, test
+repo: frontend
+
+templates:
+  lint:
+    run: pnpm lint
+  build:
+    run: pnpm build
+    timeout: 15m
+  test:
+    run: pnpm test
+    timeout: 20m
+
+dag:
+  - task: lint
+    template: lint
+  - task: build
+    dependsOn: [lint]
+    template: build
+  - task: test
+    dependsOn: [build]
+    template: test
+# Tiga step jadi 20 baris, dan setiap nama ditulis dua kali. Tidak ada satu pun
+# templat yang dipakai ulang, jadi seluruh pemisahannya murni ongkos.
+#
+# Tidak ada bidang HITL yang muncul — itu lolos. Tapi kalau bentuk pipeline yang
+# paling sering ditulis membayar semahal ini, gaya B menagih pada mayoritas untuk
+# melayani minoritas.

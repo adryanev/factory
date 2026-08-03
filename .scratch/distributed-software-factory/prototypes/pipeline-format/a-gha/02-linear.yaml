@@ -1,0 +1,22 @@
+# GAYA A — rantai lurus. Uji keringkasan pada kasus sederhana.
+# Tidak ada satu pun bidang HITL yang muncul: semuanya punya bawaan.
+
+version: 1
+name: Lint, build, test
+repo: frontend
+
+steps:
+  lint:
+    run: pnpm lint
+
+  build:
+    needs: [lint]
+    run: pnpm build
+    timeout: 15m
+
+  test:
+    needs: [build]
+    run: pnpm test
+    timeout: 20m
+# Tiga step, dua baris `needs:` yang isinya cuma "yang sebelumnya".
+# Ini pajak yang gaya A tagih pada bentuk pipeline yang paling sering ditulis.

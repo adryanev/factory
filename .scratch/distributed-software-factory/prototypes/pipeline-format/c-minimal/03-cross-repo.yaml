@@ -1,0 +1,36 @@
+# GAYA C — lintas repo. Tuan rumah: repo config Project.
+
+version: 1
+name: Ubah kontrak API, implement di dua repo
+repo: infra # bawaan Pipeline; Step dan cabang boleh menimpa
+
+steps:
+  - id: contract
+    promptFile: prompts/api-contract.md
+    timeout: 30m
+    outputs:
+      spec: { type: string }
+
+  - id: implement
+    minBranches: 1
+    branches:
+      - { key: frontend, repo: frontend }
+      - { key: backend, repo: backend }
+    promptFile: prompts/implement-from-contract.md
+    runsOn: [exec:docker]
+    timeout: 45m
+
+  - id: open-prs
+    join: all
+    run: node scripts/open-prs.mjs
+    timeout: 10m
+    # `repo:` tidak ditulis, jadi warisan `infra` berlaku. LUBANG (ticket 21):
+    # Step ini duduk di repo config dan cuma membaca manifest — ia tidak bisa
+    # fetch kode cabang, karena cabangnya di repo yang lain.
+# Kalau `repo:` per cabang terasa wajar dibaca di sini, itu bukan kebetulan:
+# `branches:` sudah berbentuk daftar Step, jadi `repo:` di dalamnya adalah
+# bidang Step biasa. Bandingkan dengan `overrides: [repo]` di gaya A.
+#
+# Uji keringkasan yang diminta ticket 09: Pipeline satu repo (lihat 01 dan 02)
+# tidak menuliskan `repo:` satu kali pun di level Step. Hanya Pipeline lintas
+# repo yang membayar, dan hanya di tempat yang memang berbeda.

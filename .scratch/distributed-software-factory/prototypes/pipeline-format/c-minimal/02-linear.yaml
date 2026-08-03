@@ -1,0 +1,21 @@
+# GAYA C — rantai lurus. Dependensi tersirat dari urutan, jadi tidak ada
+# satu pun baris yang menyatakan "yang sebelumnya".
+
+version: 1
+name: Lint, build, test
+repo: frontend
+
+steps:
+  - id: lint
+    run: pnpm lint
+  - id: build
+    run: pnpm build
+    timeout: 15m
+  - id: test
+    run: pnpm test
+    timeout: 20m
+# Tidak ada bidang HITL, tidak ada `join:`, tidak ada `branches:`, tidak ada
+# `after:`. Yang ditulis persis yang berbeda dari bawaan.
+#
+# Inilah keuntungan terbesar gaya C, dan sekaligus risikonya: memindahkan
+# `build` ke bawah `test` mengubah Graph tanpa satu baris pun berubah bentuk.

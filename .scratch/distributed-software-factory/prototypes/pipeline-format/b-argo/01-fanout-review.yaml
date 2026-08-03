@@ -1,0 +1,105 @@
+# GAYA B — menyerupai Argo/Temporal.
+# Dua bagian: `templates:` mendefinisikan pekerjaan, `dag:` menyusunnya.
+# Templat dipakai ulang DI DALAM file yang sama. `uses:` lintas file tetap
+# tidak ada, jadi larangan ticket 08 tidak dilanggar.
+
+version: 1
+name: Rencana, tiga varian, review manusia
+repo: backend
+unschedulableAfter: 2h
+
+templates:
+  planner:
+    agent: claude
+    promptFile: .factory/prompts/plan.md
+    timeout: 30m
+    outputs:
+      variants:
+        type: array
+        items: { key: string, brief: string }
+
+  # Tiga templat implement yang beda agent. Inilah jawaban gaya B untuk
+  # "cabang berbeda agent" — tanpa substitusi, tanpa daftar bidang yang
+  # boleh ditimpa. Harganya: tiga blok yang isinya nyaris sama.
+  implement-claude:
+    agent: claude
+    promptFile: .factory/prompts/implement.md
+    runsOn: [exec:docker]
+    timeout: 45m
+    attempts: 2
+
+  implement-codex:
+    agent: codex
+    promptFile: .factory/prompts/implement.md
+    runsOn: [exec:docker]
+    timeout: 45m
+    attempts: 2
+
+  implement-cursor:
+    agent: cursor
+    promptFile: .factory/prompts/implement.md
+    runsOn: [exec:docker]
+    timeout: 45m
+    attempts: 2
+
+  judge:
+    agent: claude
+    promptFile: .factory/prompts/pick-best.md
+    timeout: 20m
+
+  human-approval:
+    agent: claude
+    promptFile: .factory/prompts/review.md
+    timeout: 30m
+    ask:
+      group: reviewer
+      kind: approval
+    onReject: fail
+    humanTimeout: 7d
+    onHumanTimeout: fail
+
+  suite:
+    run: pnpm test
+    runsOn: [exec:host, macos]
+    timeout: 20m
+    attempts: 3
+
+dag:
+  - task: plan
+    template: planner
+
+  - task: implement
+    dependsOn: [plan]
+    minBranches: 1
+    over:
+      # Daftar konstanta: tiap elemen menunjuk templat. Key eksplisit.
+      - { key: agent-a, template: implement-claude }
+      - { key: agent-b, template: implement-codex }
+      - { key: agent-c, template: implement-cursor }
+
+  - task: pick-best
+    dependsOn: [implement]
+    template: judge
+    join: all
+
+  - task: review
+    dependsOn: [pick-best]
+    template: human-approval
+
+  - task: test
+    dependsOn: [review]
+    template: suite
+# Catatan gaya B
+#
+# + `over:` punya SATU bentuk saja — selalu sequence berisi elemen ber-`key`.
+#   Bentuk dinamis tinggal menggantinya jadi `over: { fromOutput: plan.variants }`,
+#   dan elemen dari Output membawa `template:` sendiri. Tidak ada `overrides:`.
+# + Cabang beda agent jatuh keluar gratis, tanpa satu pun mekanisme baru.
+# + `dag:` sequence, jadi urutan file punya arti dan bisa dibaca dari atas.
+#
+# - Dua tempat untuk satu Step. Membaca "berapa timeout step review" menuntut
+#   lompat dari `dag:` ke `templates:`.
+# - Templat yang dipakai sekali (mayoritas) tetap harus diberi nama. Nama
+#   `planner`/`judge`/`suite` adalah kosakata kedua di samping nama task.
+# - Tiga blok implement-* yang beda satu baris adalah duplikasi yang `uses:`
+#   ditolak justru untuk menghindarinya — di dalam file, bukan lintas file.

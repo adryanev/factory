@@ -1,0 +1,1150 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype 13 — Monitoring Run</title>
+<style>
+:root{
+  color-scheme:dark;
+  /* surfaces — lifted by luminance, not by borders */
+  --ink-0:#08090c; --ink-1:#0e1014; --ink-2:#14171d; --ink-3:#1b1f27; --ink-4:#232833;
+  --line:#232830; --line-2:#2e3440;
+  --fg-1:#e8ecf2; --fg-2:#a7b0bf; --fg-3:#78828f;
+  --acc:#5b8cff; --acc-dim:#1e2a45;
+
+  --ok:#3ecf8e;   --ok-bg:#0f2a20;
+  --run:#5b8cff;  --run-bg:#111c33;
+  --fail:#ff7a70; --fail-bg:#2a1416;
+  --hold:#b98cff; --hold-bg:#1e1630;
+  --warn:#f0b429; --warn-bg:#2a1f0c;
+  --skip:#6b7480;
+
+  --r-1:5px; --r-2:8px; --r-3:12px;
+  --sh-1:0 1px 2px rgba(0,0,0,.5);
+  --sh-2:0 8px 24px -6px rgba(0,0,0,.65), 0 2px 6px rgba(0,0,0,.4);
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+  --ease:cubic-bezier(.16,.84,.44,1);
+
+  /* fixed rem scale, ratio ~1.15 */
+  --t-xs:11px; --t-sm:12px; --t-md:13px; --t-base:14px; --t-lg:16px; --t-xl:19px; --t-2xl:22px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--ink-0);color:var(--fg-1);
+  font:var(--t-base)/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono);font-size:.92em;letter-spacing:-.01em}
+.fg2{color:var(--fg-2)} .fg3{color:var(--fg-3)}
+.row{display:flex;align-items:center;gap:10px}
+.ic{flex:none;vertical-align:-2px}
+
+button{font:inherit;color:var(--fg-1);background:var(--ink-3);border:1px solid var(--line-2);
+  border-radius:var(--r-1);padding:5px 11px;cursor:pointer;display:inline-flex;align-items:center;
+  gap:6px;transition:background .16s var(--ease),border-color .16s var(--ease),color .16s var(--ease)}
+button:hover{background:var(--ink-4);border-color:#3a4250}
+button:active{transform:translateY(.5px)}
+button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button[disabled]{opacity:.42;cursor:not-allowed}
+button.primary{background:var(--acc);border-color:var(--acc);color:#04101f;font-weight:600}
+button.primary:hover{background:#7ba3ff;border-color:#7ba3ff}
+button.quiet{background:transparent;border-color:transparent;color:var(--fg-2);padding:5px 8px}
+button.quiet:hover{background:var(--ink-3);color:var(--fg-1)}
+button.destructive{background:transparent;border-color:#4a2427;color:#ff9d96}
+button.destructive:hover{background:var(--fail-bg);border-color:#6b3338}
+
+/* ---------- status marks: shape first, colour second ---------- */
+.mk{flex:none;display:inline-block;vertical-align:-3px}
+.mk.ok{color:var(--ok)} .mk.running{color:var(--run)} .mk.failed{color:var(--fail)}
+.mk.awaiting{color:var(--hold)} .mk.unsched{color:var(--warn)}
+.mk.pending{color:var(--fg-3)} .mk.skipped{color:var(--skip)} .mk.cp{color:var(--fg-2)}
+.mk.running .spin{transform-origin:8px 8px;animation:spin 1.6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.mk.running .spin{animation:none}}
+
+.stat{display:inline-flex;align-items:center;gap:6px;font-size:var(--t-sm);font-weight:600;
+  letter-spacing:-.01em;white-space:nowrap}
+.stat.ok{color:var(--ok)} .stat.running{color:#8fb3ff} .stat.failed{color:var(--fail)}
+.stat.awaiting{color:#cbb0ff} .stat.unsched{color:var(--warn)}
+.stat.pending{color:var(--fg-3)} .stat.skipped{color:var(--skip)}
+
+/* ---------- chrome ---------- */
+.appbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:0 16px;height:48px;background:var(--ink-1);border-bottom:1px solid var(--line);
+  flex:none;overflow:hidden}
+@media (max-width:900px){
+  .appbar .crumbs{display:none}
+  .appbar button{padding:5px 8px;font-size:var(--t-md)}
+}
+
+.brand{flex:none;display:flex;align-items:center;gap:9px;font-weight:650;letter-spacing:-.015em}
+.brand .sq{width:16px;height:16px;border-radius:4px;
+  background:linear-gradient(140deg,var(--acc),#9b6bff);box-shadow:var(--sh-1)}
+.crumbs{display:flex;align-items:center;gap:7px;color:var(--fg-3);font-size:var(--t-md)}
+.crumbs{min-width:0;overflow:hidden;white-space:nowrap}
+.crumbs b{color:var(--fg-1);font-weight:600}
+.crumbs .sep{color:#3a4250}
+
+.runhead{padding:14px 16px 0}
+.runtitle{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}
+h1{font-size:var(--t-2xl);line-height:1.2;letter-spacing:-.02em;margin:0;font-weight:650}
+.subline{display:flex;gap:14px;flex-wrap:wrap;align-items:center;
+  margin-top:6px;font-size:var(--t-md);color:var(--fg-2)}
+.subline b{color:var(--fg-1);font-weight:600}
+.sep-dot{width:3px;height:3px;border-radius:50%;background:#39414e}
+
+/* the one authored moment: a single strip that says what is holding the Run */
+.banner{display:flex;align-items:center;gap:13px;margin:14px 16px 0;padding:11px 14px;
+  border-radius:var(--r-2);border:1px solid;background:var(--hold-bg);border-color:#3a2a5c;
+  box-shadow:var(--sh-1)}
+.banner .ico{flex:none;color:var(--hold)}
+.banner .txt{flex:1;min-width:0;font-size:var(--t-md)}
+.banner .txt b{font-weight:650}
+.banner .sub{color:#a99bc4;margin-top:2px}
+
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:14px 16px 10px;flex-wrap:wrap}
+.seg{display:inline-flex;background:var(--ink-2);border:1px solid var(--line);
+  border-radius:var(--r-1);padding:2px;gap:2px}
+.seg button{border:0;background:transparent;padding:4px 12px;border-radius:3px;
+  color:var(--fg-2);font-size:var(--t-md)}
+.seg button[aria-pressed="true"]{background:var(--ink-4);color:var(--fg-1);box-shadow:var(--sh-1)}
+.counts{display:flex;gap:14px;font-size:var(--t-sm);color:var(--fg-3);align-items:center}
+.counts .c{display:inline-flex;align-items:center;gap:5px}
+
+#app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.shell{display:grid;grid-template-columns:minmax(0,1fr) 452px;flex:1;min-height:0}
+.canvas{overflow:auto;padding:0 16px 28px}
+.inspector{border-left:1px solid var(--line);background:var(--ink-1);overflow:auto}
+@media (max-width:1180px){
+  .shell{grid-template-columns:1fr;height:auto}
+  #app{height:auto;overflow:visible}
+  .inspector{border-left:0;border-top:1px solid var(--line)}
+}
+
+/* ---------- graph ---------- */
+.graphwrap{position:relative;padding:6px 0 20px}
+.edges{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.edges path{fill:none;stroke:#2a313d;stroke-width:1.25}
+.edges path.hot{stroke:#3d4a63}
+.node{position:absolute;width:244px;background:var(--ink-2);border:1px solid var(--line);
+  border-radius:var(--r-2);padding:9px 11px;cursor:pointer;text-align:left;color:inherit;
+  display:block;transition:border-color .16s var(--ease),background .16s var(--ease),
+  box-shadow .16s var(--ease)}
+.node:hover{border-color:#39414f;background:var(--ink-3)}
+.node[aria-current="true"]{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc),var(--sh-2);
+  background:var(--ink-3)}
+.node.tint-failed{background:var(--fail-bg);border-color:#4a2427}
+.node.tint-failed:hover{background:#33191b}
+.node.tint-awaiting{background:var(--hold-bg);border-color:#3a2a5c}
+.node.tint-awaiting:hover{background:#241a3a}
+.node.ghost{background:transparent;border-style:dashed;border-color:#2b3240}
+.node.faded{opacity:.5}
+.nrow1{display:flex;align-items:center;gap:8px;justify-content:space-between}
+.nname{font-weight:600;font-size:var(--t-md);letter-spacing:-.01em;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.nmeta{display:flex;gap:4px 10px;align-items:center;margin-top:7px;font-size:var(--t-xs);
+  color:var(--fg-3);flex-wrap:wrap}
+.nmeta .m{display:inline-flex;align-items:center;gap:4px;min-width:0;white-space:nowrap}
+.nmeta .m span{overflow:hidden;text-overflow:ellipsis}
+.nnote{margin-top:7px;padding-top:6px;border-top:1px solid rgba(255,255,255,.06);
+  font-size:var(--t-xs);line-height:1.45}
+.nnote.f{color:#ffb0a8} .nnote.h{color:#cbb0ff} .nnote.w{color:#e5be62}
+.fanlabel{position:absolute;font-size:var(--t-xs);color:var(--fg-3);letter-spacing:.02em;
+  text-transform:uppercase;font-weight:600}
+.fanbox{position:absolute;border:1px dashed #2b3240;border-radius:var(--r-3);
+  background:rgba(255,255,255,.012)}
+.collabel{position:absolute;font-size:var(--t-xs);color:#4d5666;letter-spacing:.06em;
+  text-transform:uppercase;font-weight:700}
+
+/* ---------- table ---------- */
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--t-md)}
+thead th{position:sticky;top:0;z-index:1;background:var(--ink-0);text-align:left;
+  font-size:var(--t-xs);text-transform:uppercase;letter-spacing:.06em;color:#5c6573;
+  font-weight:700;padding:7px 10px;border-bottom:1px solid var(--line)}
+tbody td{padding:9px 10px;border-bottom:1px solid #171a21;vertical-align:middle}
+tbody tr{cursor:pointer;transition:background .12s var(--ease)}
+tbody tr:hover{background:var(--ink-1)}
+tbody tr[aria-current="true"]{background:var(--acc-dim);
+  box-shadow:inset 2px 0 0 var(--acc)}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.child .nm{padding-left:18px;position:relative}
+.child .nm::before{content:"";position:absolute;left:5px;top:-9px;bottom:9px;width:7px;
+  border-left:1px solid #2c333f;border-bottom:1px solid #2c333f;border-bottom-left-radius:4px}
+
+/* ---------- timeline ---------- */
+.tl{padding-top:4px}
+.tlaxis{display:grid;grid-template-columns:clamp(140px,22vw,210px) 1fr;gap:14px;font-size:var(--t-xs);
+  color:#5c6573;padding-bottom:6px;border-bottom:1px solid var(--line);margin-bottom:6px}
+.ticks{position:relative;height:14px}
+.ticks span{position:absolute;transform:translateX(-50%)}
+.tlrow{display:grid;grid-template-columns:clamp(140px,22vw,210px) 1fr;gap:14px;align-items:center;
+  padding:5px 0;cursor:pointer;border-radius:var(--r-1)}
+.tlrow:hover{background:var(--ink-1)}
+.tlrow[aria-current="true"]{background:var(--acc-dim)}
+.tllab{display:flex;align-items:center;gap:7px;font-size:var(--t-md);overflow:hidden}
+.tllab .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.track{position:relative;height:22px;background:linear-gradient(90deg,#101318,#101318);
+  border-radius:var(--r-1);overflow:hidden}
+.gridlines{position:absolute;inset:0}
+.gridlines i{position:absolute;top:0;bottom:0;width:1px;background:#181c23}
+.bar{position:absolute;top:4px;height:14px;border-radius:3px;display:flex;align-items:center;
+  padding:0 7px;font-size:10px;font-weight:700;letter-spacing:-.01em;white-space:nowrap;
+  overflow:hidden;color:#06090e}
+.bar.ok{background:var(--ok)} .bar.running{background:var(--run);color:#f0f5ff}
+.bar.failed{background:var(--fail);color:#2a0d0d}
+.bar.awaiting{background:var(--hold);color:#1c0e33}
+.bar.unsched{background:repeating-linear-gradient(-45deg,#3a2c10 0 6px,#4a3a16 6px 12px);
+  border:1px solid #6b5320;color:#f0c454}
+.bar.skipped{background:transparent;border:1px dashed #4a525e;color:var(--skip)}
+.nowline{position:absolute;top:0;bottom:0;width:1px;background:var(--fail);opacity:.55}
+.nowline::after{content:"sekarang";position:absolute;top:-16px;right:-2px;font-size:10px;
+  color:var(--fail);font-weight:700}
+
+/* ---------- inspector ---------- */
+.insp{padding:14px 16px 32px}
+.insphead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.insphead h2{margin:0;font-size:var(--t-lg);letter-spacing:-.015em;font-weight:650}
+.why{margin-top:12px;border-radius:var(--r-2);border:1px solid;padding:11px 12px}
+.why.failed{background:var(--fail-bg);border-color:#4a2427}
+.why.awaiting{background:var(--hold-bg);border-color:#3a2a5c}
+.why h3{margin:0 0 4px;font-size:var(--t-md);font-weight:650}
+.why.failed h3{color:#ffb0a8} .why.awaiting h3{color:#cbb0ff}
+.why p{margin:0;font-size:var(--t-md);color:var(--fg-2);line-height:1.5}
+.why .acts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+
+.tabs{display:flex;gap:2px;margin-top:16px;border-bottom:1px solid var(--line)}
+.tabs button{border:0;background:transparent;border-radius:var(--r-1) var(--r-1) 0 0;
+  padding:7px 12px;color:var(--fg-3);font-size:var(--t-md);position:relative}
+.tabs button[aria-selected="true"]{color:var(--fg-1)}
+.tabs button[aria-selected="true"]::after{content:"";position:absolute;left:8px;right:8px;
+  bottom:-1px;height:2px;background:var(--acc);border-radius:2px}
+.tabpanel{padding-top:14px}
+
+dl.kv{display:grid;grid-template-columns:132px minmax(0,1fr);gap:7px 12px;margin:0;
+  font-size:var(--t-md)}
+dl.kv dt{color:var(--fg-3)} dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+
+.logblk{margin-bottom:14px}
+.loghd{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  font-size:var(--t-xs);color:var(--fg-3);padding:0 2px 5px}
+.loghd .tag{display:inline-flex;gap:6px;align-items:center}
+pre.log{margin:0;background:#06070a;border:1px solid var(--line);border-radius:var(--r-2);
+  padding:10px 12px;font-family:var(--mono);font-size:var(--t-sm);line-height:1.6;
+  max-height:290px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;color:#b9c3d1}
+pre.log .e{color:#ffb0a8} pre.log .m{color:var(--warn);font-style:italic}
+pre.log .o{color:#8fd9b6} pre.log .p{color:#8fb3ff}
+
+.art{border:1px solid var(--line);border-radius:var(--r-2);margin-bottom:10px;overflow:hidden;
+  background:var(--ink-2)}
+.arthd{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:8px 11px;background:var(--ink-3);border-bottom:1px solid var(--line);font-size:var(--t-md)}
+.artbody{padding:11px 12px;font-size:var(--t-md);line-height:1.6;color:var(--fg-2);
+  max-height:280px;overflow:auto}
+.artbody h3{margin:0 0 6px;font-size:var(--t-base);color:var(--fg-1)}
+.artbody p{margin:0 0 8px;max-width:68ch}
+.artbody ol,.artbody ul{margin:0 0 8px;padding-left:20px}
+.diff{font-family:var(--mono);font-size:var(--t-sm);line-height:1.55;white-space:pre;
+  overflow-x:auto;color:#b9c3d1;margin:0}
+.diff .a{color:#8fd9b6;background:rgba(62,207,142,.07);display:block}
+.diff .r{color:#ffb0a8;background:rgba(255,122,112,.07);display:block}
+.diff .h{color:#8fb3ff;display:block}
+.srch{position:relative;margin-bottom:8px}
+.srch input{width:100%;background:#06070a;border:1px solid var(--line);color:var(--fg-1);
+  border-radius:var(--r-1);padding:6px 10px 6px 30px;font:inherit;font-size:var(--t-md)}
+.srch input:focus{outline:2px solid var(--acc);outline-offset:-1px;border-color:transparent}
+.srch .ic{position:absolute;left:9px;top:8px;color:var(--fg-3)}
+mark{background:#6b5314;color:#ffe9a8;border-radius:2px;padding:0 1px}
+
+.empty{border:1px dashed var(--line-2);border-radius:var(--r-2);padding:20px 16px;
+  text-align:center;color:var(--fg-3);font-size:var(--t-md);line-height:1.55}
+.empty b{color:var(--fg-2);display:block;margin-bottom:3px;font-weight:600}
+
+.confirm{margin:12px 16px 0;border:1px solid #4a2427;background:var(--fail-bg);
+  border-radius:var(--r-2);padding:12px 14px;box-shadow:var(--sh-2)}
+.confirm h3{margin:0 0 5px;font-size:var(--t-md);color:#ffb0a8;font-weight:650}
+.confirm p{margin:0;font-size:var(--t-md);color:var(--fg-2);max-width:70ch;line-height:1.55}
+.confirm .acts{display:flex;gap:8px;margin-top:11px}
+
+/* ---------- run list ---------- */
+.page{padding:0 16px 40px;overflow:auto}
+.metrics{display:flex;gap:28px;flex-wrap:wrap;padding:14px 0 18px}
+.metric .v{font-size:var(--t-xl);font-weight:650;letter-spacing:-.02em}
+.metric .l{font-size:var(--t-sm);color:var(--fg-3)}
+.tagline{display:inline-flex;align-items:center;gap:5px;font-size:var(--t-xs);color:var(--fg-3)}
+.warnchip{display:inline-flex;align-items:center;gap:4px;background:var(--warn-bg);
+  color:#e5be62;border:1px solid #4a3a16;border-radius:3px;padding:0 5px;font-size:10px;
+  font-weight:700;letter-spacing:.02em}
+
+/* ---------- varian: status sebagai pill, bukan bentuk ---------- */
+.pill{display:inline-flex;align-items:center;gap:5px;padding:1px 8px;border-radius:999px;
+  font-size:var(--t-xs);font-weight:650;border:1px solid;white-space:nowrap;letter-spacing:-.01em}
+.pill i{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.pill.ok{color:var(--ok);border-color:#1d4a37;background:var(--ok-bg)}
+.pill.running{color:#8fb3ff;border-color:#254068;background:var(--run-bg)}
+.pill.failed{color:var(--fail);border-color:#4a2427;background:var(--fail-bg)}
+.pill.awaiting{color:#cbb0ff;border-color:#3a2a5c;background:var(--hold-bg)}
+.pill.unsched{color:#e5be62;border-color:#4a3a16;background:var(--warn-bg)}
+.pill.pending{color:var(--fg-3);border-color:var(--line-2);background:var(--ink-2)}
+.pill.skipped{color:var(--skip);border-color:var(--line);background:transparent}
+.pill.ghost{color:var(--fg-3);border-color:var(--line-2);background:transparent;border-style:dashed}
+.dot{flex:none;display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:-1px;
+  background:currentColor}
+.dot.ok{color:var(--ok)} .dot.running{color:var(--run)} .dot.failed{color:var(--fail)}
+.dot.awaiting{color:var(--hold)} .dot.unsched{color:var(--warn)}
+.dot.pending{color:var(--fg-3);background:transparent;box-shadow:inset 0 0 0 1.4px currentColor}
+.dot.skipped{color:var(--skip);background:transparent;box-shadow:inset 0 0 0 1.4px currentColor}
+.dot.ghost{color:var(--fg-3);background:transparent;box-shadow:inset 0 0 0 1.4px currentColor}
+.dot.cp{color:var(--fg-2)}
+
+/* ---------- varian: kepadatan ---------- */
+.rapat tbody td{padding:4px 10px}
+.rapat thead th{padding:5px 10px}
+.rapat .nmeta{margin-top:5px}
+.rapat .nnote{display:none}
+.rapat .tlrow{padding:2px 0}
+.rapat .subrow{display:none}
+
+/* ---------- varian: inspector di bawah / halaman sendiri ---------- */
+.shell.ib{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) 44vh}
+.shell.ib .inspector{border-left:0;border-top:1px solid var(--line)}
+.shell.ip{grid-template-columns:minmax(0,1fr)}
+.steppage{overflow:auto;padding:0 0 40px;flex:1;min-height:0}
+.steppage .insp{max-width:980px}
+.backbar{padding:12px 16px 0}
+
+/* ---------- varian: log gabungan ---------- */
+.mlog{margin:0;background:#06070a;border:1px solid var(--line);border-radius:var(--r-2);
+  padding:10px 0;font-family:var(--mono);font-size:var(--t-sm);line-height:1.65;
+  max-height:420px;overflow:auto;color:#b9c3d1}
+.mlog .ln{display:grid;grid-template-columns:60px 92px 1fr;gap:10px;padding:0 12px;
+  overflow-wrap:anywhere}
+.mlog .ln:hover{background:#0d1017}
+.mlog .ts{color:#4d5666}
+.mlog .kk{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mlog .kk.k-a{color:#3ecf8e} .mlog .kk.k-b{color:#8fb3ff} .mlog .kk.k-c{color:#ff7a70}
+.mlog .kk.k-plan{color:#e0b0ff} .mlog .kk.k-review{color:#cbb0ff}
+.mlog .ln.err .tx{color:#ffb0a8} .mlog .ln.meta .tx{color:var(--warn);font-style:italic}
+.mlog .ln.out .tx{color:#8fd9b6}
+.mlog .ln.sel{background:#101725;box-shadow:inset 2px 0 0 var(--acc)}
+
+/* ---------- decision bar: perancah prototype, bukan bagian produk ---------- */
+.dbar{flex:none;background:#0a0b0f;border-top:1px solid #333a47;max-height:46vh;overflow:auto}
+.dbar .hd{display:flex;align-items:center;gap:10px;width:100%;padding:8px 16px;background:transparent;
+  border:0;border-radius:0;color:var(--fg-3);font-size:var(--t-sm);cursor:pointer;text-align:left}
+.dbar .hd:hover{background:#0e1016}
+.dbar .hd b{color:var(--fg-2);font-weight:650;letter-spacing:-.01em}
+.dbar .hd .sp{flex:1}
+.dbar .hd .now{flex:none;max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:#5c6573}
+@media (max-width:820px){.dbar .hd .now{display:none} .dset .lb{width:auto}}
+.dbar .hd .ch{display:inline-flex;transform:rotate(180deg);transition:transform .18s var(--ease)}
+.dbar[data-open="true"] .hd .ch{transform:rotate(270deg)}
+.dbody{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+  gap:9px 26px;padding:2px 16px 14px}
+.dgrp{grid-column:1/-1;font-size:var(--t-xs);text-transform:uppercase;letter-spacing:.08em;
+  color:#5c6573;font-weight:700;padding:8px 0 1px;border-top:1px solid #1b1f27;margin-top:4px}
+.dgrp:first-child{border-top:0;margin-top:0;padding-top:2px}
+.dset{display:flex;align-items:center;gap:10px;min-width:0}
+.dset .lb{color:var(--fg-2);white-space:nowrap;font-size:var(--t-sm);width:112px;flex:none}
+.dseg{display:inline-flex;background:var(--ink-2);border:1px solid var(--line);
+  border-radius:var(--r-1);padding:2px;gap:2px;flex-wrap:wrap}
+.dseg button{border:0;background:transparent;padding:3px 10px;border-radius:3px;
+  color:var(--fg-3);font-size:var(--t-sm)}
+.dseg button:hover{color:var(--fg-1);background:var(--ink-3)}
+.dseg button[aria-pressed="true"]{background:var(--ink-4);color:var(--fg-1);box-shadow:var(--sh-1)}
+
+/* ---------- design notes ---------- */
+.notes{margin:26px 0 40px;border-top:1px solid var(--line);padding-top:16px;max-width:78ch}
+.notes h3{font-size:var(--t-xs);letter-spacing:.09em;text-transform:uppercase;color:#5c6573;
+  margin:0 0 9px;font-weight:700}
+.notes h3+h3{margin-top:18px}
+.notes ul{margin:0;padding-left:17px;color:var(--fg-2);font-size:var(--t-md);line-height:1.6}
+.notes li{margin-bottom:6px}
+.notes li b{color:var(--fg-1)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+/* =========================================================================
+   PROTOTYPE SEKALI PAKAI — ticket 13. Data palsu, tanpa backend.
+   Yang diambil keputusannya, bukan kodenya.
+   ========================================================================= */
+
+/* ---------------------------------------------------------------- icons */
+const P = {
+  check:'<path d="M3.5 8.4l3 3 6-6.4"/>',
+  x:'<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
+  dots:'<circle cx="8" cy="3.6" r="1.15"/><circle cx="8" cy="8" r="1.15"/><circle cx="8" cy="12.4" r="1.15"/>',
+  server:'<rect x="2" y="3" width="12" height="4.4" rx="1.2"/><rect x="2" y="8.6" width="12" height="4.4" rx="1.2"/><path d="M4.6 5.2h.01M4.6 10.8h.01"/>',
+  clock:'<circle cx="8" cy="8" r="6"/><path d="M8 4.6V8l2.2 1.6"/>',
+  branch:'<circle cx="4.5" cy="3.8" r="1.7"/><circle cx="4.5" cy="12.2" r="1.7"/><circle cx="11.5" cy="3.8" r="1.7"/><path d="M4.5 5.5v5M11.5 5.5c0 3-3.4 2.4-5.3 4.4"/>',
+  coins:'<ellipse cx="8" cy="4.4" rx="5" ry="2.2"/><path d="M3 4.4v3.4c0 1.2 2.2 2.2 5 2.2s5-1 5-2.2V4.4"/><path d="M3 7.8v3.4c0 1.2 2.2 2.2 5 2.2s5-1 5-2.2V7.8"/>',
+  search:'<circle cx="7.2" cy="7.2" r="4.2"/><path d="M10.4 10.4l3 3"/>',
+  download:'<path d="M8 2.6v7.6M5 7.4l3 2.8 3-2.8M2.8 13h10.4"/>',
+  retry:'<path d="M13 8a5 5 0 1 1-1.6-3.7"/><path d="M13.2 2.6v3.1h-3.1"/>',
+  cancel:'<circle cx="8" cy="8" r="5.6"/><path d="M5.6 8h4.8"/>',
+  hand:'<path d="M5.4 8.6V4.2a1.1 1.1 0 0 1 2.2 0v3.4"/><path d="M7.6 7.4V3.4a1.1 1.1 0 0 1 2.2 0v4"/><path d="M9.8 7.6V5a1.1 1.1 0 0 1 2.2 0v5.2a3.4 3.4 0 0 1-3.4 3.4H8.2c-1.6 0-2.3-.8-3-1.9L3.7 9.3a1.1 1.1 0 0 1 1.8-1.2l1 1.3"/>',
+  chevL:'<path d="M9.8 3.6L5.4 8l4.4 4.4"/>',
+  play:'<path d="M5 3.4l7.4 4.6L5 12.6z"/>',
+  bolt:'<path d="M8.8 1.8L3.4 9h4L7.2 14.2 12.6 7h-4z"/>',
+  alert:'<path d="M8 2.6l6 10.4H2z"/><path d="M8 6.6v3M8 11.4h.01"/>',
+  doc:'<path d="M9 1.8H4.4A1.4 1.4 0 0 0 3 3.2v9.6a1.4 1.4 0 0 0 1.4 1.4h7.2a1.4 1.4 0 0 0 1.4-1.4V5.8z"/><path d="M9 1.8v4h4"/>',
+  cpu:'<rect x="4.4" y="4.4" width="7.2" height="7.2" rx="1.2"/><path d="M6.6 1.8v2.6M9.4 1.8v2.6M6.6 11.6v2.6M9.4 11.6v2.6M1.8 6.6h2.6M1.8 9.4h2.6M11.6 6.6h2.6M11.6 9.4h2.6"/>',
+  git:'<path d="M8 1.8v12.4M8 6.2l3.2-3.2M8 9.8L4.8 6.6"/>',
+};
+const ic = (n, s=14) => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 16 16" fill="none"
+  stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+  aria-hidden="true">${P[n]||""}</svg>`;
+
+/* status marks — each has a distinct SHAPE so colour is never the only signal */
+const MARK = {
+  ok:'<circle cx="8" cy="8" r="6.4" fill="currentColor" opacity=".18"/><circle cx="8" cy="8" r="6.4"/><path d="M5.2 8.2l2 2 3.6-3.9"/>',
+  running:'<circle cx="8" cy="8" r="6.4" opacity=".25"/><path class="spin" d="M8 1.6a6.4 6.4 0 0 1 6.4 6.4"/>',
+  failed:'<circle cx="8" cy="8" r="6.4" fill="currentColor" opacity=".18"/><circle cx="8" cy="8" r="6.4"/><path d="M6 6l4 4M10 6l-4 4"/>',
+  awaiting:'<circle cx="8" cy="8" r="6.4" fill="currentColor" opacity=".18"/><circle cx="8" cy="8" r="6.4"/><path d="M6.6 5.8v4.4M9.4 5.8v4.4"/>',
+  unsched:'<circle cx="8" cy="8" r="6.4"/><path d="M8 4.6V8l2.4 1.5"/>',
+  pending:'<circle cx="8" cy="8" r="6.4" stroke-dasharray="2.2 2.6"/>',
+  skipped:'<circle cx="8" cy="8" r="6.4" stroke-dasharray="2.2 2.6"/><path d="M4.8 11.2l6.4-6.4"/>',
+  ghost:'<circle cx="8" cy="8" r="6.4" stroke-dasharray="2.2 2.6"/><path d="M8 5.4v2.8M8 10.6h.01"/>',
+  cp:'<rect x="2.2" y="4.2" width="11.6" height="7.6" rx="1.6"/><path d="M5 7.2h2.2M5 9.4h4.4"/>',
+};
+const shapeMark = (s, size=15) => `<svg class="mk ${s==="succeeded"?"ok":s}" width="${size}" height="${size}"
+  viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"
+  stroke-linejoin="round" aria-hidden="true">${MARK[s==="succeeded"?"ok":s]||MARK.pending}</svg>`;
+/* varian "titik": warna jadi satu-satunya pembeda — sengaja, supaya bisa dinilai */
+const dotMark = (s, size=15) => `<span class="dot ${s==="succeeded"?"ok":s}"
+  style="width:${Math.round(size*.6)}px;height:${Math.round(size*.6)}px" aria-hidden="true"></span>`;
+const mk = (s, size=15) => (st.v.mark==="dot" ? dotMark : shapeMark)(s, size);
+
+const LABEL = {succeeded:"selesai",running:"berjalan",failed:"gagal",pending:"menunggu giliran",
+  skipped:"dilewati",awaiting:"menunggu manusia",unsched:"tak terjadwal",ghost:"belum lahir",
+  cancelled:"dibatalkan","skipped-cron":"cron dilewati"};
+const cls = s => s==="succeeded" ? "ok" : s==="skipped-cron" ? "skipped" : s;
+const chip = (s,label) => st.v.status==="pill"
+  ? `<span class="pill ${cls(s)}"><i></i>${label}</span>`
+  : `<span class="stat ${cls(s)}">${mk(cls(s),14)}${label}</span>`;
+const stat = s => chip(s, LABEL[s]||s);
+/* notasi giliran·attempt — dua penomoran, dua bentuk penulisan yang diuji */
+const ta = s => !s.turn ? `<span class="fg3">—</span>` : st.v.ta==="mono"
+  ? `<span class="mono">t${s.turn}<span style="color:${s.attempt>1?"var(--fail)":"var(--fg-3)"}">·a${s.attempt}</span></span>`
+  : `<span style="font-size:var(--t-sm)">giliran ${s.turn} · <span style="color:${
+      s.attempt>1?"var(--fail)":"inherit"}">attempt ${s.attempt}${s.attemptsMax?"/"+s.attemptsMax:""}</span></span>`;
+
+/* ------------------------------------------------------------------ data */
+const RUN = { id:1042, pipeline:"Rencana, tiga varian, review manusia", repo:"backend",
+  project:"checkout-platform", trigger:"push", by:"adryanev", ref:"feat/checkout-v2",
+  sha:"a91c4f2", started:"14:02", dur:"41m 18s", cost:10.74, costPartial:true };
+
+const S = {
+  plan:{label:"plan", status:"succeeded", agent:"claude", runner:"runner-03",
+    dur:"4m 12s", t0:0, t1:4, branch:"run/1042/plan/t1-a1", turn:1, attempt:1,
+    tokens:"82.4k", cost:"$1.24",
+    outputs:{variants:"array · 3 item", docSections:"array · 4 item"}, arts:["plan.md"]},
+
+  lint:{label:"lint", status:"unsched", kind:"run", cmd:"pnpm lint", runner:null,
+    dur:"antre 7m 30s", t0:4, t1:12, requires:"exec:host, macos", branch:null,
+    turn:1, attempt:1, tokens:null, cost:null,
+    note:"Tidak ada Runner cocok. Ditandai setelah 5 menit — antre, bukan gagal."},
+
+  docs:{label:"docs", status:"ghost", from:"plan.docSections",
+    note:"Jumlah dan Key cabang ditentukan Output plan. Graph dimaterialisasi hibrida."},
+
+  a:{label:"implement · agent-a", status:"succeeded", agent:"claude", runner:"runner-01",
+    dur:"31m 08s", t0:5, t1:36, branch:"run/1042/agent-a/t1-a1", turn:1, attempt:1,
+    tokens:"418k", cost:"$6.10",
+    outputs:{prTitle:"string", prBody:"string", filesChanged:"number · 12"},
+    arts:["diff","transkrip","test-output"]},
+
+  b:{label:"implement · agent-b", status:"running", agent:"codex", runner:"runner-04",
+    dur:"18m 44s", t0:5, t1:41, branch:"run/1042/agent-b/t1-a1", turn:1, attempt:1,
+    tokens:"221k", tokensLive:true, cost:"$3.40", costLive:true, outputs:null, arts:[]},
+
+  c:{label:"implement · agent-c", status:"failed", agent:"cursor", runner:"runner-02",
+    dur:"12m 51s", t0:5, t1:18, branch:"run/1042/agent-c/t1-a2", turn:1, attempt:2,
+    attemptsMax:2, tokens:"tidak didukung", cost:"tidak didukung",
+    reason:"output-invalid — tag <factory-output> tidak ditemukan di stdout",
+    reasonLong:"Agent selesai bekerja dan mendorong branch-nya, tapi tidak memancarkan Output. "+
+      "Attempt 1 mati karena lease hilang; attempt 2 memakai session bersih dan tetap gagal. "+
+      "Jatah attempt habis.", outputs:null, arts:["transkrip"]},
+
+  va:{label:"verify · agent-a", status:"succeeded", kind:"run", cmd:"pnpm test",
+    runner:"runner-01", dur:"3m 02s", t0:36, t1:39, branch:"run/1042/verify-agent-a/t1-a1",
+    turn:1, attempt:1, tokens:null, cost:null, arts:["test-output"]},
+  vb:{label:"verify · agent-b", status:"pending", kind:"run", cmd:"pnpm test", runner:null,
+    dur:null, t0:41, t1:41, tokens:null, cost:null},
+  vc:{label:"verify · agent-c", status:"skipped", kind:"run", cmd:"pnpm test", runner:null,
+    dur:null, t0:18, t1:18, tokens:null, cost:null,
+    note:"Hulu agent-c gagal, jadi cabang ini tidak pernah dijalankan. Bukan kegagalan — "+
+      "ia menyebar ke hilirnya sendiri."},
+
+  pick:{label:"pick-best", status:"pending", agent:"claude", join:"any", runner:null,
+    dur:null, t0:41, t1:41, tokens:null, cost:null,
+    note:"Menunggu agent-b berakhir. Join any, jadi agent-c yang gagal tidak menggagalkannya."},
+
+  review:{label:"review", status:"awaiting", agent:"claude", runner:null, dur:"2j 14m",
+    t0:41, t1:41, branch:"run/1042/review/t4-a1", turn:4, attempt:1,
+    tokens:"96.1k", cost:"$1.62", group:"reviewer",
+    question:"Varian mana yang dipakai untuk endpoint /checkout?",
+    note:"Sandbox sudah ditutup dan Runner dibebaskan. Baris DB tanpa lease."},
+
+  pr:{label:"open-pr", status:"pending", kind:"pull-request", runner:"control plane",
+    dur:null, t0:41, t1:41, tokens:null, cost:null,
+    note:"Step control-plane — tak pernah diklaim Runner, tanpa Sandbox, tanpa log. Daun."},
+};
+
+const LAYOUT = [
+  {col:0, items:[{k:"plan"}]},
+  {col:1, items:[{k:"lint"},{k:"docs"},{fan:"implement", keys:["a","b","c"]}]},
+  {col:2, items:[{k:"va"},{k:"vb"},{k:"vc"},{k:"pick"}]},
+  {col:3, items:[{k:"review"}]},
+  {col:4, items:[{k:"pr"}]},
+];
+const EDGES = [["plan","lint"],["plan","docs"],["plan","a"],["plan","b"],["plan","c"],
+  ["a","va"],["b","vb"],["c","vc"],["a","pick"],["b","pick"],["c","pick"],
+  ["pick","review"],["review","pr"]];
+const ORDER = ["plan","lint","docs","a","b","c","va","vb","vc","pick","review","pr"];
+const CHILD = new Set(["a","b","c","va","vb","vc"]);
+
+const LOGS = {
+  plan:[{turn:1,attempt:1,l:[
+    "p›claude-code 2.1.4 · model claude-opus-4-6",
+    " reading .factory/prompts/plan.md",
+    " scanning packages/api/src (142 berkas)",
+    "o‹factory-output› { done: { variants: [3], docSections: [4] } }",
+    " pushed run/1042/plan/t1-a1 → a91c4f2..8e21bb0"]}],
+  a:[{turn:1,attempt:1,l:[
+    "p›claude-code 2.1.4",
+    " edit packages/api/src/checkout/handler.ts",
+    " edit packages/api/src/checkout/schema.ts",
+    " pnpm test --filter api → 128 lulus",
+    "m[log dropped: 3.2 MB — control plane tak terjangkau 4m 10s]",
+    "o‹factory-output› { done: { prTitle: '…', filesChanged: 12 } }",
+    " pushed run/1042/agent-a/t1-a1"]}],
+  b:[{turn:1,attempt:1,l:[
+    "p›codex-cli 0.9.1",
+    " edit packages/api/src/checkout/handler.ts",
+    " pnpm test --filter api",
+    "   ✓ checkout creates order",
+    "   ✓ checkout rejects empty cart",
+    " …"]}],
+  c:[
+    {turn:1,attempt:1,l:[
+      "p›cursor-agent 1.3.0",
+      " edit packages/api/src/checkout/handler.ts",
+      "e lease hilang — Runner berhenti heartbeat 41 detik",
+      "m[attempt 1 berakhir: lease-lost]"]},
+    {turn:1,attempt:2,l:[
+      "p›cursor-agent 1.3.0 · session bersih",
+      " edit packages/api/src/checkout/handler.ts",
+      " pnpm test --filter api → 3 gagal",
+      " Saya sudah selesai mengubah handler-nya, silakan dicek.",
+      "m[log capped: 256 MiB]",
+      "e output-invalid — tag <factory-output> tidak ditemukan di stdout",
+      "e attempt 2/2 habis — StepRun gagal"]}],
+  review:[
+    {turn:1,attempt:1,l:["p›claude-code 2.1.4"," membaca diff agent-a dan agent-b",
+      "o‹factory-output› { question: { kind:'text', … } }"]},
+    {turn:2,attempt:1,l:["p›claude-code 2.1.4 · resume session",
+      "o‹factory-output› { question: { kind:'choice', … } }"]},
+    {turn:3,attempt:1,l:["p›claude-code 2.1.4 · resume session",
+      "o‹factory-output› { question: { kind:'text', … } }"]},
+    {turn:4,attempt:1,l:["p›claude-code 2.1.4 · resume session",
+      " membandingkan varian a dan b pada /checkout",
+      "o‹factory-output› { question: { kind:'choice', body:'Varian mana…' } }",
+      "m[Sandbox ditutup — awaiting-human sejak 11:48]"]}],
+};
+
+/* aliran gabungan: tiga cabang saling menyela, tiap baris berprefiks Key.
+   Tak ada objek gabungan di Garage — bentuk ini menuntut merge di klien. */
+const MERGED = [
+  ["14:07:02","a"," edit packages/api/src/checkout/handler.ts",""],
+  ["14:07:04","b"," edit packages/api/src/checkout/handler.ts",""],
+  ["14:07:09","c"," edit packages/api/src/checkout/handler.ts",""],
+  ["14:07:11","a"," edit packages/api/src/checkout/schema.ts",""],
+  ["14:07:18","b"," pnpm test --filter api",""],
+  ["14:07:20","c","lease hilang — Runner berhenti heartbeat 41 detik","err"],
+  ["14:07:21","a"," pnpm test --filter api → 128 lulus",""],
+  ["14:07:22","c","[attempt 1 berakhir: lease-lost]","meta"],
+  ["14:07:24","b","   ✓ checkout creates order",""],
+  ["14:07:31","c"," cursor-agent 1.3.0 · session bersih","" ],
+  ["14:07:33","b","   ✓ checkout rejects empty cart",""],
+  ["14:07:40","a","[log dropped: 3.2 MB — control plane tak terjangkau 4m 10s]","meta"],
+  ["14:07:44","c"," pnpm test --filter api → 3 gagal",""],
+  ["14:07:51","a","‹factory-output› { done: { prTitle: '…', filesChanged: 12 } }","out"],
+  ["14:07:52","b","   ✓ checkout is idempotent per key",""],
+  ["14:07:55","c","[log capped: 256 MiB]","meta"],
+  ["14:08:01","a"," pushed run/1042/agent-a/t1-a1",""],
+  ["14:08:03","c","output-invalid — tag <factory-output> tidak ditemukan di stdout","err"],
+  ["14:08:04","c","attempt 2/2 habis — StepRun gagal","err"],
+  ["14:08:12","b"," …",""],
+];
+const MKEY = {a:"agent-a", b:"agent-b", c:"agent-c"};
+
+const ART = {
+  "plan.md":{kind:"markdown", body:
+`# Rencana perubahan /checkout
+Tiga varian dicoba paralel:
+1. agent-a — pertahankan handler lama, tambahkan adapter.
+2. agent-b — tulis ulang handler dengan skema baru.
+3. agent-c — pecah jadi dua endpoint.
+Kriteria pilih: jumlah test yang lulus, lalu ukuran diff.`},
+  "diff":{kind:"diff", body:
+`--- a/packages/api/src/checkout/handler.ts
++++ b/packages/api/src/checkout/handler.ts
+@@ -18,7 +18,11 @@ export async function handleCheckout(req) {
+-  const cart = await getCart(req.userId)
+-  if (!cart) return err(404)
++  const cart = await getCart(req.userId)
++  if (!cart) return err(404, "cart_not_found")
++  if (cart.items.length === 0) return err(422, "cart_empty")
++
++  const idem = req.headers["idempotency-key"]
+   return ok(await createOrder(cart))`},
+  "transkrip":{kind:"markdown", body:
+`Agent: Saya mulai dari handler lama dan menambahkan adapter tipis di depannya.
+Agent: Test checkout rejects empty cart gagal karena cart kosong masih lolos validasi.`},
+  "test-output":{kind:"text", body:
+`PASS  packages/api/src/checkout/handler.test.ts
+  ✓ checkout creates order (14 ms)
+  ✓ checkout rejects empty cart (3 ms)
+  ✓ checkout is idempotent per key (9 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       128 passed, 128 total
+Time:        41.882 s`},
+};
+
+const RUNS = [
+  {id:1042, pipeline:"Rencana, tiga varian, review manusia", status:"running",
+   trigger:"push", by:"adryanev", ref:"feat/checkout-v2", sha:"a91c4f2", dur:"41m",
+   held:"review · 2j 14m", cost:"$10.74", partial:true},
+  {id:1041, pipeline:"Ubah kontrak API, implement di dua repo", status:"awaiting",
+   trigger:"manual", by:"rangga", ref:"main", sha:"77bd013", dur:"2j 23m",
+   held:"api-review · 1j 02m", cost:"$4.12"},
+  {id:1039, pipeline:"Rencana, tiga varian, review manusia", status:"succeeded",
+   trigger:"pr", by:"sinta", ref:"PR #218", sha:"0c1e88a", dur:"58m",
+   note:"1 cabang gagal · join any", cost:"$9.03"},
+  {id:1038, pipeline:"Lint, build, test", status:"skipped-cron",
+   trigger:"cron", by:"sa:frontend", ref:"main", sha:"—", dur:"—",
+   note:"Run 1037 masih berjalan", cost:"—"},
+  {id:1037, pipeline:"Lint, build, test", status:"failed",
+   trigger:"cron", by:"sa:frontend", ref:"main", sha:"5df9021", dur:"1j 04m",
+   note:"test · keluar dengan kode 1", cost:"—"},
+];
+
+/* ----------------------------------------------------------------- state */
+const st = {screen:"run", view:"graph", sel:"c", tab:"log", confirm:null, q:"", step:false,
+  dopen:true,
+  /* varian yang sedang diuji — dibolak-balik lewat decision bar di bawah layar */
+  v:{ home:"graph",     /* graph | list | timeline   — tampilan bawaan saat Run dibuka */
+      insp:"right",     /* right | bottom | page     — di mana detail StepRun muncul   */
+      log:"branch",     /* branch | merged           — satu panel per cabang / gabungan*/
+      banner:"on",      /* on | off                  — sumbatan diumumkan di atas      */
+      status:"mark",    /* mark | pill               — bentuk+warna / label berkapsul  */
+      mark:"shape",     /* shape | dot               — ikon berbentuk / titik warna    */
+      dens:"lega",      /* lega | rapat              — kepadatan baris dan kartu       */
+      ta:"verbose" }    /* mono | verbose            — t1·a2 / giliran 1 · attempt 2   */
+};
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* ----------------------------------------------------------------- graph */
+const NW=244, COLW=244, COLGAP=52, FANPAD=11, FANHEAD=20;
+const nh = () => st.v.dens==="rapat" ? 54 : 80;
+const gapy = () => st.v.dens==="rapat" ? 10 : 16;
+function geometry(){
+  const NH=nh(), GAPY=gapy();
+  const pos={}, colX=[], fans=[];
+  LAYOUT.forEach(col=>{
+    const x = col.col*(COLW+COLGAP);
+    colX.push(x);
+    let y = 26;
+    col.items.forEach(it=>{
+      if(it.fan){
+        const top=y; y+=FANHEAD+FANPAD;
+        it.keys.forEach(k=>{ pos[k]={x:x+0,y}; y+=NH+GAPY; });
+        y = y-GAPY+FANPAD;
+        fans.push({x:x-FANPAD, y:top, w:NW+FANPAD*2, h:y-top, label:it.fan, n:it.keys.length});
+        y += GAPY+6;
+      } else { pos[it.k]={x,y}; y+=NH+GAPY; }
+    });
+  });
+  return {pos, colX, fans, nh:NH,
+    w:colX[colX.length-1]+NW+20, h:Math.max(...Object.values(pos).map(p=>p.y))+NH+40};
+}
+function nodeHTML(k, pos){
+  const s=S[k];
+  const sel = st.sel===k;
+  const tint = s.status==="failed"?" tint-failed":s.status==="awaiting"?" tint-awaiting":"";
+  const faded = s.status==="skipped"?" faded":"";
+  if(s.status==="ghost"){
+    return `<button class="node ghost${sel?"":""}" style="left:${pos.x}px;top:${pos.y}px"
+      data-k="${k}" aria-current="${sel}">
+      <div class="nrow1"><span class="nname fg2">${s.label}</span>${mk("ghost",14)}</div>
+      <div class="nmeta"><span class="m">${ic("git",12)}<span>dari ${s.from}</span></span></div>
+      <div class="nnote fg3">jumlah cabang belum diketahui</div></button>`;
+  }
+  const metas=[];
+  if(s.runner) metas.push(`<span class="m">${ic(s.kind==="pull-request"?"cpu":"server",12)}<span>${s.runner}</span></span>`);
+  if(s.dur) metas.push(`<span class="m">${ic("clock",12)}<span>${s.dur}</span></span>`);
+  if(s.cost && s.cost!=="tidak didukung") metas.push(`<span class="m">${ic("coins",12)}<span>${s.cost}</span></span>`);
+  if(s.turn>1||s.attempt>1) metas.push(
+    `<span class="m" title="giliran ${s.turn}, attempt ${s.attempt}">${ta(s)}</span>`);
+  let note="";
+  if(s.status==="failed") note=`<div class="nnote f">attempt ${s.attempt}/${s.attemptsMax} habis · output-invalid</div>`;
+  else if(s.status==="awaiting") note=`<div class="nnote h">menyumbat hilir · ditanyakan ke ${s.group}</div>`;
+  else if(s.status==="unsched") note=`<div class="nnote w">butuh ${s.requires}</div>`;
+  else if(s.status==="skipped") note=`<div class="nnote fg3">hulu gagal — tidak pernah dijalankan</div>`;
+  return `<button class="node${tint}${faded}" style="left:${pos.x}px;top:${pos.y}px"
+    data-k="${k}" aria-current="${sel}">
+    <div class="nrow1"><span class="nname">${s.label}</span>${mk(s.status,15)}</div>
+    <div class="nmeta">${metas.join("")||`<span class="m fg3">${LABEL[s.status]}</span>`}</div>
+    ${note}</button>`;
+}
+function graphView(){
+  const g=geometry();
+  const paths = EDGES.map(([f,t])=>{
+    const a=g.pos[f], b=g.pos[t]; if(!a||!b) return "";
+    const x1=a.x+NW, y1=a.y+g.nh/2, x2=b.x, y2=b.y+g.nh/2, m=(x1+x2)/2;
+    const hot = (st.sel===f||st.sel===t) ? " class='hot'" : "";
+    return `<path${hot} d="M${x1} ${y1} C${m} ${y1} ${m} ${y2} ${x2} ${y2}"/>`;
+  }).join("");
+  const fans = g.fans.map(f=>`<div class="fanbox" style="left:${f.x}px;top:${f.y}px;
+     width:${f.w}px;height:${f.h}px"></div>
+     <div class="fanlabel" style="left:${f.x+FANPAD}px;top:${f.y+5}px">fan-out ${f.label} · ${f.n} cabang</div>`).join("");
+  const cols = g.colX.map((x,i)=>`<div class="collabel" style="left:${x}px;top:2px">tahap ${i+1}</div>`).join("");
+  const nodes = Object.keys(g.pos).map(k=>nodeHTML(k,g.pos[k])).join("");
+  return `<div class="graphwrap" style="width:${g.w}px;height:${g.h}px">
+    <svg class="edges" width="${g.w}" height="${g.h}">${paths}</svg>
+    ${fans}${cols}${nodes}</div>`;
+}
+
+/* ------------------------------------------------------------------ list */
+function listView(){
+  return `<table><thead><tr>
+    <th style="width:29%">Step</th><th style="width:15%">Status</th><th>Runner</th>
+    <th>Branch</th><th style="width:${st.v.ta==="mono"?"9%":"15%"}">Giliran</th>
+    <th class="num">Durasi</th><th class="num">Biaya</th>
+  </tr></thead><tbody>${ORDER.map(k=>{
+    const s=S[k], sel=st.sel===k;
+    return `<tr data-k="${k}" aria-current="${sel}" class="${CHILD.has(k)?"child":""}">
+      <td class="nm"><span style="display:inline-flex;align-items:center;gap:7px">
+        ${mk(s.status,14)}<span style="${s.status==="skipped"?"color:var(--skip)":""}">${s.label}</span></span></td>
+      <td>${st.v.status==="pill"
+        ? `<span class="pill ${cls(s.status)}"><i></i>${LABEL[s.status]}</span>`
+        : `<span class="stat ${cls(s.status)}">${LABEL[s.status]}</span>`}</td>
+      <td class="fg2">${s.runner||`<span class="fg3">—</span>`}</td>
+      <td class="mono fg3">${s.branch?s.branch.replace("run/1042/",""):"—"}</td>
+      <td>${ta(s)}</td>
+      <td class="num fg2">${s.dur||"—"}</td>
+      <td class="num">${s.cost?(s.cost==="tidak didukung"?`<span class="fg3" style="font-size:var(--t-xs)">tidak didukung</span>`:s.cost):`<span class="fg3">—</span>`}</td>
+    </tr>`;}).join("")}</tbody></table>`;
+}
+
+/* -------------------------------------------------------------- timeline */
+function timelineView(){
+  const T=44, keys=ORDER.filter(k=>S[k].status!=="ghost");
+  const ticks=[0,10,20,30,40].map(m=>`<span style="left:${(m/T)*100}%">${m}m</span>`).join("");
+  const lines=[0,10,20,30,40].map(m=>`<i style="left:${(m/T)*100}%"></i>`).join("");
+  return `<div class="tl">
+    <div class="tlaxis"><div>Step</div><div class="ticks">${ticks}</div></div>
+    ${keys.map(k=>{
+      const s=S[k], sel=st.sel===k;
+      const l=(s.t0/T)*100, w=Math.max(((s.t1-s.t0)/T)*100,2.2);
+      const cls={succeeded:"ok",running:"running",failed:"failed",awaiting:"awaiting",
+        unsched:"unsched",skipped:"skipped"}[s.status];
+      const lab = w>7 ? (s.dur||"") : "";
+      const bar = cls ? `<div class="bar ${cls}" style="left:${l}%;width:${w}%" title="${s.dur||LABEL[s.status]}">${lab}</div>` : "";
+      return `<div class="tlrow" data-k="${k}" aria-current="${sel}">
+        <div class="tllab">${mk(s.status,13)}<span class="t ${s.status==="skipped"?"fg3":""}">${s.label}</span></div>
+        <div class="track"><div class="gridlines">${lines}</div>${bar}
+          <div class="nowline" style="left:${(41.3/T)*100}%"></div></div></div>`;
+    }).join("")}</div>`;
+}
+
+/* ------------------------------------------------------------- inspector */
+function mergedLog(k){
+  return `<div class="loghd" style="padding-bottom:7px">
+      <span class="tag">${ic("doc",12)} tiga cabang, satu aliran · diurutkan waktu tiba</span>
+      <span class="mono fg3">${MERGED.length} baris</span></div>
+    <div class="mlog">${MERGED.map(([t,key,txt,kind])=>
+      `<div class="ln ${kind}${key===k?" sel":""}"><span class="ts">${t}</span
+        ><span class="kk k-${key}">${MKEY[key]}</span><span class="tx">${esc(txt)}</span></div>`).join("")}</div>
+    <p class="fg3" style="font-size:var(--t-sm);margin:10px 0 0;max-width:64ch">
+      Cabang terpilih disorot, sisanya tetap terbaca. Harganya: tak ada objek gabungan di Garage —
+      kunci log adalah (StepRun, attempt), jadi urutan lintas cabang ini dirakit di klien dan
+      hanya sebenar jam Runner masing-masing.</p>`;
+}
+function logPanel(k){
+  const s=S[k];
+  if(st.v.log==="merged" && MKEY[k]) return mergedLog(k);
+  if(s.kind==="pull-request") return `<div class="empty"><b>Tidak ada log, dan itu disengaja</b>
+    Step ini dijalankan control plane, bukan Runner. Tidak ada Sandbox, jadi tidak ada stdout.
+    Yang menggantikannya: respons GitHub, di tab <b style="display:inline">Info</b>.</div>`;
+  const g=LOGS[k];
+  if(!g) return `<div class="empty"><b>Belum ada log</b>StepRun ini belum pernah berjalan.</div>`;
+  return g.map(b=>{
+    const body=b.l.map(line=>{
+      const t=line[0], v=esc(line.slice(1));
+      if(t==="e") return `<span class="e">${v}</span>`;
+      if(t==="m") return `<span class="m">— ${v} —</span>`;
+      if(t==="o") return `<span class="o">${v}</span>`;
+      if(t==="p") return `<span class="p">${v}</span>`;
+      return v;
+    }).join("\n");
+    return `<div class="logblk"><div class="loghd">
+      <span class="tag">${ic("doc",12)} giliran ${b.turn} · attempt ${b.attempt}</span>
+      <span class="mono">a${b.attempt}.log</span></div><pre class="log">${body}</pre></div>`;
+  }).join("");
+}
+function outPanel(k){
+  const s=S[k];
+  if(!s.outputs) return `<div class="empty"><b>Output belum ada</b>${
+    s.status==="failed" ? "Justru di sinilah kegagalannya: Output tidak pernah dipancarkan."
+    : "StepRun belum berakhir sukses."}</div>`;
+  return `<table><thead><tr><th>Nama</th><th>Bentuk</th></tr></thead><tbody>${
+    Object.entries(s.outputs).map(([a,b])=>
+      `<tr style="cursor:default"><td class="mono">${a}</td><td class="fg2">${b}</td></tr>`).join("")
+  }</tbody></table>
+  <p class="fg3" style="font-size:var(--t-sm);margin:10px 0 0;max-width:60ch">
+    Selalu tabel, sarang maksimal satu tingkat — dijamin oleh notasi <span class="mono">outputs:</span>.</p>`;
+}
+function artPanel(k){
+  const s=S[k];
+  if(!s.arts||!s.arts.length) return `<div class="empty"><b>Tidak ada Artifact</b>
+    Step tidak mendeklarasikan daftar artefak; Runner melapor bebas.</div>`;
+  return s.arts.map(n=>{
+    const a=ART[n]; let body;
+    if(a.kind==="diff"){
+      body=`<pre class="diff">${a.body.split("\n").map(l=>{
+        const c=l.startsWith("+")?"a":l.startsWith("-")?"r":l.startsWith("@@")?"h":"";
+        return `<span class="${c}">${esc(l)}</span>`;}).join("")}</pre>`;
+    } else if(a.kind==="text"){
+      const q=st.q.trim(); let t=esc(a.body);
+      if(q) t=t.replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"gi"), m=>`<mark>${m}</mark>`);
+      body=`<div class="srch">${ic("search",13)}
+        <input type="search" placeholder="Cari di dalam artefak" value="${esc(st.q)}" data-srch></div>
+        <pre class="diff">${t}</pre>`;
+    } else {
+      body=a.body.split("\n").map(l=>{
+        if(l.startsWith("# ")) return `<h3>${esc(l.slice(2))}</h3>`;
+        if(/^\d\./.test(l)) return `<p style="padding-left:14px">${esc(l)}</p>`;
+        return `<p>${esc(l)}</p>`;}).join("");
+    }
+    return `<div class="art"><div class="arthd">
+      <span class="row" style="gap:7px">${ic("doc",13)}<b>${n}</b>
+        <span class="fg3" style="font-size:var(--t-xs)">${a.kind}</span></span>
+      <button class="quiet">${ic("download",13)}Unduh</button></div>
+      <div class="artbody">${body}</div></div>`;
+  }).join("");
+}
+function infoPanel(k){
+  const s=S[k];
+  const rows=[
+    ["Status", stat(s.status)],
+    ["Runner", s.runner ? esc(s.runner) : `<span class="fg3">— belum ditugaskan</span>`],
+    ["Branch", s.branch ? `<span class="mono">${s.branch}</span>` : `<span class="fg3">—</span>`],
+    ["Giliran · attempt", s.turn ? `<span class="mono">turn ${s.turn}</span> · <span class="mono"
+        style="${s.attempt>1?"color:var(--fail)":""}">attempt ${s.attempt}${s.attemptsMax?"/"+s.attemptsMax:""}</span>`
+      : `<span class="fg3">—</span>`],
+    ["Dijalankan oleh", s.agent ? `agent <b>${s.agent}</b>`
+      : s.kind==="pull-request" ? `<b>control plane</b> <span class="fg3">— tanpa Runner</span>`
+      : `<span class="fg3">perintah shell</span>`],
+    ["Token", s.tokens ? (s.tokens==="tidak didukung"
+        ? `<span class="fg3">tidak didukung</span>` : esc(s.tokens)+(s.tokensLive?` <span class="fg3">berjalan</span>`:""))
+      : `<span class="fg3">—</span>`],
+    ["Biaya", s.cost ? (s.cost==="tidak didukung"
+        ? `<span class="fg3">tidak didukung</span>` : esc(s.cost)+(s.costLive?` <span class="fg3">berjalan</span>`:""))
+      : `<span class="fg3">—</span>`],
+  ];
+  if(s.cmd) rows.push(["Perintah",`<span class="mono">${esc(s.cmd)}</span>`]);
+  if(s.join) rows.push(["Join",`<span class="mono">${s.join}</span>`]);
+  if(s.requires) rows.push(["Butuh Runner",`<span class="mono">${s.requires}</span>`]);
+  if(s.note) rows.push(["Catatan",`<span class="fg2">${esc(s.note)}</span>`]);
+  return `<dl class="kv">${rows.map(([a,b])=>`<dt>${a}</dt><dd>${b}</dd>`).join("")}</dl>`;
+}
+function inspector(){
+  const k=st.sel, s=S[k];
+  if(!s) return "";
+  if(s.status==="ghost") return `<div class="insp">
+    <div class="insphead"><h2>${s.label}</h2>${mk("ghost",18)}</div>
+    <div class="empty" style="margin-top:14px"><b>Cabang ini belum lahir</b>${esc(s.note)}</div></div>`;
+
+  let why="";
+  if(s.status==="failed") why=`<div class="why failed">
+    <h3 class="row" style="gap:7px">${ic("alert",14)}Gagal — jatah attempt habis</h3>
+    <p>${esc(s.reasonLong)}</p>
+    <div class="acts"><button class="primary" data-act="retry">${ic("retry",14)}Jalankan ulang Step</button>
+      <button data-act="tolog">${ic("doc",14)}Buka log attempt 2</button></div></div>`;
+  if(s.status==="awaiting") why=`<div class="why awaiting">
+    <h3 class="row" style="gap:7px">${ic("hand",14)}Menunggu manusia · giliran ${s.turn}</h3>
+    <p>“${esc(s.question)}”<br><span class="fg3">Ditanyakan ke group <b>${s.group}</b> ·
+      menggantung ${s.dur} · Sandbox sudah dilepas, Runner bebas.</span></p>
+    <div class="acts"><button class="primary" data-act="answer">${ic("play",14)}Buka sesi &amp; jawab</button>
+      <button class="destructive" data-act="cancelbranch">${ic("cancel",14)}Batalkan cabang</button></div></div>`;
+
+  const canCancel = s.status==="running";
+  const tabs=[["log","Log"],["output","Output"],["artifact","Artifact"],["info","Info"]];
+  const panel={log:logPanel(k),output:outPanel(k),artifact:artPanel(k),info:infoPanel(k)}[st.tab];
+  return `<div class="insp">
+    <div class="insphead">
+      <div style="min-width:0">
+        <h2>${s.label}</h2>
+        <div class="row" style="gap:8px;margin-top:4px">${stat(s.status)}
+          ${s.branch?`<span class="sep-dot"></span><span class="mono fg3">${s.branch}</span>`:""}</div>
+      </div>
+      ${canCancel?`<button class="destructive" data-act="cancelbranch">${ic("cancel",14)}Batalkan cabang</button>`:""}
+    </div>
+    ${why}
+    ${st.confirm==="cancelbranch"?`<div class="confirm" style="margin:12px 0 0">
+      <h3>Batalkan cabang ${esc(s.label)}?</h3>
+      <p>Cabang lain tetap jalan. Prosesnya menerima SIGTERM, lalu SIGKILL setelah 30 detik.
+        Branch setengah jadi dibiarkan yatim untuk GC.</p>
+      <div class="acts"><button class="destructive" data-act="do">Ya, batalkan cabang ini</button>
+        <button data-act="no">Jangan</button></div></div>`:""}
+    <div class="tabs" role="tablist">${tabs.map(([t,l])=>
+      `<button role="tab" aria-selected="${st.tab===t}" data-tab="${t}">${l}</button>`).join("")}</div>
+    <div class="tabpanel" role="tabpanel">${panel}</div>
+  </div>`;
+}
+
+/* --------------------------------------------------------------- screens */
+function appbarHTML(){
+  return `<div class="appbar">
+    <div class="row" style="gap:18px">
+      <div class="brand"><span class="sq"></span>factory</div>
+      <div class="crumbs">${RUN.project}<span class="sep">/</span>${RUN.repo}
+        <span class="sep">/</span><b>Run #${RUN.id}</b></div>
+    </div>
+    <div class="row">
+      <button class="quiet" data-act="toruns">${ic("chevL",14)}Semua Run</button>
+      <button class="quiet">${ic("doc",14)}Definisi</button>
+      <button class="destructive" data-act="cancelrun">${ic("cancel",14)}Batalkan Run</button>
+    </div></div>`;
+}
+
+/* varian insp="page": satu StepRun mengambil alih layar, konteks Run hilang */
+function stepScreen(){
+  return `${appbarHTML()}
+  <div class="backbar"><button class="quiet" data-act="backrun">${ic("chevL",14)}Kembali ke Run #${RUN.id}</button></div>
+  <div class="steppage">${inspector()}</div>`;
+}
+
+function runScreen(){
+  if(st.v.insp==="page" && st.step) return stepScreen();
+  const counts = ORDER.reduce((a,k)=>{const s=S[k].status;a[s]=(a[s]||0)+1;return a;},{});
+  return `${appbarHTML()}
+
+  <div class="runhead">
+    <div class="runtitle">
+      <div style="min-width:0">
+        <h1>${RUN.pipeline}</h1>
+        <div class="subline">
+          <span class="row" style="gap:6px">${mk("running",14)}<b>berjalan</b> ${RUN.dur}</span>
+          <span class="sep-dot"></span>
+          <span class="row" style="gap:6px">${ic("bolt",13)}dipicu <b>${RUN.trigger}</b> oleh <b>${RUN.by}</b></span>
+          <span class="sep-dot"></span>
+          <span class="row mono" style="gap:6px">${ic("branch",13)}${RUN.ref} @ ${RUN.sha}</span>
+          <span class="sep-dot"></span>
+          <span class="row" style="gap:6px">${ic("coins",13)}<b>$${RUN.cost.toFixed(2)}</b> berjalan
+            ${RUN.costPartial?`<span class="warnchip" title="1 StepRun memakai agent tanpa data usage">batas bawah</span>`:""}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  ${st.v.banner==="off"?"":`<div class="banner">
+    <span class="ico">${ic("hand",18)}</span>
+    <div class="txt"><b>Run ini tersumbat 2 jam 14 menit di <span class="mono">review</span></b>
+      <div class="sub">Menunggu jawaban group <b>reviewer</b>. Selama ini <span class="mono">pick-best</span>
+        dan <span class="mono">open-pr</span> tidak akan pernah dijadwalkan — cancel adalah satu-satunya jalan keluar lain.</div></div>
+    <button class="primary" data-act="gotoreview">${ic("play",14)}Buka pertanyaan</button>
+  </div>`}
+
+  ${st.confirm==="cancelrun"?`<div class="confirm">
+    <h3>Batalkan Run #${RUN.id}?</h3>
+    <p>Ini akan menghentikan <b>agent-b</b> yang sedang berjalan (SIGTERM → 30 detik → SIGKILL)
+      dan membuang giliran ke-4 <b>review</b> yang sudah menunggu jawaban 2 jam.
+      Artifact dan log yang sudah tersimpan tetap ada.</p>
+    <div class="acts"><button class="destructive" data-act="do">Ya, batalkan Run</button>
+      <button data-act="no">Jangan</button></div></div>`:""}
+
+  <div class="toolbar">
+    <div class="seg" role="group" aria-label="Tampilan">
+      ${[["graph","Graph"],["list","Daftar"],["timeline","Timeline"]].map(([v,l])=>
+        `<button data-view="${v}" aria-pressed="${st.view===v}">${l}</button>`).join("")}
+    </div>
+    <div class="counts">
+      <span class="c">${mk("succeeded",13)}${counts.succeeded||0} selesai</span>
+      <span class="c">${mk("running",13)}${counts.running||0} berjalan</span>
+      <span class="c">${mk("failed",13)}${counts.failed||0} gagal</span>
+      <span class="c">${mk("skipped",13)}${counts.skipped||0} dilewati</span>
+      <span class="c">${mk("ghost",13)}${counts.ghost||0} belum lahir</span>
+    </div>
+  </div>
+
+  <div class="shell ${{right:"",bottom:"ib",page:"ip"}[st.v.insp]}">
+    <div class="canvas">${{graph:graphView(),list:listView(),timeline:timelineView()}[st.view]}
+      ${notes()}</div>
+    ${st.v.insp==="page" ? "" : `<aside class="inspector">${inspector()}</aside>`}
+  </div>`;
+}
+
+function runsScreen(){
+  return `<div class="appbar">
+    <div class="row" style="gap:18px">
+      <div class="brand"><span class="sq"></span>factory</div>
+      <div class="crumbs">${RUN.project}<span class="sep">/</span><b>Run</b></div>
+    </div>
+    <div class="row"><button class="primary" data-act="torun">${ic("play",14)}Jalankan Pipeline</button></div>
+  </div>
+  <div class="page">
+    <div class="metrics">
+      <div class="metric"><div class="v">2</div><div class="l">berjalan</div></div>
+      <div class="metric"><div class="v" style="color:#cbb0ff">2</div><div class="l">menunggu manusia</div></div>
+      <div class="metric"><div class="v">3 / 4</div><div class="l">Runner online</div></div>
+      <div class="metric"><div class="v">$412.80</div>
+        <div class="l">bulan ini <span class="warnchip">batas bawah</span></div></div>
+    </div>
+    <table><thead><tr>
+      <th style="width:30%">Run</th><th style="width:14%">Status</th><th>Pemicu</th>
+      <th>Ref</th><th style="width:17%">Tersumbat</th><th class="num">Durasi</th><th class="num">Biaya</th>
+    </tr></thead><tbody>${RUNS.map(r=>`
+      <tr data-run="${r.id}">
+        <td><div style="font-weight:600">#${r.id}</div>
+          <div class="fg3" style="font-size:var(--t-sm)">${r.pipeline}</div></td>
+        <td>${stat(r.status)}
+          ${r.note?`<div class="fg3 subrow" style="font-size:var(--t-sm);padding-left:21px">${r.note}</div>`:""}</td>
+        <td><div class="fg2">${r.trigger}</div><div class="fg3 mono" style="font-size:var(--t-sm)">${r.by}</div></td>
+        <td class="mono fg2" style="font-size:var(--t-sm)">${r.ref}<div class="fg3">${r.sha}</div></td>
+        <td>${r.held?chip("awaiting",r.held):`<span class="fg3">—</span>`}</td>
+        <td class="num fg2">${r.dur}</td>
+        <td class="num">${r.cost}${r.partial?` <span class="warnchip">bb</span>`:""}</td>
+      </tr>`).join("")}</tbody></table>
+
+    <div class="notes"><h3>Yang diuji halaman ini</h3><ul>
+      <li>Kolom <b>Tersumbat</b> adalah alasan halaman ini ada: “apa yang menunggu manusia”
+        terjawab tanpa membuka satu Run pun.</li>
+      <li><b>#1039 selesai</b> membawa catatan “1 cabang gagal · join any”. Bukan kontradiksi —
+        dan ia tidak boleh terbaca sebagai kontradiksi.</li>
+      <li><b>#1038</b> adalah cron yang <b>dilewati</b> karena Run sebelumnya belum selesai.
+        Ia terlihat, bukan hilang diam-diam.</li>
+      <li>Chip <b>batas bawah</b> menandai biaya yang tidak lengkap karena ada agent tanpa
+        data usage — bukan $0.00, bukan perkiraan.</li>
+    </ul></div>
+  </div>`;
+}
+
+function notes(){
+  return `<div class="notes">
+    <h3>Keadaan wajib yang sedang tampil</h3><ul>
+      <li><b>docs</b> — simpul <i>belum lahir</i>, digambar putus-putus di posisinya.
+        Bentuk Run terbaca sebelum cabangnya ada.</li>
+      <li><b>verify · agent-c</b> — <i>dilewati</i>, memakai tanda lingkaran putus tergores dan
+        dipudarkan. Ia tidak pernah merah: ia bukan kegagalan.</li>
+      <li><b>review</b> — satu-satunya simpul bertinta ungu, dan satu-satunya yang naik jadi
+        banner di atas Graph. Sumbatan tidak boleh menuntut orang membaca Graph dulu.</li>
+      <li><b>lint</b> — tak terjadwal 7m 30s karena tidak ada Runner
+        <span class="mono">exec:host, macos</span>. Ditandai setelah 5 menit, tetap antre.</li>
+      <li><b>agent-c</b> — <span class="mono">t1·a2</span>: hanya angka attempt yang merah,
+        turn tetap netral. Dua penomoran, dua warna.</li>
+      <li><b>open-pr</b> — Runner tertulis “control plane”, dan tab Log berisi penjelasan
+        kenapa ia kosong, bukan kekosongan tanpa sebab.</li>
+      <li>Biaya <b>agent-c</b> berbunyi “tidak didukung”, dan total Run membawa chip
+        <b>batas bawah</b>.</li>
+    </ul>
+    <h3>Sudah diputuskan — bilah keputusan tinggal jadi bukti</h3><ul>
+      <li>Bawaan yang tersetel di bilah bawah <b>adalah</b> keputusan ticket 13. Sakelarnya
+        dibiarkan hidup supaya alternatif yang kalah masih bisa dilihat, bukan cuma dibaca.</li>
+      <li>Satu-satunya yang membalik rekomendasi: <b>giliran ditulis panjang</b>
+        (“giliran 4 · attempt 1”). <span class="mono">t4-a1</span> hanya bertahan di nama branch,
+        karena di sana ia memang literal.</li>
+      <li><b>Tindakan tidak dijadikan varian</b>, karena penempatannya bukan selera:
+        “Batalkan Run” di kanan atas dengan konfirmasi yang menyebut <i>apa yang akan hilang</i>;
+        “Batalkan cabang” hanya di panel cabang; “Jalankan ulang” hanya di dalam kotak kegagalan.
+        Tidak ada tombol destruktif bersebelahan dengan tombol utama.</li>
+    </ul>
+  </div>`;
+}
+
+/* ------------------------------------------------- bilah keputusan (scaffold) */
+const VARIANTS = [
+  ["Tata letak", [
+    ["home","Tampilan bawaan",[["graph","Graph"],["list","Daftar"],["timeline","Timeline"]]],
+    ["insp","Detail StepRun",[["right","Panel kanan"],["bottom","Panel bawah"],["page","Halaman sendiri"]]],
+    ["log","Live log",[["branch","Per cabang"],["merged","Gabungan"]]],
+    ["banner","Sumbatan",[["on","Banner di atas"],["off","Hanya di simpulnya"]]],
+  ]],
+  ["Komponen", [
+    ["status","Label status",[["mark","Ikon + teks"],["pill","Pill berkapsul"]]],
+    ["mark","Tanda status",[["shape","Berbentuk"],["dot","Titik warna"]]],
+    ["dens","Kepadatan",[["lega","Lega"],["rapat","Rapat"]]],
+    ["ta","Giliran·attempt",[["mono","t1·a2"],["ta-verbose","giliran 1 · attempt 2"]]],
+  ]],
+];
+function dbar(){
+  const body = VARIANTS.map(([grp,sets])=>
+    `<div class="dgrp">${grp}</div>` + sets.map(([key,label,opts])=>
+      `<div class="dset"><span class="lb">${label}</span>
+        <span class="dseg" role="group" aria-label="${label}">${opts.map(([val,txt])=>{
+          const v = val==="ta-verbose" ? "verbose" : val;
+          return `<button data-v="${key}" data-val="${v}" aria-pressed="${st.v[key]===v}">${txt}</button>`;
+        }).join("")}</span></div>`).join("")).join("");
+  return `<div class="dbar" data-open="${st.dopen}">
+    <button class="hd" data-act="dtoggle" aria-expanded="${st.dopen}">
+      <span class="ch">${ic("chevL",13)}</span>
+      <b>Bilah keputusan</b>
+      <span>perancah prototype — bukan bagian produk. Bolak-balik variannya, lalu pilih.</span>
+      <span class="sp"></span>
+      <span class="mono now">${Object.values(st.v).join(" · ")}</span>
+    </button>
+    ${st.dopen?`<div class="dbody">${body}</div>`:""}</div>`;
+}
+
+/* ---------------------------------------------------------------- render */
+function render(){
+  document.body.className = st.v.dens==="rapat" ? "rapat" : "";
+  $("#app").innerHTML = (st.screen==="run" ? runScreen() : runsScreen()) + dbar();
+}
+
+document.addEventListener("input", e=>{
+  if(e.target.hasAttribute && e.target.hasAttribute("data-srch")){
+    st.q=e.target.value; const p=e.target.selectionStart;
+    render(); const n=document.querySelector("[data-srch]");
+    if(n){ n.focus(); try{n.setSelectionRange(p,p);}catch(_){} }
+  }
+});
+document.addEventListener("click", e=>{
+  const t=e.target.closest("[data-v],[data-view],[data-tab],[data-k],[data-act],[data-run]");
+  if(!t) return;
+  if(t.dataset.v){
+    const k=t.dataset.v, val=t.dataset.val;
+    st.v[k]=val;
+    if(k==="home") st.view=val;                 /* tunjukkan bawaan yang baru dipilih */
+    if(k==="insp") st.step=false;
+    return render();
+  }
+  if(t.dataset.view){ st.view=t.dataset.view; return render(); }
+  if(t.dataset.tab){ st.tab=t.dataset.tab; return render(); }
+  if(t.dataset.k){ st.sel=t.dataset.k; st.confirm=null;
+    if(st.v.insp==="page") st.step=true; return render(); }
+  if(t.dataset.run){ st.screen="run"; st.step=false; return render(); }
+  const a=t.dataset.act;
+  if(a==="dtoggle"){ st.dopen=!st.dopen; return render(); }
+  if(a==="backrun"){ st.step=false; return render(); }
+  if(a==="toruns"){ st.screen="runs"; st.step=false; return render(); }
+  if(a==="torun"){ st.screen="run"; return render(); }
+  if(a==="cancelrun"){ st.confirm="cancelrun"; return render(); }
+  if(a==="cancelbranch"){ st.confirm="cancelbranch"; return render(); }
+  if(a==="no"||a==="do"){ st.confirm=null; return render(); }
+  if(a==="tolog"){ st.tab="log"; return render(); }
+  if(a==="gotoreview"||a==="answer"){ st.sel="review"; st.tab="info"; st.confirm=null;
+    if(st.v.insp==="page") st.step=true; return render(); }
+  if(a==="retry"){ st.confirm=null; return render(); }
+});
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+# HASIL — lintas repo. Tuan rumah: repo config Project (ticket 08).
+# Fan-out ber-Key nama repo. Satu StepRun tetap menyentuh satu repo.
+#
+# DIPERBAIKI OLEH TICKET 21 + 24. Versi sebelumnya menulis `open-prs` sebagai
+# satu Step `run:` di repo `infra` yang membuka PR di dua repo lewat script.
+# Bentuk itu salah: satu StepRun menulis ke dua repo, dan Sandbox memegang
+# `pull_requests:write` yang ticket 16 tolak eksplisit.
+
+version: 1
+name: Ubah kontrak API, implement di dua repo
+repo: infra # repo config Project — tuan rumah definisi ini
+
+steps:
+  contract:
+    promptFile: prompts/api-contract.md
+    timeout: 30m
+    outputs:
+      spec: { type: string } # path file OpenAPI di dalam ref-nya
+
+  implement:
+    after: [contract]
+    branches:
+      - key: frontend # Key = nama repo, terbaca di Branch, log, dan UI
+        repo: frontend
+      - key: backend
+        repo: backend
+    minBranches: 1
+    promptFile: prompts/implement-from-contract.md
+    runsOn: [exec:docker]
+    timeout: 45m
+    outputs:
+      prTitle: { type: string }
+      prBody: { type: string }
+
+  open-pr:
+    after: [implement]
+    kind: pull-request # Step control-plane; tak pernah diklaim Runner (16, 24)
+    base: main # bawaan: default branch repo cabangnya
+    title: { step: implement, output: prTitle }
+    body: { step: implement, output: prBody }
+    # Tanpa `join:`, jadi ia lahir SEKALI PER CABANG — satu PR di frontend,
+    # satu di backend. `repo:` tidak ditulis dan tidak boleh ditulis: ia
+    # mewarisi repo cabangnya, dan pewarisan itu tidak bohong.
+    # Daun: `after: [open-pr]` adalah error validasi (ticket 24).
+
+  report:
+    after: [implement]
+    join: all
+    repo: infra # WAJIB eksplisit — Join di hilir fan-out ber-repo (ticket 21)
+    promptFile: prompts/report.md
+    timeout: 10m
+    # Ia membaca manifest `[{ key, repo, branch, sha, outcome, outputs }]` dan
+    # menulis ringkasan ke repo tuan rumahnya sendiri. Cabang `frontend` dan
+    # `backend` hadir sebagai DATA; `git fetch` ke repo lain tidak pernah terjadi.
+# `repo:` di dalam `branches:` adalah bidang Step biasa — tidak butuh mekanisme
+# apa pun untuk menahannya supaya bukan ekspresi. Bandingkan dengan gaya A,
+# yang butuh `overrides: [repo]` dan runtuh jadi YAML tidak valid karenanya.
+#
+# LUBANG TICKET 21 — DITUTUP. Jawabannya: yang lintas repo adalah *bacaannya*,
+# bukan *checkout*-nya. Tidak ada kelas Step tanpa repo, dan aturan satu-repo
+# tidak dilonggarkan. "Buka PR di banyak repo" ternyata bukan Join sama sekali —
+# ia fan-out Step control-plane, satu StepRun satu repo, satu token satu id.
+#
+# YANG MASIH TIDAK BISA DITULIS DI FILE INI (ticket 21, disengaja): sebuah Step
+# yang butuh source frontend DAN backend hidup bersamaan — integration test
+# lintas repo. Verifikasi lintas repo terjadi setelah PR terbuka, di GitHub.

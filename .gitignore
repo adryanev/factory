@@ -1,0 +1,17 @@
+# Local agent settings — per-machine, not shared
+.claude/settings.local.json
+
+# Node
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# Env & key material — never committed
+.env
+.env.*
+*.pem
+*.key
+
+# OS
+.DS_Store

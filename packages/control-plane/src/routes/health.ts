@@ -2,6 +2,7 @@ import { createRoute, z, type OpenAPIHono } from "@hono/zod-openapi";
 import { errorResponseSchema } from "@factory/shared";
 import { sql } from "drizzle-orm";
 import type { AppDeps } from "../deps.js";
+import type { AppEnv } from "../http-env.js";
 
 const healthResponseSchema = z
   .object({
@@ -40,7 +41,7 @@ const readyRoute = createRoute({
   },
 });
 
-export function registerHealthRoutes(app: OpenAPIHono, deps: AppDeps): void {
+export function registerHealthRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps): void {
   app.openapi(healthRoute, (c) => {
     return c.json({ status: "ok" as const, time: deps.clock.now().toISOString() }, 200);
   });

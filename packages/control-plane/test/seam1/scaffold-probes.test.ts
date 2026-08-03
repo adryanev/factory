@@ -16,7 +16,7 @@ describe("POST /scaffold-probes, GET /scaffold-probes/:id", () => {
   it("writes a row with a client-generated id and reads it back through Postgres", async () => {
     const id = generateId("probe");
 
-    const created = await fetch(`${rig.baseUrl}/scaffold-probes`, {
+    const created = await rig.fetchWithCsrf(`${rig.baseUrl}/scaffold-probes`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id, message: "seam-1 rig proves the round trip" }),
@@ -36,7 +36,7 @@ describe("POST /scaffold-probes, GET /scaffold-probes/:id", () => {
   });
 
   it("rejects a malformed id with { code, message } and 400, without writing a row", async () => {
-    const response = await fetch(`${rig.baseUrl}/scaffold-probes`, {
+    const response = await rig.fetchWithCsrf(`${rig.baseUrl}/scaffold-probes`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: "not-a-valid-id", message: "should be rejected" }),

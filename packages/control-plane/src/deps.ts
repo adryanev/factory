@@ -7,13 +7,14 @@
  * (`main.ts` for the real process, each seam-1 test for its own instance)
  * builds it once and passes it to `createApp`.
  *
- * Outbound network calls (GitHub App, webhooks) have no caller yet — they
- * land with the issues that need them, following this same pattern: add a
+ * Outbound network calls (GitHub App, webhooks) have no caller yet beyond
+ * `githubOAuth` below, added by issue #3 — the pattern it establishes: add a
  * field here, inject it, never read `fetch`/`http` ambiently from inside a
  * handler.
  */
 import type { Pool } from "pg";
 import { createDatabase, type Database } from "./db/client.js";
+import { createGithubOAuthClient, type GithubOAuthClient } from "./domain/github-identity.js";
 
 export interface Clock {
   now(): Date;
@@ -27,6 +28,7 @@ export interface AppDeps {
   db: Database;
   clock: Clock;
   random: RandomSource;
+  githubOAuth: GithubOAuthClient;
 }
 
 export function createSystemClock(): Clock {
@@ -43,11 +45,17 @@ export function createSystemRandom(): RandomSource {
   };
 }
 
-/** Builds real (non-test) deps around an already-connected pool. */
-export function createDeps(pool: Pool): AppDeps {
+export interface GithubOAuthConfig {
+  clientId: string;
+  clientSecret: string;
+}
+
+/** Builds real (non-test) deps around an already-connected pool. `githubConfig` comes from the environment in `main.ts` — infra config, not the clock/random/network seams this file otherwise documents as injected. */
+export function createDeps(pool: Pool, githubConfig: GithubOAuthConfig): AppDeps {
   return {
     db: createDatabase(pool),
     clock: createSystemClock(),
     random: createSystemRandom(),
+    githubOAuth: createGithubOAuthClient(githubConfig),
   };
 }

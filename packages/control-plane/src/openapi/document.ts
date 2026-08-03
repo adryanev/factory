@@ -20,6 +20,8 @@ export const OPENAPI_CONFIG = {
  */
 export function buildOpenApiDocument(): ReturnType<OpenAPIHono["getOpenAPIDocument"]> {
   const pool = new Pool({ connectionString: "postgres://unused/unused" });
-  const app = createApp(createDeps(pool));
+  // Route registration only records metadata — no handler ever runs — so a
+  // placeholder client id/secret never actually reaches github.com.
+  const app = createApp(createDeps(pool, { clientId: "unused", clientSecret: "unused" }));
   return app.getOpenAPIDocument(OPENAPI_CONFIG);
 }

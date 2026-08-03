@@ -34,6 +34,25 @@
 - [ ] Nilai secret tidak pernah masuk `audit_log`
 - [ ] CSRF ditutup `SameSite=Lax` + kewajiban header yang memicu preflight; nol token, nol tabel
 
+**Deviasi tercatat.** Tiga hal ditandai agent dan belum pernah diadu siapa pun:
+
+1. **Break-glass sekaligus diberi `owner` org saat bootstrap.** Perlu — harus ada owner
+   pertama supaya ada yang bisa menambahkan orang lain — tapi spec tidak pernah
+   menyebutnya. Alternatifnya seed terpisah atau SQL manual.
+2. **Tidak ada endpoint untuk mengangkat `owner` org kedua.** Hari ini satu-satunya jalan
+   adalah SQL langsung ke database. Bukan bagian kriteria issue ini, tapi deployment nyata
+   menabraknya.
+3. **Tawaran self-add untuk owner org ada di level API, tanpa layar.** `403` membawa
+   `code: forbidden_not_project_member_org_owner` dan menunjuk endpointnya. `packages/web`
+   belum punya routing sama sekali, jadi layarnya menunggu #14.
+
+**Penyimpangan dari ticket 11 yang justru perbaikan, bukan kemunduran.** Ticket 11 menulis
+"keanggotaan awal diverifikasi dari org GitHub". Yang dibangun: login GitHub selalu
+mengautentikasi lalu melahirkan Principal dorman tanpa akses apa pun, dan keanggotaan
+diberikan eksplisit sesudahnya. Ini lebih patuh pada garis spec "identitas GitHub hanya
+menjawab siapa kamu, tidak pernah boleh apa" ketimbang mengecek org GitHub secara live —
+pengecekan live akan mengembalikan otorisasi ke GitHub, persis yang spec tolak.
+
 ---
 
 ## Issue 4 — Definisi Pipeline, pemicu manual, dan materialisasi Graph

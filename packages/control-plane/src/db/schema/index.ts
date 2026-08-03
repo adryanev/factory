@@ -1,5 +1,6 @@
 export * from "./principals.js";
 export * from "./orgs.js";
+export * from "./sessions.js";
 export * from "./projects.js";
 export * from "./repositories.js";
 export * from "./secrets.js";

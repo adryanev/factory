@@ -9,6 +9,7 @@ import { errorResponseSchema, isValidId } from "@factory/shared";
 import { eq } from "drizzle-orm";
 import { scaffoldProbes, scaffoldProbeStatuses } from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
+import type { AppEnv } from "../http-env.js";
 
 const scaffoldProbeSchema = z
   .object({
@@ -75,7 +76,7 @@ function toResponse(row: typeof scaffoldProbes.$inferSelect) {
   };
 }
 
-export function registerScaffoldProbeRoutes(app: OpenAPIHono, deps: AppDeps): void {
+export function registerScaffoldProbeRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps): void {
   app.openapi(createProbeRoute, async (c) => {
     const body = c.req.valid("json");
     if (!isValidId("probe", body.id)) {

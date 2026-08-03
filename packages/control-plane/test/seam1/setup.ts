@@ -15,12 +15,25 @@ import { createApp } from "../../src/app.js";
 import { createDatabase } from "../../src/db/client.js";
 import { MIGRATIONS_FOLDER } from "../../src/db/migrations-path.js";
 import type { AppDeps, Clock, RandomSource } from "../../src/deps.js";
+import { bootstrapBreakGlassAccount } from "../../src/domain/auth.js";
+import { CSRF_HEADER_NAME, CSRF_HEADER_VALUE } from "../../src/csrf.js";
+import { createFakeGithubOAuthClient, type FakeGithubOAuthClient } from "./fake-github-oauth.js";
+import type { GithubIdentity } from "../../src/domain/github-identity.js";
+
+export const BREAK_GLASS_TEST_PASSWORD = "correct horse battery staple";
 
 export interface TestRig {
   baseUrl: string;
   pool: Pool;
+  githubOAuth: FakeGithubOAuthClient;
   /** Moves the injected clock. No test in this rig ever reads the wall clock. */
   setClock(date: Date): void;
+  /** `fetch` with the CSRF header every mutating request needs already set — tests only add it explicitly when they mean to test its absence. */
+  fetchWithCsrf(input: string, init?: RequestInit): Promise<Response>;
+  /** Logs in via break-glass and returns the `Cookie` header value for subsequent requests. */
+  loginAsBreakGlass(): Promise<string>;
+  /** Registers a fake GitHub identity, drives the real callback endpoint, and returns the `Cookie` header value for subsequent requests. */
+  loginAsGithub(identity: GithubIdentity): Promise<string>;
   stop(): Promise<void>;
 }
 
@@ -39,6 +52,16 @@ function seededRandom(seed: number): RandomSource {
   };
 }
 
+function sessionCookieFromResponse(response: Response): string {
+  const setCookie = response.headers.get("set-cookie");
+  if (!setCookie) {
+    throw new Error("expected a Set-Cookie header on the login response");
+  }
+  // Only the name=value pair belongs in a request's Cookie header — strip
+  // the attributes (`Path`, `HttpOnly`, `SameSite`, ...).
+  return setCookie.split(";")[0]!;
+}
+
 export async function startTestRig(): Promise<TestRig> {
   const container: StartedPostgreSqlContainer = await new PostgreSqlContainer(
     "postgres:16-alpine",
@@ -49,12 +72,16 @@ export async function startTestRig(): Promise<TestRig> {
 
   let currentTime = new Date("2026-01-01T00:00:00.000Z");
   const clock: Clock = { now: () => currentTime };
+  const githubOAuth = createFakeGithubOAuthClient();
 
   const deps: AppDeps = {
     db: createDatabase(pool),
     clock,
     random: seededRandom(42),
+    githubOAuth,
   };
+
+  await bootstrapBreakGlassAccount(deps, BREAK_GLASS_TEST_PASSWORD);
 
   const app = createApp(deps);
 
@@ -64,11 +91,43 @@ export async function startTestRig(): Promise<TestRig> {
     });
   });
 
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  const fetchWithCsrf = (input: string, init: RequestInit = {}) =>
+    fetch(input, {
+      ...init,
+      headers: { ...init.headers, [CSRF_HEADER_NAME]: CSRF_HEADER_VALUE },
+    });
+
   return {
-    baseUrl: `http://127.0.0.1:${port}`,
+    baseUrl,
     pool,
+    githubOAuth,
     setClock: (date: Date) => {
       currentTime = date;
+    },
+    fetchWithCsrf,
+    async loginAsBreakGlass() {
+      const response = await fetchWithCsrf(`${baseUrl}/auth/breakglass/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: BREAK_GLASS_TEST_PASSWORD }),
+      });
+      if (!response.ok) {
+        throw new Error(`break-glass login failed: ${response.status} ${await response.text()}`);
+      }
+      return sessionCookieFromResponse(response);
+    },
+    async loginAsGithub(identity: GithubIdentity) {
+      const code = `fake-code-${identity.githubUserId}`;
+      githubOAuth.registerCode(code, identity);
+      const response = await fetch(
+        `${baseUrl}/auth/github/callback?code=${encodeURIComponent(code)}`,
+      );
+      if (!response.ok) {
+        throw new Error(`github login failed: ${response.status} ${await response.text()}`);
+      }
+      return sessionCookieFromResponse(response);
     },
     async stop() {
       await new Promise<void>((resolve, reject) => {

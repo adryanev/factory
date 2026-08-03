@@ -1,0 +1,19 @@
+# Rule: timeout:/attempts: are rejected on a Step with kind:.
+version: 1
+name: Timeout and attempts on a kind Step
+repo: backend
+steps:
+  review:
+    promptFile: .factory/prompts/review.md
+    outputs:
+      prTitle: { type: string }
+      prBody: { type: string }
+
+  open-pr:
+    after: [review]
+    kind: pull-request
+    base: main
+    title: { step: review, output: prTitle }
+    body: { step: review, output: prBody }
+    timeout: 60s
+    attempts: 3

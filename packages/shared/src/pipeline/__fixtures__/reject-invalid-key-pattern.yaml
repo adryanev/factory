@@ -1,0 +1,19 @@
+# Rule: Key type is constrained [a-z0-9][a-z0-9._-]{0,63}. No slug
+# normalisation: an uppercase Key is rejected outright, never lower-cased.
+version: 1
+name: Invalid Key pattern
+repo: backend
+steps:
+  plan:
+    promptFile: prompts/plan.md
+    outputs:
+      variants:
+        type: array
+        items: { key: string, brief: string }
+
+  implement:
+    after: [plan]
+    branches:
+      - key: Frontend
+        agent: claude
+    promptFile: prompts/implement.md

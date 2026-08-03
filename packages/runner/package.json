@@ -1,0 +1,23 @@
+{
+  "name": "@factory/runner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "factory-runner": "./dist/main.js"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@factory/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.4"
+  }
+}

@@ -1,0 +1,67 @@
+.fan-out-summary {
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius-md);
+  padding: 0.625rem 0.75rem;
+  background: var(--sunk);
+}
+
+.fan-out-summary__label {
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.fan-out-summary__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.fan-out-summary__branch {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.3rem 0.5rem;
+  cursor: pointer;
+}
+
+.fan-out-summary__branch:hover {
+  border-color: var(--border-2);
+}
+
+.fan-out-summary__key {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+
+.fan-out-summary__remainder {
+  margin-top: 0.375rem;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.3rem 0.5rem;
+  cursor: pointer;
+}
+
+.fan-out-summary__remainder:hover {
+  color: var(--fg-2);
+  border-color: var(--border-2);
+}

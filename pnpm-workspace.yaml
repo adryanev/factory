@@ -1,0 +1,7 @@
+packages:
+  - "packages/*"
+allowBuilds:
+  cpu-features: true
+  esbuild: true
+  protobufjs: true
+  ssh2: true

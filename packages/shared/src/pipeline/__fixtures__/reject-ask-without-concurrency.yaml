@@ -1,0 +1,8 @@
+# Rule: a Pipeline containing ask: must write concurrency: explicitly.
+version: 1
+name: ask without pipeline-level concurrency
+repo: backend
+steps:
+  review:
+    promptFile: prompts/review.md
+    ask: { group: reviewer, kind: approval }

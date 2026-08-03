@@ -1,6 +1,9 @@
 # Local agent settings — per-machine, not shared
 .claude/settings.local.json
 
+# Transient agent worktrees — they live inside the repo but are never part of it
+.claude/worktrees/
+
 # Node
 node_modules/
 dist/

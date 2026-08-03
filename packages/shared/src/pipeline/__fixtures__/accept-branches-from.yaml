@@ -1,0 +1,21 @@
+# Valid dynamic fan-out: branchesFrom reading a Step's array-of-object Output.
+version: 1
+name: Dynamic fan-out from Output
+repo: backend
+steps:
+  plan:
+    promptFile: .factory/prompts/plan.md
+    timeout: 30m
+    outputs:
+      variants:
+        type: array
+        items: { key: string, brief: string }
+
+  implement:
+    after: [plan]
+    branchesFrom: { step: plan, output: variants }
+    minBranches: 1
+    promptFile: .factory/prompts/implement.md
+    runsOn: [exec:docker]
+    timeout: 45m
+    attempts: 2

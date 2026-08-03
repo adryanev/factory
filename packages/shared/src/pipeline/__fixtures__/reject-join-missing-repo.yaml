@@ -1,0 +1,25 @@
+# Rule: a Join downstream of a repo-valued fan-out must write an explicit repo:.
+version: 1
+name: Join missing explicit repo
+repo: infra
+steps:
+  plan:
+    promptFile: prompts/plan.md
+    outputs:
+      variants:
+        type: array
+        items: { key: string, brief: string }
+
+  implement:
+    after: [plan]
+    branches:
+      - key: frontend
+        repo: frontend
+      - key: backend
+        repo: backend
+    promptFile: prompts/implement.md
+
+  report:
+    after: [implement]
+    join: all
+    promptFile: prompts/report.md

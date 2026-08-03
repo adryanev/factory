@@ -1,0 +1,21 @@
+# Rule: an after: pointing at a kind: pull-request Step is an error — it is a leaf.
+version: 1
+name: After points at a pull-request Step
+repo: backend
+steps:
+  review:
+    promptFile: .factory/prompts/review.md
+    outputs:
+      prTitle: { type: string }
+      prBody: { type: string }
+
+  open-pr:
+    after: [review]
+    kind: pull-request
+    base: main
+    title: { step: review, output: prTitle }
+    body: { step: review, output: prBody }
+
+  notify:
+    after: [open-pr]
+    run: echo done

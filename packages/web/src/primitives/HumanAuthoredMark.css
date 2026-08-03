@@ -1,0 +1,12 @@
+.human-authored-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--attention);
+  background: var(--attention-wash);
+  border: 1px solid var(--attention-line);
+  border-radius: 999px;
+  padding: 0.075rem 0.5rem;
+}

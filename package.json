@@ -1,0 +1,15 @@
+{
+  "name": "factory",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@11.14.0",
+  "scripts": {
+    "typecheck": "pnpm -r run typecheck",
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "generate:openapi": "pnpm --filter @factory/control-plane run generate:openapi",
+    "check:openapi": "pnpm --filter @factory/control-plane run check:openapi"
+  }
+}

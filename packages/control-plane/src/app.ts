@@ -18,6 +18,7 @@ import { registerAuthRoutes, SESSION_COOKIE_NAME } from "./routes/auth.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerGroupRoutes } from "./routes/groups.js";
 import { registerRunRoutes } from "./routes/runs.js";
+import { registerSecretRoutes } from "./routes/secrets.js";
 import { registerRunnerProtocolRoutes } from "./routes/runner-protocol.js";
 import { registerRunnerAdminRoutes } from "./routes/runner-admin.js";
 import { registerStepRunLogRoutes } from "./routes/step-run-logs.js";
@@ -127,6 +128,7 @@ export function createApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerProjectRoutes(app, { domain, clock: deps.clock });
   registerGroupRoutes(app, { domain, clock: deps.clock });
   registerRunRoutes(app, { domain, clock: deps.clock });
+  registerSecretRoutes(app, { domain, clock: deps.clock });
   registerRunnerProtocolRoutes(app, { domain, clock: deps.clock });
   registerRunnerAdminRoutes(app, { domain, clock: deps.clock });
   registerStepRunLogRoutes(app, { domain, clock: deps.clock });

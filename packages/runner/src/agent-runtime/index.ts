@@ -14,6 +14,7 @@
 import { createSandbox } from "@ai-hero/sandcastle";
 import { createDockerControl } from "./docker-control.js";
 import { createHostProcessControl } from "./host-process.js";
+import { createPfEgressControl, type EgressControl } from "./egress.js";
 import { createTurnRuntime } from "./runtime.js";
 import type {
   DockerControl,
@@ -28,18 +29,26 @@ import type {
 
 export type { RunsOn, ShellTurnSpec, Turn, TurnResult, TurnRuntimeDeps, DockerControl, HostProcessControl };
 export type { TurnSpec };
-export { DOCKER_STOP_GRACE_SECONDS, TurnCancelledError } from "./runtime.js";
+export type { EgressControl } from "./egress.js";
+export { DOCKER_STOP_GRACE_SECONDS, TurnCancelledError, shellEnvPrefix } from "./runtime.js";
 export { createFactoryHostProvider } from "./host-provider.js";
 export { createDockerControl } from "./docker-control.js";
 export { createHostProcessControl } from "./host-process.js";
 export { createTurnRuntime } from "./runtime.js";
+export { renderEgressRules, createPfEgressControl } from "./egress.js";
 
 /** The real system deps every production turn runs on. */
 export function createSystemTurnRuntimeDeps(): TurnRuntimeDeps {
+  const hostAgentUser = process.env["FACTORY_AGENT_USER"];
   return {
     createSandbox,
     docker: createDockerControl(),
     hostProcess: createHostProcessControl(),
+    // AC7: the OS user `exec:host` drops the agent to. When unset, host-mode
+    // turns run as the Runner's own user (weaker, but explicit in SECURITY.md).
+    ...(hostAgentUser === undefined ? {} : { hostAgentUser }),
+    // AC6: default-deny egress enforcement for the agent user (pf on macOS).
+    egress: createPfEgressControl(),
   };
 }
 

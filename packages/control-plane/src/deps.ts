@@ -16,6 +16,7 @@ import type { Pool } from "pg";
 import { createDatabase, type Database } from "./db/client.js";
 import { createGithubOAuthClient, type GithubOAuthClient } from "./domain/github-identity.js";
 import { createGithubHost, type GithubAppConfig, type GitHost } from "./domain/git-host.js";
+import type { KeyRing } from "./domain/master-key.js";
 import { createS3ObjectStore, type ObjectStore, type S3ObjectStoreConfig } from "./object-store.js";
 import { LIVE_TAIL_HOLD_MS } from "./domain/step-run-logs.js";
 
@@ -64,6 +65,14 @@ export interface AppDeps {
   random: RandomSource;
   githubOAuth: GithubOAuthClient;
   gitHost: GitHost;
+  /**
+   * The master key, loaded from a FILE at boot (spec: "Master key dari file,
+   * bukan environment variable") — see `domain/master-key.ts` for why the
+   * key material must never ride an env var. Decrypting a secret row is the
+   * one use; every decryption goes through `domain/secrets.ts`, never a
+   * route.
+   */
+  keyring: KeyRing;
   /**
    * `/claim`'s long-poll hold duration is randomized server-side in this
    * range so a herd of Runners arriving together (e.g. right after a
@@ -130,7 +139,8 @@ const MAX_HANGING_LIVE_TAIL_CONNECTIONS = 2000;
 export function createDeps(
   pool: Pool,
   githubConfig: GithubOAuthConfig,
-  gitHostConfig?: GithubAppConfig,
+  gitHostConfig: GithubAppConfig | undefined,
+  keyring: KeyRing,
   objectStoreConfig?: S3ObjectStoreConfig,
 ): AppDeps {
   const clock = createSystemClock();
@@ -141,6 +151,7 @@ export function createDeps(
     random: createSystemRandom(),
     githubOAuth: createGithubOAuthClient(githubConfig),
     gitHost: createGithubHost(gitHostConfig),
+    keyring,
     claimHoldRangeMs: PRODUCTION_CLAIM_HOLD_RANGE_MS,
     claimLimiter: createClaimConnectionLimiter(MAX_HANGING_CLAIM_CONNECTIONS),
     liveTailHoldMs: LIVE_TAIL_HOLD_MS,

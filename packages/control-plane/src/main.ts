@@ -10,6 +10,7 @@ import { createDeps } from "./deps.js";
 import { assertMigrationsApplied, MigrationGateError } from "./db/migration-gate.js";
 import { MIGRATIONS_FOLDER } from "./db/migrations-path.js";
 import { bootstrapBreakGlassAccount } from "./domain/auth.js";
+import { createFileKeyRing } from "./domain/master-key.js";
 import { bootControlPlane } from "./boot.js";
 
 function requiredEnv(name: string): string {
@@ -46,6 +47,10 @@ async function main(): Promise<void> {
       appId: Number(requiredEnv("GITHUB_APP_ID")),
       privateKey: requiredEnv("GITHUB_APP_PRIVATE_KEY"),
     },
+    // Key material from a FILE, not an env var — the path may ride the env,
+    // the material never does (spec: "Master key dari file, bukan environment
+    // variable"; CVE-2025-66032, `/proc/self/environ`).
+    createFileKeyRing(requiredEnv("FACTORY_MASTER_KEY_FILE")),
     {
       endpoint: requiredEnv("GARAGE_S3_ENDPOINT"),
       region: process.env["GARAGE_REGION"] ?? "garage",

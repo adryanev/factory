@@ -37,11 +37,25 @@ export interface ShellTurnSpec {
   image: string;
   /** Per-StepRun docker network (`docker` mode) — the boundary `cancel()` stops containers on. */
   network: string;
+  /**
+   * The Project's secrets, resolved at `/claim` (AC5). Never written to a
+   * file inside the sandbox: host mode injects them into the spawned
+   * process's environment; docker mode inlines them as shell env
+   * assignments in the command (visible in `docker inspect` — a deliberately
+   * unprotected surface, see `docs/SECURITY.md`).
+   */
+  secrets?: Record<string, string>;
+  /**
+   * The Project's default-deny egress allowlist (AC6). The seam is expected
+   * to deny everything not listed here.
+   */
+  egressAllowlist?: string[];
   /** Streamed stdout line sink (a future live-tail/log-chunks consumer). */
   onLine?: (line: string) => void;
 }
 
-/** The seam grows by discriminated union — issue 9 (agent Steps) adds `kind: "agent"`. */
+/**
+ * The seam grows by discriminated union — issue 9 (agent Steps) adds `kind: "agent"`. */
 export type TurnSpec = ShellTurnSpec;
 
 export interface TurnResult {
@@ -83,7 +97,12 @@ export interface HostProcessControl {
   spawnShell(
     command: string,
     cwd: string,
-    options: { env: Record<string, string>; onLine?: (line: string) => void },
+    options: {
+      env: Record<string, string>;
+      /** When set, the command runs as this OS user via `sudo -n -u <user> --` (AC7: agent as a separate OS user). */
+      runAsUser?: string;
+      onLine?: (line: string) => void;
+    },
   ): { pgid: number; result: Promise<{ stdout: string; stderr: string; exitCode: number }> };
   /** SIGTERM to the whole process group — children die with the parent (AC6). */
   killGroup(pgid: number): void;
@@ -94,4 +113,8 @@ export interface TurnRuntimeDeps {
   createSandbox: (options: CreateSandboxOptions) => Promise<Sandbox>;
   docker: DockerControl;
   hostProcess: HostProcessControl;
+  /** The OS user `exec:host` runs the agent as (AC7) — separate from the Runner's own user. */
+  hostAgentUser?: string;
+  /** Egress enforcement (AC6) — when present, `exec:host` installs default-deny allowlist rules for the agent user. */
+  egress?: import("./egress.js").EgressControl;
 }

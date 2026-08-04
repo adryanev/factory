@@ -32,7 +32,7 @@
  *
  * See the written report for this as an open question for review.
  */
-import { and, desc, eq, isNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lt } from "drizzle-orm";
 import {
   generateId,
   validatePipelineDefinition,
@@ -40,7 +40,7 @@ import {
   type Pipeline,
   type ValidationIssue,
 } from "@factory/shared";
-import { projects, repositories, runs, stepRuns } from "../db/schema.js";
+import { projects, repositories, runs, secrets, serviceAccounts, stepRuns } from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
 import type { Principal } from "./principal.js";
 import { requireProjectMembership } from "./projects.js";
@@ -222,6 +222,36 @@ export async function triggerRun(
     );
   }
 
+  // Fallback User→ServiceAccount (spec: "Credential, secret, dan akses
+  // repo"). A User-triggered Run's `credentialPrincipalId` defaults to the
+  // User itself — the Run uses secrets that User owns. When the Project has
+  // `allowSharedAgentCredential` on AND the User owns no secrets of their own
+  // here, the Run falls back to the Project's ServiceAccount so it can still
+  // reach the Project's shared credentials. The two attribution columns on
+  // `runs` differ exactly when the fallback engaged (spec: "pemakaiannya
+  // terlihat lewat dua kolom atribusi terpisah di `runs`"). Automation runs
+  // (ServiceAccount-triggered) always attribute to the ServiceAccount — no
+  // fallback, no flag needed.
+  let credentialPrincipalId: Id<"user"> | Id<"serviceaccount"> = principal.id;
+  if (principal.kind === "user" && project?.allowSharedAgentCredential) {
+    const [userOwnedSecret] = await deps.db
+      .select({ id: secrets.id })
+      .from(secrets)
+      .where(and(eq(secrets.projectId, projectId), eq(secrets.ownerPrincipalId, principal.id)))
+      .limit(1);
+    if (!userOwnedSecret) {
+      const [shared] = await deps.db
+        .select()
+        .from(serviceAccounts)
+        .where(eq(serviceAccounts.projectId, projectId))
+        .orderBy(asc(serviceAccounts.principalId))
+        .limit(1);
+      if (shared) {
+        credentialPrincipalId = shared.principalId;
+      }
+    }
+  }
+
   const promptFilePaths = collectPromptFilePaths(pipeline);
   const definitionFiles: Record<string, string> = {};
   let totalBytes = Buffer.byteLength(definitionText, "utf-8");
@@ -276,7 +306,7 @@ export async function triggerRun(
           pipelinePath: input.pipelinePath,
           triggerKind: "manual",
           triggeredByPrincipalId: principal.id,
-          credentialPrincipalId: principal.id,
+          credentialPrincipalId,
           refBranch: input.refBranch,
           refSha: sha,
           definition: definitionText,

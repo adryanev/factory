@@ -23,7 +23,13 @@ describe("Runner protocol: /claim", () => {
   let ownerCookie: string;
 
   beforeAll(async () => {
-    rig = await startTestRig({ claimHoldRangeMs: { min: 150, max: 400 } });
+    // The herd-breakup window is wider than the fast-test default: with
+    // `pnpm -r run test` running the control-plane seam-1 suite concurrently,
+    // poll-loop and HTTP overhead under load eats into a [150,400)ms window
+    // enough to occasionally cluster ten near-simultaneous holds past the
+    // `spread > 50` assertion. A ~800ms window keeps the test fast while
+    // making the randomized spread dominate machine jitter.
+    rig = await startTestRig({ claimHoldRangeMs: { min: 400, max: 1200 } });
     ownerCookie = await rig.loginAsBreakGlass();
   });
 

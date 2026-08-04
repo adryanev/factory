@@ -178,6 +178,7 @@ describe("Runner protocol: heartbeat, lease renewal, and the lease sweep", () =>
       random: { bytes: (n: number) => new Uint8Array(n) },
       githubOAuth: createFakeGithubOAuthClient(),
       gitHost: createFakeGitHost(),
+      keyring: { currentVersion: () => 1, key: () => Buffer.alloc(32, 1) },
       objectStore: createFakeObjectStore(),
       claimHoldRangeMs: { min: 50, max: 100 },
       claimLimiter: createClaimConnectionLimiter(2000),

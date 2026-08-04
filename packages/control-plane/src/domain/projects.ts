@@ -169,6 +169,44 @@ export async function requireProjectMembership(
   await getProjectForPrincipal(deps, principal, projectId);
 }
 
+/**
+ * Admin-only settings write for a Project. Today exactly one knob exists —
+ * `allowSharedAgentCredential`, the User→ServiceAccount credential fallback,
+ * **default off** (spec: "Fallback User→ServiceAccount lewat
+ * `allowSharedAgentCredential`, bawaan mati"). Returning the updated Project
+ * row keeps the response truthful (the write is idempotent).
+ */
+export async function updateProjectSettings(
+  deps: Pick<AppDeps, "db">,
+  principal: Principal,
+  projectId: Id<"project">,
+  patch: { allowSharedAgentCredential?: boolean },
+): Promise<Project> {
+  await requireProjectAdmin(deps, principal, projectId);
+  const [updated] = await deps.db
+    .update(projects)
+    .set({
+      ...(patch.allowSharedAgentCredential !== undefined
+        ? { allowSharedAgentCredential: patch.allowSharedAgentCredential }
+        : {}),
+    })
+    .where(eq(projects.id, projectId))
+    .returning();
+  await recordAuditEvent(deps, {
+    actor: principal,
+    projectId,
+    action: "project.settings_updated",
+    targetType: "project",
+    targetId: projectId,
+    metadata: {
+      ...(patch.allowSharedAgentCredential !== undefined
+        ? { allowSharedAgentCredential: patch.allowSharedAgentCredential }
+        : {}),
+    },
+  });
+  return updated!;
+}
+
 /** Admin-only. Upserts, so changing an existing member's role is the same call as adding a new one — one endpoint, not two for adjacent behavior. */
 export async function addProjectMember(
   deps: Pick<AppDeps, "db">,

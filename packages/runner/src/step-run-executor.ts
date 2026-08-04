@@ -221,6 +221,10 @@ export async function executeClaimedTurn(deps: StepRunExecutorDeps, claimed: Cla
       image: deps.sandboxImage,
       network: perStepRunNetwork(claimed.id),
       onLine: (line) => logSink.write(`${line}\n`),
+      // AC5: the secrets resolved at /claim travel the seam to the agent call.
+      secrets: claimed.secrets,
+      // AC6: default-deny egress allowlist for the sandbox.
+      egressAllowlist: claimed.egressAllowlist,
     });
 
     const cancelWatch = startCancelWatch(deps, claimed, () => turn.cancel());

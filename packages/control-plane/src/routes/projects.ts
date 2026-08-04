@@ -18,6 +18,7 @@ const projectSchema = z
     automationEnabled: z.boolean(),
     allowSharedAgentCredential: z.boolean(),
     hostExecAllowed: z.boolean(),
+    egressAllowlist: z.array(z.string()),
     notificationWebhookUrl: z.string().nullable(),
   })
   .openapi("Project");
@@ -100,12 +101,36 @@ const selfAddRoute = createRoute({
   },
 });
 
+const updateProjectSettingsRoute = createRoute({
+  method: "patch",
+  path: "/projects/{id}",
+  summary:
+    "Admin settings write. Today one knob: `allowSharedAgentCredential` — the User→ServiceAccount credential fallback, **default off** (AC: \"Fallback User→ServiceAccount lewat allowSharedAgentCredential, bawaan mati\"). Audited.",
+  request: {
+    params: idParamSchema,
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ allowSharedAgentCredential: z.boolean().optional() }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: { description: "Updated.", content: { "application/json": { schema: projectSchema } } },
+    401: { description: "Not logged in.", content: { "application/json": { schema: errorResponseSchema } } },
+    403: { description: "Not a Project admin.", content: { "application/json": { schema: errorResponseSchema } } },
+    404: { description: "No such Project.", content: { "application/json": { schema: errorResponseSchema } } },
+  },
+});
+
 function toProjectResponse(project: {
   id: string;
   name: string;
   automationEnabled: boolean;
   allowSharedAgentCredential: boolean;
   hostExecAllowed: boolean;
+  egressAllowlist: string[];
   notificationWebhookUrl: string | null;
 }) {
   return project;
@@ -145,5 +170,17 @@ export function registerProjectRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDeps)
     const { id } = c.req.valid("param");
     await deps.domain.projects.selfAddAsMember(principal, id as Id<"project">);
     return c.json({ ok: true as const }, 200);
+  });
+
+  app.openapi(updateProjectSettingsRoute, async (c) => {
+    const principal = requirePrincipal(c);
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const project = await deps.domain.projects.updateSettings(principal, id as Id<"project">, {
+      ...(body.allowSharedAgentCredential !== undefined
+        ? { allowSharedAgentCredential: body.allowSharedAgentCredential }
+        : {}),
+    });
+    return c.json(toProjectResponse(project), 200);
   });
 }

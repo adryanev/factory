@@ -15,6 +15,7 @@
 import { copyFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { createBindMountSandboxProvider } from "@ai-hero/sandcastle";
+import type { EgressControl } from "./egress.js";
 import type { HostProcessControl } from "./types.js";
 
 export interface FactoryHostProviderOptions {
@@ -23,12 +24,18 @@ export interface FactoryHostProviderOptions {
   onSpawn?: (pgid: number) => void;
   /** When true, `exec` resolves immediately without spawning — used when `cancel()` landed before the command started. */
   shouldSkip?: () => boolean;
-  /** Extra env for every command (never a git token — see `types.ts`). */
+  /** Extra env for every command — the Project's secrets (never a git token — see `types.ts`). */
   env?: Record<string, string>;
+  /** AC7: the OS user the agent runs as, separate from the Runner's own user. */
+  runAsUser?: string;
+  /** AC6: egress enforcement — when set alongside `runAsUser`, default-deny allowlist rules are applied for the agent user. */
+  egress?: EgressControl;
+  /** AC6: the allowlist to apply. */
+  egressAllowlist?: string[];
 }
 
 export function createFactoryHostProvider(options: FactoryHostProviderOptions) {
-  const { hostProcess, onSpawn, shouldSkip, env } = options;
+  const { hostProcess, onSpawn, shouldSkip, env, runAsUser, egress, egressAllowlist } = options;
   const home = process.env["HOME"];
   return createBindMountSandboxProvider({
     name: "factory-host",
@@ -41,17 +48,25 @@ export function createFactoryHostProvider(options: FactoryHostProviderOptions) {
           mergedEnv[key] = value;
         }
       }
+      // AC6: default-deny egress for the agent user, before the first spawn.
+      let egressHandle: string | undefined;
+      if (runAsUser && egress) {
+        egressHandle = await egress.apply(runAsUser, egressAllowlist ?? []);
+      }
       return {
         worktreePath,
         async exec(command, execOptions) {
           if (shouldSkip?.()) {
             return { stdout: "", stderr: "", exitCode: -1 };
           }
-          const spawned = hostProcess.spawnShell(
-            command,
-            execOptions?.cwd ?? worktreePath,
-            execOptions?.onLine ? { env: mergedEnv, onLine: execOptions.onLine } : { env: mergedEnv },
-          );
+          const spawnOptions: {
+            env: Record<string, string>;
+            runAsUser?: string;
+            onLine?: (line: string) => void;
+          } = { env: mergedEnv };
+          if (runAsUser !== undefined) spawnOptions.runAsUser = runAsUser;
+          if (execOptions?.onLine !== undefined) spawnOptions.onLine = execOptions.onLine;
+          const spawned = hostProcess.spawnShell(command, execOptions?.cwd ?? worktreePath, spawnOptions);
           onSpawn?.(spawned.pgid);
           return spawned.result;
         },
@@ -65,6 +80,10 @@ export function createFactoryHostProvider(options: FactoryHostProviderOptions) {
         },
         async close() {
           // No container to tear down — the worktree lifecycle is sandcastle's.
+          // Tear down the egress anchor (best-effort, like every teardown).
+          if (egressHandle !== undefined) {
+            await egress?.remove(egressHandle).catch(() => {});
+          }
         },
       };
     },

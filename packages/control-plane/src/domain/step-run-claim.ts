@@ -12,12 +12,13 @@
  */
 import { eq } from "drizzle-orm";
 import { isProtocolVersionSupported, type Id } from "@factory/shared";
-import { githubAppInstallations, repositories, runs, stepRuns } from "../db/schema.js";
+import { githubAppInstallations, projects, repositories, runs, stepRuns } from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
 import { loadSqlStatement } from "../db/sql/load.js";
 import { ProtocolVersionError } from "./errors.js";
 import type { InstallationToken, RepoRef } from "./git-host.js";
 import type { RunnerIdentity } from "./runners.js";
+import { resolveSecretsForPrincipal } from "./secrets.js";
 
 const CLAIM_QUERY = loadSqlStatement("claim_step_run.sql");
 const POLL_INTERVAL_MS = 1000; // spec: "poll kueri klaim tiap 1 detik per koneksi menggantung"
@@ -59,6 +60,20 @@ export interface ClaimedStepRun {
    * plane (see `packages/runner`'s step-run executor).
    */
   gitTokens: { fetch: InstallationToken; push: InstallationToken };
+  /**
+   * The secrets resolved at scheduling time (spec: "secret di-resolve saat
+   * penjadwalan") for the Run's `credentialPrincipalId` — a `name -> value`
+   * map handed directly to the Runner, which passes it to the agent call.
+   * The values are decrypted here, in the control plane, and carried only in
+   * this payload: never written to a file inside the sandbox (AC5).
+   */
+  secrets: Record<string, string>;
+  /**
+   * The Project's default-deny egress allowlist. The Runner turns this into
+   * firewall rules scoped to the agent's OS user; hosts outside it get no
+   * egress (AC6).
+   */
+  egressAllowlist: string[];
 }
 
 export interface ClaimInput {
@@ -83,13 +98,20 @@ async function tryClaimOnce(deps: Pick<AppDeps, "pool">, runner: RunnerIdentity,
   return result.rows[0];
 }
 
-async function hydrateClaimedRow(deps: Pick<AppDeps, "db" | "gitHost">, row: ClaimedRow): Promise<ClaimedStepRun> {
+async function hydrateClaimedRow(
+  deps: Pick<AppDeps, "db" | "gitHost" | "keyring">,
+  row: ClaimedRow,
+): Promise<ClaimedStepRun> {
   const [run] = await deps.db.select().from(runs).where(eq(runs.id, row.run_id));
   const [repository] = await deps.db.select().from(repositories).where(eq(repositories.id, row.repository_id));
   if (!run || !repository) {
     // Both are foreign keys `step_runs` requires NOT NULL — their absence
     // would mean the database itself is inconsistent, not a caller error.
     throw new Error(`claimed step run ${row.id} references a missing run or repository`);
+  }
+  const [project] = await deps.db.select().from(projects).where(eq(projects.id, run.projectId));
+  if (!project) {
+    throw new Error(`run ${run.id} references a missing project`);
   }
   const [installation] = await deps.db
     .select()
@@ -117,6 +139,8 @@ async function hydrateClaimedRow(deps: Pick<AppDeps, "db" | "gitHost">, row: Cla
     leaseToken: row.lease_token,
     leaseExpiresAt: row.lease_expires_at,
     gitTokens: await mintTurnTokens(deps, repository.owner, repository.name, installation.installationId),
+    secrets: await resolveSecretsForPrincipal(deps, run.projectId, run.credentialPrincipalId),
+    egressAllowlist: project.egressAllowlist,
   };
 }
 
@@ -164,7 +188,7 @@ async function unleaseStepRun(deps: Pick<AppDeps, "db">, stepRunId: Id<"steprun"
  * distinctly from `/heartbeat`, which never does this).
  */
 export async function claimStepRun(
-  deps: Pick<AppDeps, "pool" | "db" | "random" | "claimHoldRangeMs" | "claimLimiter" | "gitHost">,
+  deps: Pick<AppDeps, "pool" | "db" | "random" | "claimHoldRangeMs" | "claimLimiter" | "gitHost" | "keyring">,
   runner: RunnerIdentity,
   input: ClaimInput,
 ): Promise<ClaimedStepRun | null> {

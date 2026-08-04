@@ -21,7 +21,14 @@ export type AuditAction =
   | "project.member_added"
   | "group.created"
   | "group.member_added"
-  | "run.triggered";
+  | "run.triggered"
+  | "project.service_account_created"
+  | "project.egress_allowlist_updated"
+  | "project.settings_updated"
+  | "secret.stored"
+  | "secret.updated"
+  | "secret.deleted"
+  | "secret.rotated";
 
 export interface AuditEvent {
   actor: Principal;

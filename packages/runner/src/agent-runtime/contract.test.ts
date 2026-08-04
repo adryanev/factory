@@ -228,21 +228,29 @@ describe("sandcastle contract: worktree path verbatim", () => {
 });
 
 describe("sandcastle contract: idle timer resets on each output", () => {
-  it("a command emitting output beyond its idle window is not killed — every line resets the timer", async () => {
-    const started = Date.now();
-    // Six ticks at 0.5s apart run ~3s total against a 2s idle window: the
-    // 1.5s slack absorbs machine jitter under a loaded test runner, while the
-    // total still outlives the window — proving the timer resets on every
-    // line rather than measuring the whole run.
-    const result = await runShell("for i in 1 2 3 4 5 6; do echo tick-$i; sleep 0.5; done", {
-      idleTimeoutSeconds: 2,
-    });
-    const elapsed = Date.now() - started;
+  it(
+    "a command emitting output beyond its idle window is not killed — every line resets the timer",
+    // Real `sleep 0.5` ticks under a concurrently-loaded `pnpm -r run test`
+    // can stretch past vitest's default 5s timeout (the control-plane seam-1
+    // suite boots Postgres containers at the same time). The behavior under
+    // test — the timer resets on output — is unaffected by a wider window.
+    { timeout: 20_000 },
+    async () => {
+      const started = Date.now();
+      // Six ticks at 0.5s apart run ~3s total against a 2s idle window: the
+      // 1.5s slack absorbs machine jitter under a loaded test runner, while the
+      // total still outlives the window — proving the timer resets on every
+      // line rather than measuring the whole run.
+      const result = await runShell("for i in 1 2 3 4 5 6; do echo tick-$i; sleep 0.5; done", {
+        idleTimeoutSeconds: 2,
+      });
+      const elapsed = Date.now() - started;
 
-    // If the idle timer did NOT reset on output, the run would have failed at
-    // 2s with an AgentIdleTimeoutError. It ran the full ~3s instead.
-    expect(result.stdout).toContain("tick-1");
-    expect(result.stdout).toContain("tick-6");
-    expect(elapsed).toBeGreaterThanOrEqual(2500);
-  });
+      // If the idle timer did NOT reset on output, the run would have failed at
+      // 2s with an AgentIdleTimeoutError. It ran the full ~3s instead.
+      expect(result.stdout).toContain("tick-1");
+      expect(result.stdout).toContain("tick-6");
+      expect(elapsed).toBeGreaterThanOrEqual(2500);
+    },
+  );
 });

@@ -20,6 +20,17 @@
  *
  * The token deliberately never appears in a spec (see `types.ts`): the sandbox
  * cannot pass `contents: write` if it never receives a token.
+ *
+ * Secrets (AC5) reach the agent call directly, never a file:
+ *   - host mode: injected into the spawned process's environment;
+ *   - docker mode: inlined as shell env assignments in the command
+ *     (`FOO='...' BAR='...' sh -c 'command'`), which is visible in
+ *     `docker inspect`/`ps` — a deliberately unprotected surface (see
+ *     `docs/SECURITY.md`).
+ *
+ * AC7 (`exec:host`): the agent runs as `deps.hostAgentUser`, a separate OS
+ * user from the Runner; AC6: default-deny egress rules for that user are
+ * applied through `deps.egress` before the first spawn.
  */
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { createFactoryHostProvider } from "./host-provider.js";
@@ -33,6 +44,18 @@ export class TurnCancelledError extends Error {
     super("turn was cancelled");
     this.name = "TurnCancelledError";
   }
+}
+
+/** Single-quotes a value for `/bin/sh` assignment; the only escaping `sh` needs inside single quotes is the quote itself. */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/** `KEY='value' NEXT='other'` — the docker-mode secret transport (AC5). */
+export function shellEnvPrefix(secrets: Record<string, string>): string {
+  return Object.entries(secrets)
+    .map(([key, value]) => `${key}=${shellQuote(value)}`)
+    .join(" ");
 }
 
 export function createTurnRuntime(deps: TurnRuntimeDeps) {
@@ -53,6 +76,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps) {
           });
         }
 
+        // The command that actually runs: in docker mode the secrets ride as
+        // inline shell env assignments (no file is ever written); in host mode
+        // they ride the spawned process's environment instead.
+        const secretsPrefix = spec.runsOn === "docker" ? shellEnvPrefix(spec.secrets ?? {}) : "";
+        const effectiveCommand = secretsPrefix ? `${secretsPrefix} ${spec.command}` : spec.command;
+
         const sandboxProvider =
           spec.runsOn === "docker"
             ? // The built-in provider, as-is — we never modify it (spec: AC1).
@@ -63,6 +92,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps) {
                   activePgid = pgid;
                 },
                 shouldSkip: () => cancelled,
+                ...(spec.secrets === undefined ? {} : { env: spec.secrets }),
+                ...(deps.hostAgentUser === undefined ? {} : { runAsUser: deps.hostAgentUser }),
+                ...(deps.egress === undefined ? {} : { egress: deps.egress }),
+                ...(spec.egressAllowlist === undefined ? {} : { egressAllowlist: spec.egressAllowlist }),
               });
 
         const sandbox = await deps.createSandbox({
@@ -73,7 +106,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps) {
         });
 
         try {
-          const execResult = await sandbox.exec(spec.command, spec.onLine ? { onLine: spec.onLine } : undefined);
+          const execResult = await sandbox.exec(
+            effectiveCommand,
+            spec.onLine ? { onLine: spec.onLine } : undefined,
+          );
           if (cancelled) {
             throw new TurnCancelledError();
           }

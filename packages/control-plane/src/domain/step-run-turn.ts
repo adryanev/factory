@@ -22,6 +22,7 @@ import {
   normalizeArtifactKey,
   type ArtifactKind,
   type Id,
+  type UsageReport,
 } from "@factory/shared";
 import { compileStepOutputContract, validatePipelineDefinition } from "@factory/shared";
 import { artifacts, logChunks, questions, runs, stepRuns, stepRunUploadGrants } from "../db/schema.js";
@@ -30,6 +31,7 @@ import type { AppDeps } from "../deps.js";
 import { DomainValidationError, LeaseConflictError } from "./errors.js";
 import type { RunnerIdentity } from "./runners.js";
 import { advanceGraph, finalizeRunIfDone, parsePipelineSnapshot, type RunRow } from "./graph-advance.js";
+import { recordStepRunCost } from "./costs.js";
 
 type StepRunRow = typeof stepRuns.$inferSelect;
 
@@ -382,13 +384,17 @@ function toResultRecord(row: StepRunRow): ResultRecord {
  *
  * Returns `no-contract` when the Step has no output contract (`run:` Steps
  * report no `output_data` and are never gated), `invalid` when the Output
- * fails the union, and the parsed `done` arm when valid.
+ * fails the union, and the parsed `done` arm when valid — including the
+ * agent's optional token `usage` claim, which `submitResult` prices once.
  */
 function checkStepOutput(
   definition: unknown,
   stepKey: string,
   outputData: unknown,
-): { kind: "no-contract" } | { kind: "invalid" } | { kind: "done"; outputs: unknown } {
+):
+  | { kind: "no-contract" }
+  | { kind: "invalid" }
+  | { kind: "done"; outputs: unknown; usage: UsageReport | null } {
   if (typeof definition !== "string") {
     return { kind: "no-contract" }; // no snapshot to validate against — a run: Step.
   }
@@ -411,7 +417,8 @@ function checkStepOutput(
   if (!parsed.success || (parsed.data as { kind?: string }).kind !== "done") {
     return { kind: "invalid" };
   }
-  return { kind: "done", outputs: (parsed.data as { outputs: unknown }).outputs };
+  const data = parsed.data as { outputs: unknown; usage?: UsageReport };
+  return { kind: "done", outputs: data.outputs, usage: data.usage ?? null };
 }
 
 /**
@@ -576,12 +583,18 @@ export async function submitResult(
   let outcome: "succeeded" | "failed" = input.outcome;
   let reason = input.reason ?? null;
   let outputData: unknown = input.outputData;
+  let usage: UsageReport | null = null;
   if (input.outcome === "succeeded") {
     const checked = checkStepOutput(run.definition, row.stepKey, input.outputData);
     if (checked.kind === "invalid") {
       outcome = "failed";
       reason = "output-invalid";
       outputData = null;
+    } else if (checked.kind === "done") {
+      // The agent's reported token usage, priced exactly once below (issue
+      // 12): absent → the cost row is written with NULLs, shown as
+      // "tidak didukung", never estimated.
+      usage = checked.usage;
     }
   }
 
@@ -595,6 +608,10 @@ export async function submitResult(
     if (outcome === "succeeded") {
       await recordArtifacts(tx, deps.clock.now(), row, input.artifacts ?? []);
     }
+    // The attempt's cost is written once, here, inside the same transaction
+    // as the terminal commit — priced against the current price version and
+    // pinned to it (spec: "disimpan bersama price_version"; issue 12, AC3/4).
+    await recordStepRunCost(tx, row, usage);
     const [committed] = await tx
       .update(stepRuns)
       .set({

@@ -56,6 +56,10 @@ export interface RunFixtureOverrides {
   /** The inline definition snapshot (YAML text). Defaults to an empty object — run: fixtures never read it. */
   definition?: unknown;
   definitionFiles?: Record<string, string>;
+  /** Overrides `runs.triggered_by_principal_id` (defaults to the chain's principal). */
+  triggeredByPrincipalId?: Id<"user"> | Id<"serviceaccount">;
+  /** Overrides `runs.credential_principal_id` — the second attribution column (issue 12, AC9). Defaults to the chain's principal. */
+  credentialPrincipalId?: Id<"user"> | Id<"serviceaccount">;
 }
 
 export interface RunFixtureChain {
@@ -78,8 +82,8 @@ export async function seedRun(
     pipelineRepositoryId: chain.repositoryId,
     pipelinePath: ".factory/pipelines/ci.yaml",
     triggerKind: "manual",
-    triggeredByPrincipalId: chain.principalId,
-    credentialPrincipalId: chain.principalId,
+    triggeredByPrincipalId: overrides.triggeredByPrincipalId ?? chain.principalId,
+    credentialPrincipalId: overrides.credentialPrincipalId ?? chain.principalId,
     refBranch: "main",
     refSha: "a".repeat(40),
     definition: overrides.definition ?? {},

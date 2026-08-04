@@ -15,3 +15,15 @@ export type { TurnAttempt } from "./turnNotation";
 
 export { HumanAuthoredMark } from "./HumanAuthoredMark";
 export type { HumanAuthoredMarkProps } from "./HumanAuthoredMark";
+
+export { CostValue } from "./CostValue";
+export type { CostValueProps } from "./CostValue";
+
+export { StepRunCost } from "./StepRunCost";
+export type { StepRunCostProps } from "./StepRunCost";
+
+export { RunCost } from "./RunCost";
+export type { RunCostProps } from "./RunCost";
+
+export { ProjectCost } from "./ProjectCost";
+export type { ProjectCostProps } from "./ProjectCost";

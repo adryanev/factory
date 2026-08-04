@@ -1301,6 +1301,142 @@
             ]
           }
         ]
+      },
+      "StepRunCost": {
+        "type": "object",
+        "properties": {
+          "totalCostUsd": {
+            "type": "string",
+            "nullable": true
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttemptCost"
+            }
+          }
+        },
+        "required": [
+          "totalCostUsd",
+          "attempts"
+        ]
+      },
+      "AttemptCost": {
+        "type": "object",
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "minimum": 0,
+            "exclusiveMinimum": true
+          },
+          "supported": {
+            "type": "boolean"
+          },
+          "tokens": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "inputTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "outputTokens": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "inputTokens",
+              "outputTokens"
+            ]
+          },
+          "costUsd": {
+            "type": "string",
+            "nullable": true
+          },
+          "priceVersion": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "attempt",
+          "supported",
+          "tokens",
+          "costUsd",
+          "priceVersion"
+        ]
+      },
+      "RunCost": {
+        "type": "object",
+        "properties": {
+          "totalCostUsd": {
+            "type": "string",
+            "nullable": true
+          },
+          "supportedAttempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unsupportedAttempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "credentialPrincipalId": {
+            "type": "string"
+          },
+          "runEnded": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "totalCostUsd",
+          "supportedAttempts",
+          "unsupportedAttempts",
+          "credentialPrincipalId",
+          "runEnded"
+        ]
+      },
+      "ProjectCost": {
+        "type": "object",
+        "properties": {
+          "totalCostUsd": {
+            "type": "string",
+            "nullable": true
+          },
+          "lowerBound": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "byCredentialPrincipal": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectCostPrincipal"
+            }
+          }
+        },
+        "required": [
+          "totalCostUsd",
+          "lowerBound",
+          "byCredentialPrincipal"
+        ]
+      },
+      "ProjectCostPrincipal": {
+        "type": "object",
+        "properties": {
+          "credentialPrincipalId": {
+            "type": "string"
+          },
+          "costUsd": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credentialPrincipalId",
+          "costUsd"
+        ]
       }
     },
     "parameters": {}
@@ -5175,6 +5311,293 @@
           },
           "404": {
             "description": "No such artifact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/step-runs/{id}/cost": {
+      "get": {
+        "summary": "One StepRun's cost with the per-attempt breakdown (issue 12, AC6). A retried StepRun has one row per attempt; the cumulative total is a plain sum. An attempt whose agent reported no usage is `supported: false` — shown as 'tidak didukung', never estimated. Project member.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ok.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepRunCost"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a Project member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such step run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{id}/runs/{runId}/cost": {
+      "get": {
+        "summary": "One Run's cost (issue 12, AC8). While the Run is in flight (`runEnded: false`) this is the running cost — the sum of completed attempts so far — which the run-detail screen (the one with the cancel button) shows live. Project member.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ok.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCost"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a Project member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Project or Run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{id}/cost": {
+      "get": {
+        "summary": "The Project's cost across every Run (issue 12, AC2/AC9). Explicitly a *lower bound*, never a total: agents that reported no usage and Runs still in flight contribute nothing, and the price table is pinned to what was already written. Broken down by the credential principal each Run used, so shared-credential usage is visible. Project member.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ok.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectCost"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a Project member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Project.",
             "content": {
               "application/json": {
                 "schema": {

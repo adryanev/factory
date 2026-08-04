@@ -15,6 +15,7 @@ export {
   QUESTION_KINDS,
   outputDescriptorSchema,
   outputsMapSchema,
+  usageReportSchema,
 } from "./output-contract.js";
 export type {
   OutputDescriptor,
@@ -23,6 +24,7 @@ export type {
   FlatObjectDescriptor,
   Question,
   QuestionKind,
+  UsageReport,
 } from "./output-contract.js";
 
 export { KEY_PATTERN, isValidKey } from "./key.js";

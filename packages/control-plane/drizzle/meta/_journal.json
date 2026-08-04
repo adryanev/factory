@@ -50,6 +50,13 @@
       "when": 1785831826871,
       "tag": "0006_mysterious_bug",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785835403104,
+      "tag": "0007_tiresome_madame_web",
+      "breakpoints": true
     }
   ]
 }

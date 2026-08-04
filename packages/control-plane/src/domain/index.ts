@@ -32,6 +32,7 @@ import type { DesiredState, HeartbeatLease, HeartbeatReply, RunnerIdentity } fro
 import type { ClaimedStepRun, ClaimInput } from "./step-run-claim.js";
 import * as stepRunLogsDomain from "./step-run-logs.js";
 import * as stepRunArtifactsDomain from "./step-run-artifacts.js";
+import * as costsDomain from "./costs.js";
 import type {
   ArtifactMetadataInput,
   LogChunkInput,
@@ -42,6 +43,7 @@ import type {
   UploadRequest,
 } from "./step-run-turn.js";
 import type { ArtifactMeta, ArtifactRead } from "./step-run-artifacts.js";
+import type { AttemptCost, ProjectCost, ProjectCostPrincipal, RunCost, StepRunCost } from "./costs.js";
 import type { ServiceAccountInfo, StoredSecret, PutSecretInput } from "./secrets.js";
 
 export type { Principal } from "./principal.js";
@@ -70,6 +72,7 @@ export type {
   UploadRequest,
 } from "./step-run-turn.js";
 export type { ArtifactMeta, ArtifactRead } from "./step-run-artifacts.js";
+export type { AttemptCost, ProjectCost, ProjectCostPrincipal, RunCost, StepRunCost } from "./costs.js";
 export type { ServiceAccountInfo, StoredSecret, PutSecretInput } from "./secrets.js";
 
 export interface Domain {
@@ -198,6 +201,14 @@ export interface Domain {
   egress: {
     setAllowlist: (principal: Principal, projectId: Id<"project">, allowlist: string[]) => Promise<string[]>;
   };
+  costs: {
+    /** Web surface, Project `member`: one StepRun's cost with the per-attempt breakdown (issue 12, AC6). */
+    stepRun: (principal: Principal, stepRunId: Id<"steprun">) => Promise<StepRunCost>;
+    /** Web surface, Project `member`: one Run's cost — while in flight this is the running cost (AC8). */
+    run: (principal: Principal, projectId: Id<"project">, runId: Id<"run">) => Promise<RunCost>;
+    /** Web surface, Project `member`: the Project's cost, explicitly a lower bound, by credential principal (AC2/AC9). */
+    project: (principal: Principal, projectId: Id<"project">) => Promise<ProjectCost>;
+  };
 }
 
 export function createDomain(deps: AppDeps): Domain {
@@ -279,6 +290,11 @@ export function createDomain(deps: AppDeps): Domain {
     egress: {
       setAllowlist: (principal, projectId, allowlist) =>
         egressDomain.setProjectEgressAllowlist(deps, principal, projectId as never, allowlist),
+    },
+    costs: {
+      stepRun: (principal, stepRunId) => costsDomain.getStepRunCost(deps, principal, stepRunId),
+      run: (principal, projectId, runId) => costsDomain.getRunCost(deps, principal, projectId, runId),
+      project: (principal, projectId) => costsDomain.getProjectCost(deps, principal, projectId),
     },
   };
 }

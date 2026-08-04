@@ -6,6 +6,7 @@ import {
   generateFormatInstructions,
   outputsMapSchema,
   renderFinalPrompt,
+  usageReportSchema,
   type OutputsMap,
 } from "../output-contract.js";
 
@@ -77,6 +78,42 @@ describe("compileStepOutputContract", () => {
   });
 });
 
+describe("compileStepOutputContract — optional usage (issue 12)", () => {
+  it("accepts a done arm without usage (the agent reported nothing — the cost UI shows 'tidak didukung')", () => {
+    const schema = compileStepOutputContract({ outputs: variantsOutputs });
+    expect(schema.safeParse({ kind: "done", outputs: { variants: [{ key: "a", brief: "b" }] } }).success).toBe(true);
+  });
+
+  it("accepts a done arm with a well-formed usage report", () => {
+    const schema = compileStepOutputContract({ outputs: variantsOutputs });
+    const parsed = schema.safeParse({
+      kind: "done",
+      outputs: { variants: [{ key: "a", brief: "b" }] },
+      usage: { input_tokens: 1200, output_tokens: 300 },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect((parsed.data as { usage?: unknown }).usage).toEqual({ input_tokens: 1200, output_tokens: 300 });
+    }
+  });
+
+  it("rejects a malformed usage report — token counts must be nonnegative integers", () => {
+    const schema = compileStepOutputContract({ outputs: variantsOutputs });
+    expect(
+      schema.safeParse({ kind: "done", outputs: {}, usage: { input_tokens: -1, output_tokens: 10 } }).success
+    ).toBe(false);
+    expect(
+      schema.safeParse({ kind: "done", outputs: {}, usage: { input_tokens: 1.5, output_tokens: 10 } }).success
+    ).toBe(false);
+    expect(schema.safeParse({ kind: "done", outputs: {}, usage: { input_tokens: 1 } }).success).toBe(false);
+  });
+
+  it("usageReportSchema is the closed shape the control plane prices", () => {
+    expect(usageReportSchema.safeParse({ input_tokens: 10, output_tokens: 20 }).success).toBe(true);
+    expect(usageReportSchema.safeParse({ input_tokens: 10, output_tokens: 20, extra: 1 }).success).toBe(false);
+  });
+});
+
 describe("generateFormatInstructions", () => {
   it("names the system tag and every output field", () => {
     const text = generateFormatInstructions({ outputs: variantsOutputs });
@@ -91,6 +128,13 @@ describe("generateFormatInstructions", () => {
     expect(withoutAsk).not.toContain('"kind":"question"');
     expect(withAsk).toContain('"kind":"question"');
     expect(withAsk).toContain('"kind":"approval"');
+  });
+
+  it("tells the agent the usage field is optional (issue 12) — so the agent can report it but never must", () => {
+    const text = generateFormatInstructions({ outputs: {} });
+    expect(text).toContain('"usage"');
+    expect(text).toContain("input_tokens");
+    expect(text).toContain("output_tokens");
   });
 });
 

@@ -1,0 +1,60 @@
+.project-cost {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.75rem;
+  background: var(--panel);
+  box-shadow: var(--shadow-xs);
+}
+
+.project-cost__head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.project-cost__total {
+  font-family: var(--mono);
+  font-size: var(--fs-xl);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+/* The lower-bound note is the point of this component — stated in words,
+   never as a small footnote mark (spec: "dengan kata-kata, bukan lewat
+   tanda kecil"). */
+.project-cost__note {
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
+}
+
+.project-cost__principals {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.project-cost__principal {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.project-cost__principal-id {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+}
+
+.project-cost__principal-cost {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}

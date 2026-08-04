@@ -639,6 +639,27 @@ describe("agent Steps: the executor flow", () => {
     ]);
   });
 
+  it("an agent-reported usage rides the done Output to /result, so the control plane can price it once (issue 12)", async () => {
+    const protocol = fakeProtocol();
+    const git = fakeGit();
+    const deps = makeDeps({
+      protocol,
+      git,
+      turn: tagResult(
+        '{"kind":"done","outputs":{"variants":[{"key":"agent-a","brief":"b"}]},"usage":{"input_tokens":1200,"output_tokens":300}}',
+      ),
+    });
+
+    await executeClaimedTurn(deps.deps, agentClaim());
+
+    expect(protocol.results[0]!.outputData).toEqual({
+      kind: "done",
+      outputs: { variants: [{ key: "agent-a", brief: "b" }] },
+      usage: { input_tokens: 1200, output_tokens: 300 },
+    });
+    expect(protocol.results[0]!.outcome).toBe("succeeded");
+  });
+
   it("an invalid Output reports failed with reason output-invalid, and the branch push still happens before the report (AC7)", async () => {
     const protocol = fakeProtocol();
     const git = fakeGit();

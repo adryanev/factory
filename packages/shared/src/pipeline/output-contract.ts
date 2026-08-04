@@ -152,6 +152,24 @@ const questionSchemaByKind: Record<QuestionKind, z.ZodTypeAny> = {
   "edit-artifact": questionEditArtifactSchema,
 };
 
+/**
+ * The token usage an agent may report inside the `done` arm of its Output
+ * (issue 12): `input_tokens` / `output_tokens` as reported by the agent call.
+ * Optional by construction — an agent that does not report usage is
+ * displayed as "tidak didukung", never estimated (spec: "Cost": "Estimasi
+ * dilarang"). This is the *claim* the control plane prices once at StepRun
+ * end; it is not itself the cost.
+ */
+export const usageReportSchema = z
+  .object({
+    input_tokens: z.number().int().nonnegative(),
+    output_tokens: z.number().int().nonnegative(),
+  })
+  // .strict(): a usage report carrying a field the control plane does not
+  // price is a bug, not data to silently drop (same rule as compileOutputsSchema).
+  .strict();
+export type UsageReport = z.infer<typeof usageReportSchema>;
+
 /** The tag name is a system constant. Nobody ever types it. */
 export const FACTORY_OUTPUT_TAG = "factory-output";
 
@@ -173,6 +191,10 @@ export function compileStepOutputContract(step: StepOutputContractSource): z.Zod
   const doneArm = z.object({
     kind: z.literal("done"),
     outputs: compileOutputsSchema(step.outputs),
+    // Optional token usage, reported by the agent (issue 12). Absent →
+    // "tidak didukung" in the cost UI; present → the control plane prices it
+    // once at StepRun end against the current price version.
+    usage: usageReportSchema.optional(),
   });
 
   if (!step.ask) {
@@ -232,6 +254,12 @@ export function generateFormatInstructions(step: StepOutputContractSource): stri
   } else {
     lines.push('"outputs" must be an empty object: {}');
   }
+  // Issue 12: the agent may report its token usage so the control plane can
+  // price it exactly once at StepRun end. Optional — omitting it shows
+  // "tidak didukung" in the cost UI, never an estimate.
+  lines.push(
+    '"usage" (optional): report the token counts the agent call returned, as {"usage":{"input_tokens":<number>,"output_tokens":<number>}}',
+  );
 
   if (step.ask) {
     lines.push("");

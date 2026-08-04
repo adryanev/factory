@@ -1,0 +1,26 @@
+.cost-value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+
+.cost-value__usd {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+.cost-value__tokens {
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+}
+
+/* "tidak didukung" is a state, not a number — rendered muted, never with a
+   currency glyph that could read as a real figure. */
+.cost-value[data-supported="false"] {
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  font-style: italic;
+}

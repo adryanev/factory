@@ -14,6 +14,7 @@ import {
 import type { Id } from "@factory/shared";
 import { repositories } from "./repositories.js";
 import { runs } from "./runs.js";
+import { priceVersions } from "./price_versions.js";
 
 /**
  * Satu eksekusi sebuah Step di dalam sebuah Run (CONTEXT.md). Kunci natural
@@ -154,6 +155,12 @@ export const stepRuns = pgTable(
  * melaporkan pemakaian tetap dapat baris (untuk kelengkapan pencatatan per
  * attempt), ditampilkan sebagai "tidak didukung", bukan sebagai angka
  * perkiraan (spec: "Cost").
+ *
+ * `priceVersion` menunjuk ke baris `price_versions` yang dipakai saat biaya
+ * ditulis (spec: "disimpan bersama price_version") — mengubah tabel harga
+ * setelahnya tidak menulis ulang baris ini. Baris bertahan selama baris Run
+ * induknya; tidak ada sweep retensi yang menyentuh tabel ini (spec:
+ * "Retensi: tidak pernah kedaluwarsa, seumur baris Run").
  */
 export const stepRunCosts = pgTable(
   "step_run_costs",
@@ -165,7 +172,7 @@ export const stepRunCosts = pgTable(
     attempt: integer("attempt").notNull(),
     tokens: jsonb("tokens"),
     costUsd: numeric("cost_usd", { precision: 12, scale: 6 }),
-    priceVersion: text("price_version"),
+    priceVersion: text("price_version").references(() => priceVersions.version),
   },
   (table) => [primaryKey({ columns: [table.stepRunId, table.attempt] })],
 );

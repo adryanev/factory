@@ -41,6 +41,7 @@ export {
   QUESTION_KINDS,
   outputDescriptorSchema,
   outputsMapSchema,
+  usageReportSchema,
   KEY_PATTERN,
   isValidKey,
   DURATION_PATTERN,
@@ -65,4 +66,5 @@ export {
   type FlatObjectDescriptor,
   type Question,
   type QuestionKind,
+  type UsageReport,
 } from "./pipeline/index.js";

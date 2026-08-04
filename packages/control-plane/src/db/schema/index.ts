@@ -7,6 +7,7 @@ export * from "./secrets.js";
 export * from "./audit_log.js";
 export * from "./runs.js";
 export * from "./step_runs.js";
+export * from "./price_versions.js";
 export * from "./questions.js";
 export * from "./artifacts.js";
 export * from "./runners.js";

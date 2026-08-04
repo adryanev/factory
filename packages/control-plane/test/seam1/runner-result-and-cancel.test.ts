@@ -124,7 +124,11 @@ describe("Runner protocol: /result idempotency and cancel authority", () => {
     const stepRun = (claimed.body as { step_run: { id: string; lease_token: string } | null }).step_run;
     expect(stepRun?.id).toBe(stepRunId);
 
-    await client.result(secret, stepRunId, { lease_token: stepRun!.lease_token, outcome: "succeeded" });
+    await client.result(secret, stepRunId, {
+      lease_token: stepRun!.lease_token,
+      outcome: "succeeded",
+      ref: { branch: "run/x/step/t1-a1", sha: "cafebabe" },
+    });
 
     const cancelSucceeded = await fetch(`${rig.baseUrl}/step-runs/${stepRunId}/cancel`, {
       method: "POST",

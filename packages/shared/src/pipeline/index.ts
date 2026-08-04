@@ -26,3 +26,5 @@ export type {
 
 export { KEY_PATTERN, isValidKey } from "./key.js";
 export { DURATION_PATTERN, durationSchema, humanTimeoutSchema } from "./duration.js";
+
+export { stepRunBranchName, type StepRunBranchInput } from "./step-run-branch.js";

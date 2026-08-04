@@ -36,10 +36,17 @@ async function main(): Promise<void> {
     throw error;
   }
 
-  const deps = createDeps(pool, {
-    clientId: requiredEnv("GITHUB_OAUTH_CLIENT_ID"),
-    clientSecret: requiredEnv("GITHUB_OAUTH_CLIENT_SECRET"),
-  });
+  const deps = createDeps(
+    pool,
+    {
+      clientId: requiredEnv("GITHUB_OAUTH_CLIENT_ID"),
+      clientSecret: requiredEnv("GITHUB_OAUTH_CLIENT_SECRET"),
+    },
+    {
+      appId: Number(requiredEnv("GITHUB_APP_ID")),
+      privateKey: requiredEnv("GITHUB_APP_PRIVATE_KEY"),
+    },
+  );
 
   // Idempotent — safe to run on every boot, including a config'd password
   // rotation (see `domain/auth.ts`).

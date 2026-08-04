@@ -37,6 +37,8 @@ export {
   DURATION_PATTERN,
   durationSchema,
   humanTimeoutSchema,
+  stepRunBranchName,
+  type StepRunBranchInput,
   type ValidationResult,
   type ValidationIssue,
   type Pipeline,

@@ -124,6 +124,9 @@ describe("Pipeline trigger and Graph materialization", () => {
 
   it("materializes only the pre-fan-out root of a fan-out prototype fixture (d-verdict-01)", async () => {
     const project = await createProject(rig, ownerCookie, "fanout-project");
+    // The fixture's `test` Step declares `runsOn: [exec:host, macos]` — that
+    // is the AC8 (issue #6) Project opt-in, so grant it for this Project.
+    await rig.pool.query("update projects set host_exec_allowed = true where id = $1", [project.id]);
     const repo = await createRepository(rig, project.id, "backend");
     const yaml = readSharedFixture("d-verdict-01-fanout-review.yaml");
     rig.gitHost.registerRef(repo, "main", "sha-fanout-1");

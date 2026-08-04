@@ -40,7 +40,7 @@ import {
   type Pipeline,
   type ValidationIssue,
 } from "@factory/shared";
-import { repositories, runs, stepRuns } from "../db/schema.js";
+import { projects, repositories, runs, stepRuns } from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
 import type { Principal } from "./principal.js";
 import { requireProjectMembership } from "./projects.js";
@@ -121,6 +121,30 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
+/**
+ * Every Step (and each Branch's *effective* `runsOn`, which falls back to the
+ * parent Step's) that asks for `exec:host`. `exec:docker` is the default and
+ * needs no Project permission; host execution is a conscious, Project-scoped
+ * opt-in (spec: "runsOn: [exec:host] hanya jalan bila Project punya
+ * izinnya"; `projects.host_exec_allowed`).
+ */
+function hostExecSteps(pipeline: Pipeline): string[] {
+  const asksHost = (runsOn: string[] | undefined): boolean => runsOn?.includes("exec:host") ?? false;
+  const out: string[] = [];
+  for (const [stepId, step] of Object.entries(pipeline.steps)) {
+    if (asksHost(step.runsOn)) {
+      out.push(stepId);
+      continue;
+    }
+    for (const branch of step.branches ?? []) {
+      if (asksHost(branch.runsOn ?? step.runsOn)) {
+        out.push(`${stepId}.${branch.key}`);
+      }
+    }
+  }
+  return out;
+}
+
 async function findRepositoryByName(
   deps: Pick<AppDeps, "db">,
   projectId: Id<"project">,
@@ -183,6 +207,20 @@ export async function triggerRun(
     throw new DomainValidationError("pipeline_definition_invalid", formatValidationIssues(validation.issues));
   }
   const { pipeline } = validation;
+
+  // AC8: `runsOn: [exec:host]` is a per-Project opt-in (`hostExecAllowed`,
+  // default off). Rejected here, at the door, so a Project that never granted
+  // host execution cannot have host-mode Steps scheduled onto its Runners —
+  // the Runner never even sees the claim. `exec:docker` (the default, or
+  // written explicitly) is never gated.
+  const [project] = await deps.db.select().from(projects).where(eq(projects.id, projectId));
+  const hostSteps = hostExecSteps(pipeline);
+  if (hostSteps.length > 0 && !project?.hostExecAllowed) {
+    throw new DomainValidationError(
+      "host_exec_not_allowed",
+      `this Project has not enabled host execution, but the Pipeline runs ${hostSteps.join(", ")} on [exec:host]`,
+    );
+  }
 
   const promptFilePaths = collectPromptFilePaths(pipeline);
   const definitionFiles: Record<string, string> = {};

@@ -142,6 +142,7 @@ describe("Graph advance: /result schedules dependents whose after: is now satisf
     await runner.client.result(runner.secret, stepRunX.id, {
       lease_token: stepRunX.lease_token,
       outcome: "succeeded",
+      ref: { branch: `run/${runId}/x/t1-a1`, sha: "deadbeef" },
     });
 
     // `z` needs both `x` and `y` — only `x` is done, so `z` must not exist yet.
@@ -154,6 +155,7 @@ describe("Graph advance: /result schedules dependents whose after: is now satisf
     await runner.client.result(runner.secret, stepRunY.id, {
       lease_token: stepRunY.lease_token,
       outcome: "succeeded",
+      ref: { branch: `run/${runId}/y/t1-a1`, sha: "deadbeef" },
     });
 
     const rowsAfterY = await rig.pool.query<{ step_key: string; outcome: string }>(

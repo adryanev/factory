@@ -15,7 +15,7 @@
 import type { Pool } from "pg";
 import { createDatabase, type Database } from "./db/client.js";
 import { createGithubOAuthClient, type GithubOAuthClient } from "./domain/github-identity.js";
-import { createGithubHost, type GitHost } from "./domain/git-host.js";
+import { createGithubHost, type GithubAppConfig, type GitHost } from "./domain/git-host.js";
 
 export interface Clock {
   now(): Date;
@@ -97,15 +97,27 @@ export interface GithubOAuthConfig {
 const PRODUCTION_CLAIM_HOLD_RANGE_MS = { min: 20_000, max: 30_000 };
 const MAX_HANGING_CLAIM_CONNECTIONS = 2000;
 
-/** Builds real (non-test) deps around an already-connected pool. `githubConfig` comes from the environment in `main.ts` — infra config, not the clock/random/network seams this file otherwise documents as injected. */
-export function createDeps(pool: Pool, githubConfig: GithubOAuthConfig): AppDeps {
+/**
+ * Builds real (non-test) deps around an already-connected pool. `githubConfig`
+ * and `gitHostConfig` come from the environment in `main.ts` — infra config,
+ * not the clock/random/network seams this file otherwise documents as injected.
+ * `gitHostConfig` carries the GitHub App credentials (`GITHUB_APP_ID` +
+ * `GITHUB_APP_PRIVATE_KEY`) that let the control plane mint installation
+ * tokens at `/claim` (see `domain/git-host.ts`); without them the host is
+ * read-only for public repos and minting throws a clear "not configured".
+ */
+export function createDeps(
+  pool: Pool,
+  githubConfig: GithubOAuthConfig,
+  gitHostConfig?: GithubAppConfig,
+): AppDeps {
   return {
     db: createDatabase(pool),
     pool,
     clock: createSystemClock(),
     random: createSystemRandom(),
     githubOAuth: createGithubOAuthClient(githubConfig),
-    gitHost: createGithubHost(),
+    gitHost: createGithubHost(gitHostConfig),
     claimHoldRangeMs: PRODUCTION_CLAIM_HOLD_RANGE_MS,
     claimLimiter: createClaimConnectionLimiter(MAX_HANGING_CLAIM_CONNECTIONS),
   };

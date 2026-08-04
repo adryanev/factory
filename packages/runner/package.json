@@ -13,6 +13,7 @@
     "dev": "tsx src/main.ts"
   },
   "dependencies": {
+    "@ai-hero/sandcastle": "0.12.0",
     "@factory/shared": "workspace:*"
   },
   "devDependencies": {

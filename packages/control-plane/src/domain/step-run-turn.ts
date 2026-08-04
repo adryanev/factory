@@ -19,7 +19,7 @@ import { and, eq } from "drizzle-orm";
 import type { Id } from "@factory/shared";
 import { logChunks, questions, stepRuns } from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
-import { LeaseConflictError } from "./errors.js";
+import { DomainValidationError, LeaseConflictError } from "./errors.js";
 import type { RunnerIdentity } from "./runners.js";
 import { scheduleDependentsOf } from "./graph-advance.js";
 
@@ -240,6 +240,13 @@ function toResultRecord(row: StepRunRow): ResultRecord {
  * the full reasoning and the shape chosen). Never re-runs on an idempotent
  * replay — only the branch that actually just flipped the row to
  * `succeeded` calls it.
+ *
+ * The invariant of the turn's commit point (spec: "push branch → unggah blob
+ * → POST result ... StepRun `succeeded` ada ⇒ ref ada") is enforced here,
+ * authoritatively: a `succeeded` result without a `ref` is a
+ * `DomainValidationError` (400), not a stored row. A `failed` result may
+ * carry an optional `ref` — the branch may have been pushed before the turn
+ * went sideways (spec: "ref opsional bila branch sempat terdorong").
  */
 export async function submitResult(
   deps: Pick<AppDeps, "db" | "clock">,
@@ -256,6 +263,13 @@ export async function submitResult(
 
   if (row.outcome !== "running" || row.leasedBy !== runner.id) {
     throw new LeaseConflictError("step run is not currently leased to this runner");
+  }
+
+  if (input.outcome === "succeeded" && !input.ref) {
+    throw new DomainValidationError(
+      "result_ref_required",
+      "a succeeded step run must report the ref it pushed (push branch → upload blob → POST /result)",
+    );
   }
 
   const [updated] = await deps.db

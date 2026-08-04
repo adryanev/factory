@@ -43,6 +43,15 @@ const claimRequestSchema = z
   })
   .openapi("ClaimRequest");
 
+const gitTokenSchema = z
+  .object({
+    token: z.string(),
+    expires_at: z.string(),
+    repository_ids: z.array(z.number().int()),
+    permissions: z.record(z.string(), z.string()),
+  })
+  .openapi("GitToken");
+
 const claimedStepRunSchema = z.object({
   id: z.string(),
   run_id: z.string(),
@@ -56,6 +65,7 @@ const claimedStepRunSchema = z.object({
   definition_files: z.unknown(),
   lease_token: z.string(),
   lease_expires_at: z.string(),
+  git_tokens: z.object({ fetch: gitTokenSchema, push: gitTokenSchema }),
 });
 const claimResponseSchema = z.object({ step_run: claimedStepRunSchema.nullable() }).openapi("ClaimResponse");
 
@@ -275,6 +285,12 @@ export function registerRunnerProtocolRoutes(app: OpenAPIHono<AppEnv>, deps: Rou
     if (!claimed) {
       return c.json({ step_run: null }, 200);
     }
+    const toTokenWire = (token: { token: string; expiresAt: Date; repositoryIds: number[]; permissions: Record<string, string> }) => ({
+      token: token.token,
+      expires_at: token.expiresAt.toISOString(),
+      repository_ids: token.repositoryIds,
+      permissions: token.permissions,
+    });
     return c.json(
       {
         step_run: {
@@ -295,6 +311,7 @@ export function registerRunnerProtocolRoutes(app: OpenAPIHono<AppEnv>, deps: Rou
           definition_files: claimed.definitionFiles,
           lease_token: claimed.leaseToken,
           lease_expires_at: claimed.leaseExpiresAt.toISOString(),
+          git_tokens: { fetch: toTokenWire(claimed.gitTokens.fetch), push: toTokenWire(claimed.gitTokens.push) },
         },
       },
       200,

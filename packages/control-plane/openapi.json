@@ -442,6 +442,21 @@
               },
               "lease_expires_at": {
                 "type": "string"
+              },
+              "git_tokens": {
+                "type": "object",
+                "properties": {
+                  "fetch": {
+                    "$ref": "#/components/schemas/GitToken"
+                  },
+                  "push": {
+                    "$ref": "#/components/schemas/GitToken"
+                  }
+                },
+                "required": [
+                  "fetch",
+                  "push"
+                ]
               }
             },
             "required": [
@@ -454,12 +469,42 @@
               "repository",
               "ref",
               "lease_token",
-              "lease_expires_at"
+              "lease_expires_at",
+              "git_tokens"
             ]
           }
         },
         "required": [
           "step_run"
+        ]
+      },
+      "GitToken": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "repository_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "permissions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "token",
+          "expires_at",
+          "repository_ids",
+          "permissions"
         ]
       },
       "ClaimRequest": {

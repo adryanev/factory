@@ -2,7 +2,14 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import { getCookie } from "hono/cookie";
 import type { AppDeps } from "./deps.js";
 import { createDomain } from "./domain/index.js";
-import { DomainValidationError, ForbiddenError, NotFoundError, UnauthorizedError } from "./domain/errors.js";
+import {
+  DomainValidationError,
+  ForbiddenError,
+  LeaseConflictError,
+  NotFoundError,
+  ProtocolVersionError,
+  UnauthorizedError,
+} from "./domain/errors.js";
 import type { AppEnv } from "./http-env.js";
 import { CSRF_HEADER_NAME } from "./csrf.js";
 import { registerHealthRoutes } from "./routes/health.js";
@@ -11,6 +18,11 @@ import { registerAuthRoutes, SESSION_COOKIE_NAME } from "./routes/auth.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerGroupRoutes } from "./routes/groups.js";
 import { registerRunRoutes } from "./routes/runs.js";
+import { registerRunnerProtocolRoutes } from "./routes/runner-protocol.js";
+import { registerRunnerAdminRoutes } from "./routes/runner-admin.js";
+import { isRunnerProtocolPath } from "./routes/runner-protocol-paths.js";
+
+const MAX_JSON_BODY_BYTES = 1024 * 1024; // spec: "Batas ukuran: badan JSON 1 MiB semua endpoint" (Runner surface).
 
 /**
  * Composition root for the HTTP surface. Takes the dependency object built
@@ -51,13 +63,34 @@ export function createApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   // defense — a non-"simple" header that forces the browser into a CORS
   // preflight, which a foreign origin cannot pass because this server sets
   // no permissive Access-Control-Allow-Origin. Zero tokens, zero tables.
+  // Exempt: the Runner protocol surface (`routes/runner-protocol-paths.ts`)
+  // — a Runner is a bearer-authenticated non-browser client with no ambient
+  // cookie a foreign origin could ever ride, so this defense has nothing to
+  // defend for those paths, and requiring the header there would just be
+  // friction with no security value.
   app.use("*", async (c, next) => {
     const isMutating = !["GET", "HEAD", "OPTIONS"].includes(c.req.method);
-    if (isMutating && c.req.header(CSRF_HEADER_NAME) === undefined) {
+    if (isMutating && !isRunnerProtocolPath(c.req.path) && c.req.header(CSRF_HEADER_NAME) === undefined) {
       return c.json(
         { code: "csrf_header_required", message: `mutating requests must send the ${CSRF_HEADER_NAME} header` },
         403,
       );
+    }
+    await next();
+  });
+
+  // Body-size cap for the Runner protocol surface (spec: "badan JSON 1 MiB
+  // semua endpoint"). Best-effort on `Content-Length` — a Runner is inside
+  // this system's trust boundary already (spec: "Runner sudah ada di dalam
+  // batas kepercayaan"), so this is a defensive ceiling, not an adversarial
+  // one, and a client omitting the header (chunked transfer) simply isn't
+  // capped here.
+  app.use("*", async (c, next) => {
+    if (isRunnerProtocolPath(c.req.path)) {
+      const contentLength = c.req.header("content-length");
+      if (contentLength && Number(contentLength) > MAX_JSON_BODY_BYTES) {
+        return c.json({ code: "payload_too_large", message: `body exceeds ${MAX_JSON_BODY_BYTES} bytes` }, 413);
+      }
     }
     await next();
   });
@@ -75,6 +108,12 @@ export function createApp(deps: AppDeps): OpenAPIHono<AppEnv> {
     if (error instanceof DomainValidationError) {
       return c.json({ code: error.code, message: error.message }, 400);
     }
+    if (error instanceof ProtocolVersionError) {
+      return c.json({ code: "protocol_version_unsupported", message: error.message }, 426);
+    }
+    if (error instanceof LeaseConflictError) {
+      return c.json({ code: "lease_conflict", message: error.message }, 409);
+    }
     console.error("unhandled error", error);
     return c.json({ code: "internal_error", message: "unexpected error" }, 500);
   });
@@ -87,6 +126,8 @@ export function createApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerProjectRoutes(app, { domain, clock: deps.clock });
   registerGroupRoutes(app, { domain, clock: deps.clock });
   registerRunRoutes(app, { domain, clock: deps.clock });
+  registerRunnerProtocolRoutes(app, { domain, clock: deps.clock });
+  registerRunnerAdminRoutes(app, { domain, clock: deps.clock });
 
   return app;
 }

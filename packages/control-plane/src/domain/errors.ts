@@ -54,3 +54,35 @@ export class DomainValidationError extends Error {
     this.code = code;
   }
 }
+
+/**
+ * `/claim` only (spec: "Kontrak API control-plane <-> Runner" — the error
+ * table). `/heartbeat` never throws this: it always accepts an out-of-range
+ * protocol version and reports the supported range in its 200 body instead,
+ * so a healthy-but-permanently-idle Runner still has somewhere to be seen by
+ * an operator. Not one of the four errors `require-principal.ts` guards
+ * against — this belongs to the Runner surface, not the web one.
+ */
+export class ProtocolVersionError extends Error {
+  constructor(message = "protocol version out of the supported range") {
+    super(message);
+    this.name = "ProtocolVersionError";
+  }
+}
+
+/**
+ * The Runner-surface equivalent of "this write no longer applies": a
+ * `lease_token` that doesn't match the row's current one (superseded by a
+ * later claim after a lease sweep, or the row moved on without this Runner —
+ * e.g. `cancelled`). Deliberately never `NotFoundError` for a StepRun id the
+ * Runner references — the Runner protocol's closed error set has no 404
+ * (spec: "Runner tidak pernah menanyakan apa pun tentang dunia"), so an
+ * unrecognized id is indistinguishable from a fenced-out lease and gets the
+ * same 409.
+ */
+export class LeaseConflictError extends Error {
+  constructor(message = "lease is no longer valid") {
+    super(message);
+    this.name = "LeaseConflictError";
+  }
+}

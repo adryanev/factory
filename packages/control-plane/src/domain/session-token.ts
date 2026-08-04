@@ -8,8 +8,8 @@
  * `RandomSource` (see `deps.ts`) — callers pass bytes in, this module never
  * reads `crypto.getRandomValues` itself.
  */
-import { createHash } from "node:crypto";
 import { encodeBase32 } from "@factory/shared";
+import { hashToken } from "./token-hash.js";
 
 const TOKEN_BYTE_LENGTH = 20; // 160 bits — same order of magnitude as a UUIDv4's random bits
 
@@ -18,5 +18,5 @@ export function generateSessionToken(randomBytes: (length: number) => Uint8Array
 }
 
 export function hashSessionToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
+  return hashToken(token);
 }

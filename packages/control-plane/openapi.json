@@ -339,6 +339,542 @@
             ]
           }
         ]
+      },
+      "RunnerJoinResponse": {
+        "type": "object",
+        "properties": {
+          "runner_id": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runner_id",
+          "secret"
+        ]
+      },
+      "RunnerJoinRequest": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "ClaimResponse": {
+        "type": "object",
+        "properties": {
+          "step_run": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "step_key": {
+                "type": "string"
+              },
+              "branch_key": {
+                "type": "string",
+                "nullable": true
+              },
+              "turn": {
+                "type": "number"
+              },
+              "attempt": {
+                "type": "number"
+              },
+              "repository": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "owner": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "default_branch": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "owner",
+                  "name",
+                  "default_branch"
+                ]
+              },
+              "ref": {
+                "type": "object",
+                "properties": {
+                  "branch": {
+                    "type": "string"
+                  },
+                  "sha": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "branch",
+                  "sha"
+                ]
+              },
+              "definition": {
+                "nullable": true
+              },
+              "definition_files": {
+                "nullable": true
+              },
+              "lease_token": {
+                "type": "string"
+              },
+              "lease_expires_at": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "run_id",
+              "step_key",
+              "branch_key",
+              "turn",
+              "attempt",
+              "repository",
+              "ref",
+              "lease_token",
+              "lease_expires_at"
+            ]
+          }
+        },
+        "required": [
+          "step_run"
+        ]
+      },
+      "ClaimRequest": {
+        "type": "object",
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "slots": {
+            "type": "integer",
+            "minimum": 0,
+            "exclusiveMinimum": true
+          },
+          "protocol_version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tags",
+          "slots",
+          "protocol_version"
+        ]
+      },
+      "HeartbeatResponse": {
+        "type": "object",
+        "properties": {
+          "desired_state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "draining",
+              "revoked"
+            ]
+          },
+          "cancel": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "unknown_leases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "caps_stale": {
+            "type": "boolean"
+          },
+          "latest_release": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "object",
+            "properties": {
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "min",
+              "max"
+            ]
+          }
+        },
+        "required": [
+          "desired_state",
+          "cancel",
+          "unknown_leases",
+          "caps_stale",
+          "latest_release",
+          "protocol"
+        ]
+      },
+      "HeartbeatRequest": {
+        "type": "object",
+        "properties": {
+          "leases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "step_run_id": {
+                  "type": "string"
+                },
+                "lease_token": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "step_run_id",
+                "lease_token"
+              ]
+            }
+          },
+          "caps_hash": {
+            "type": "string",
+            "nullable": true
+          },
+          "free_slots": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "protocol_version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "leases"
+        ]
+      },
+      "CapabilitiesReportRequest": {
+        "type": "object",
+        "properties": {
+          "caps_hash": {
+            "type": "string",
+            "minLength": 1
+          },
+          "capabilities": {
+            "nullable": true
+          },
+          "release_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "caps_hash"
+        ]
+      },
+      "UploadGrantResponse": {
+        "type": "object",
+        "properties": {
+          "grants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "upload_url": {
+                  "type": "string"
+                },
+                "expires_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "upload_url",
+                "expires_at"
+              ]
+            }
+          }
+        },
+        "required": [
+          "grants"
+        ]
+      },
+      "UploadGrantRequest": {
+        "type": "object",
+        "properties": {
+          "lease_token": {
+            "type": "string"
+          },
+          "requests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "artifact",
+                    "session"
+                  ]
+                }
+              },
+              "required": [
+                "key",
+                "kind"
+              ]
+            },
+            "maxItems": 64
+          }
+        },
+        "required": [
+          "lease_token",
+          "requests"
+        ]
+      },
+      "LogChunksRequest": {
+        "type": "object",
+        "properties": {
+          "lease_token": {
+            "type": "string"
+          },
+          "chunks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "exclusiveMinimum": true
+                },
+                "seq": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "blob_key": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "byte_offset": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "size": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "attempt",
+                "seq",
+                "blob_key",
+                "byte_offset",
+                "size"
+              ]
+            },
+            "maxItems": 256
+          }
+        },
+        "required": [
+          "lease_token",
+          "chunks"
+        ]
+      },
+      "QuestionRequest": {
+        "type": "object",
+        "properties": {
+          "lease_token": {
+            "type": "string"
+          },
+          "question": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "group_id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "choice",
+                  "approval",
+                  "edit-artifact"
+                ]
+              },
+              "body": {
+                "type": "string",
+                "maxLength": 65536
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label"
+                  ]
+                }
+              },
+              "multi": {
+                "type": "boolean"
+              },
+              "allow_other": {
+                "type": "boolean"
+              },
+              "artifact_key": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "group_id",
+              "kind",
+              "body"
+            ]
+          },
+          "ref": {
+            "type": "object",
+            "properties": {
+              "branch": {
+                "type": "string"
+              },
+              "sha": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "branch",
+              "sha"
+            ]
+          },
+          "session_blob_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "lease_token",
+          "question",
+          "ref"
+        ]
+      },
+      "ResultResponse": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "succeeded",
+              "failed"
+            ]
+          },
+          "ref": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "branch": {
+                "type": "string"
+              },
+              "sha": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "branch",
+              "sha"
+            ]
+          },
+          "output_data": {
+            "nullable": true
+          }
+        },
+        "required": [
+          "outcome",
+          "ref"
+        ]
+      },
+      "ResultRequest": {
+        "type": "object",
+        "properties": {
+          "lease_token": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "succeeded",
+              "failed"
+            ]
+          },
+          "ref": {
+            "type": "object",
+            "properties": {
+              "branch": {
+                "type": "string"
+              },
+              "sha": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "branch",
+              "sha"
+            ]
+          },
+          "output_data": {
+            "nullable": true
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "lease_token",
+          "outcome"
+        ]
       }
     },
     "parameters": {}
@@ -1746,6 +2282,1185 @@
           },
           "404": {
             "description": "No such Project or Run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/join": {
+      "post": {
+        "summary": "Exchanges a single-use join token for a runner id + bearer secret. The Runner writes both to a file on disk — never a hostname or IP carries identity (spec).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunnerJoinRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Joined.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunnerJoinResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token invalid, unknown, or already used.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/claim": {
+      "post": {
+        "summary": "Long-polls for up to a server-randomized 20-30s (spec). 200 with `step_run: null` when the hold elapses with nothing to claim — that is not an error. 426 outside the supported protocol range; 503 + Retry-After above the hanging-connection cap.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Claimed, or nothing available.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad or revoked secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Protocol version out of range.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Too many hanging connections.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/heartbeat": {
+      "post": {
+        "summary": "The only command channel. Always 200, even outside the supported protocol range (spec) — a healthy-but-permanently-idle Runner still needs somewhere to be seen by an operator. `unknown_leases` and `cancel` are always disjoint lists with different meanings.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeartbeatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Always.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad or revoked secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runners/me/capabilities": {
+      "post": {
+        "summary": "Full capabilities report, sent when the Runner's locally-computed caps_hash no longer matches what the last heartbeat reply confirmed (`caps_stale`).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapabilitiesReportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad or revoked secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runners/me/drain": {
+      "post": {
+        "summary": "CLI-local write of desired_state='draining' — the Runner asking to stop taking new work while finishing what it holds. See /runners/{id}/drain for the operator/UI path into the same column.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Draining.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad or revoked secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/step-runs/{id}/uploads": {
+      "post": {
+        "summary": "Mints presigned PUT grants for this turn's artifacts/session — replaces the previous grant list rather than adding to it (spec).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadGrantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Grants minted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadGrantResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad or revoked secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Lease no longer valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/step-runs/{id}/log-chunks": {
+      "post": {
+        "summary": "Records log chunk metadata, batch. Dedup at the primary key (step_run_id, attempt, seq), not in application code.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogChunksRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad or revoked secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Lease no longer valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/step-runs/{id}/question": {
+      "post": {
+        "summary": "The commit point of a turn that ends by asking a human. Moves the StepRun to awaiting-human without a lease.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuestionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Published.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "question_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "question_id"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad or revoked secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Lease no longer valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/step-runs/{id}/result": {
+      "post": {
+        "summary": "The commit point of a turn that ends succeeded/failed. Idempotent on lease_token itself: the same token replays the recorded outcome at 200; a stale one (superseded by a sweep, or the row was cancelled) is 409 and the Runner is fenced.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResultRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad or revoked secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Lease no longer valid — cancelled, or superseded by another claim.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runner-joins": {
+      "post": {
+        "summary": "Mints a single-use Runner join token. Org owner only. The raw token is returned exactly once — only its hash is ever stored.",
+        "responses": {
+          "201": {
+            "description": "Minted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "token"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an org owner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runners/{id}/policy": {
+      "post": {
+        "summary": "Sets operator-written policy: slots and tags (spec: \"kebijakan ditulis operator\"). Org owner only.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slots": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "slots",
+                  "tags"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an org owner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such runner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runners/{id}/drain": {
+      "post": {
+        "summary": "Operator/UI write of desired_state='draining' — the same column the Runner's own /runners/me/drain writes (spec: \"ditulis CLI lokal maupun tombol UI\"). Org owner only.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Draining.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an org owner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such runner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runners/{id}/revoke": {
+      "post": {
+        "summary": "Instant fencing, not killing (spec, verbatim): the Runner's secret stops authenticating from this point on, regardless of whether its process is still alive. Org owner only.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an org owner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such runner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/step-runs/{id}/cancel": {
+      "post": {
+        "summary": "Authoritative cancel: the row goes `cancelled` immediately (spec: \"Cancel otoritatif di control plane\"). A /result already in flight for this StepRun is answered 409. Project member.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled (or already was).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Already ended with a different outcome.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a Project member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such step run.",
             "content": {
               "application/json": {
                 "schema": {

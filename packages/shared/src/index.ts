@@ -1,5 +1,10 @@
 export { errorResponseSchema, type ErrorResponse } from "./errors.js";
 export {
+  CURRENT_PROTOCOL_VERSION,
+  SUPPORTED_PROTOCOL_RANGE,
+  isProtocolVersionSupported,
+} from "./protocol.js";
+export {
   encodeBase32,
   decodeBase32,
   generateId,

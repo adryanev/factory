@@ -25,12 +25,54 @@ export interface RandomSource {
   bytes(length: number): Uint8Array;
 }
 
+/** One hanging `/claim` long-poll connection slot. `createApp` builds exactly one of these per process (see `app.ts`) so the 2000-connection cap (spec: "Batas 2000 koneksi menggantung per instance") is real per-instance state, not a per-request illusion. */
+export interface ClaimConnectionLimiter {
+  tryAcquire(): boolean;
+  release(): void;
+}
+
+export function createClaimConnectionLimiter(maxHangingConnections: number): ClaimConnectionLimiter {
+  let hanging = 0;
+  return {
+    tryAcquire(): boolean {
+      if (hanging >= maxHangingConnections) {
+        return false;
+      }
+      hanging += 1;
+      return true;
+    },
+    release(): void {
+      hanging -= 1;
+    },
+  };
+}
+
 export interface AppDeps {
   db: Database;
+  /**
+   * The raw `pg.Pool` `db` wraps. Exists for exactly one caller:
+   * `domain/step-run-claim.ts`'s hand-written `claim_step_run.sql`, which
+   * needs positional `$1..$5` parameter binding and `FOR UPDATE SKIP LOCKED`
+   * that Drizzle's query builder cannot express (see that file's header, and
+   * `test/sql/claim-step-run.test.ts`, which calls the same pool directly).
+   * No other domain function should reach for this — reach for `db` instead.
+   */
+  pool: Pool;
   clock: Clock;
   random: RandomSource;
   githubOAuth: GithubOAuthClient;
   gitHost: GitHost;
+  /**
+   * `/claim`'s long-poll hold duration is randomized server-side in this
+   * range so a herd of Runners arriving together (e.g. right after a
+   * control-plane restart) breaks up within one cycle instead of
+   * thundering back all at once (spec: "durasi tahan diacak server di
+   * rentang 20-30 detik"). Production always gets 20000-30000; tests inject
+   * a much smaller range so the herd-breakup behavior is provable without a
+   * 20-second test.
+   */
+  claimHoldRangeMs: { min: number; max: number };
+  claimLimiter: ClaimConnectionLimiter;
 }
 
 export function createSystemClock(): Clock {
@@ -52,13 +94,19 @@ export interface GithubOAuthConfig {
   clientSecret: string;
 }
 
+const PRODUCTION_CLAIM_HOLD_RANGE_MS = { min: 20_000, max: 30_000 };
+const MAX_HANGING_CLAIM_CONNECTIONS = 2000;
+
 /** Builds real (non-test) deps around an already-connected pool. `githubConfig` comes from the environment in `main.ts` — infra config, not the clock/random/network seams this file otherwise documents as injected. */
 export function createDeps(pool: Pool, githubConfig: GithubOAuthConfig): AppDeps {
   return {
     db: createDatabase(pool),
+    pool,
     clock: createSystemClock(),
     random: createSystemRandom(),
     githubOAuth: createGithubOAuthClient(githubConfig),
     gitHost: createGithubHost(),
+    claimHoldRangeMs: PRODUCTION_CLAIM_HOLD_RANGE_MS,
+    claimLimiter: createClaimConnectionLimiter(MAX_HANGING_CLAIM_CONNECTIONS),
   };
 }

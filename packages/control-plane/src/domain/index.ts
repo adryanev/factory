@@ -17,18 +17,43 @@ import * as authDomain from "./auth.js";
 import * as projectsDomain from "./projects.js";
 import * as groupsDomain from "./groups.js";
 import * as runsDomain from "./runs.js";
+import * as runnersDomain from "./runners.js";
+import * as claimDomain from "./step-run-claim.js";
+import * as turnDomain from "./step-run-turn.js";
+import * as stepRunOpsDomain from "./step-run-ops.js";
 import type { Principal } from "./principal.js";
 import type { LoginResult } from "./auth.js";
 import type { Project, ProjectRole } from "./projects.js";
 import type { Group } from "./groups.js";
 import type { RunListFilters, RunPage, RunWithGraph, TriggerRunInput, TriggeredRun } from "./runs.js";
+import type { DesiredState, HeartbeatLease, HeartbeatReply, RunnerIdentity } from "./runners.js";
+import type { ClaimedStepRun, ClaimInput } from "./step-run-claim.js";
+import type { LogChunkInput, QuestionInput, ResultInput, ResultRecord, UploadGrant, UploadRequest } from "./step-run-turn.js";
 
 export type { Principal } from "./principal.js";
 export type { Project, ProjectRole } from "./projects.js";
 export type { Group } from "./groups.js";
 export type { Run, StepRun, RunListFilters, RunPage, RunWithGraph, TriggerRunInput, TriggeredRun } from "./runs.js";
-export { UnauthorizedError, ForbiddenError, NotFoundError, DomainValidationError } from "./errors.js";
+export {
+  UnauthorizedError,
+  ForbiddenError,
+  NotFoundError,
+  DomainValidationError,
+  ProtocolVersionError,
+  LeaseConflictError,
+} from "./errors.js";
+export { ClaimCapacityError } from "./step-run-claim.js";
 export type { LoginResult } from "./auth.js";
+export type { DesiredState, HeartbeatLease, HeartbeatReply, RunnerIdentity } from "./runners.js";
+export type { ClaimedStepRun, ClaimInput } from "./step-run-claim.js";
+export type {
+  LogChunkInput,
+  QuestionInput,
+  ResultInput,
+  ResultRecord,
+  UploadGrant,
+  UploadRequest,
+} from "./step-run-turn.js";
 
 export interface Domain {
   auth: {
@@ -66,6 +91,56 @@ export interface Domain {
     ) => Promise<RunPage>;
     get: (principal: Principal, projectId: Id<"project">, runId: Id<"run">) => Promise<RunWithGraph>;
   };
+  runners: {
+    /** Bearer secret -> `RunnerIdentity`. Throws `UnauthorizedError` for a missing/malformed header, a wrong secret, or a revoked one — see `runners.ts`'s doc on why revoke is fencing, enforced right here. */
+    authenticate: (bearerAuthorizationHeader: string | undefined) => Promise<RunnerIdentity>;
+    join: (token: string) => Promise<{ runnerId: Id<"runner">; secret: string }>;
+    reportCapabilities: (
+      runner: RunnerIdentity,
+      capsHash: string,
+      capabilities: unknown,
+      releaseVersion: string | undefined,
+    ) => Promise<void>;
+    selfDrain: (runner: RunnerIdentity) => Promise<void>;
+    heartbeat: (
+      runner: RunnerIdentity,
+      input: { leases: HeartbeatLease[]; capsHash: string | null; protocolVersion: number | null },
+    ) => Promise<HeartbeatReply>;
+    /** Operator surface, org `owner` only. */
+    mintJoinToken: (principal: Principal) => Promise<{ token: string }>;
+    setPolicy: (principal: Principal, runnerId: Id<"runner">, policy: { slots: number; tags: string[] }) => Promise<void>;
+    drain: (principal: Principal, runnerId: Id<"runner">) => Promise<void>;
+    revoke: (principal: Principal, runnerId: Id<"runner">) => Promise<void>;
+  };
+  stepRuns: {
+    claim: (runner: RunnerIdentity, input: ClaimInput) => Promise<ClaimedStepRun | null>;
+    mintUploadGrants: (
+      runner: RunnerIdentity,
+      stepRunId: Id<"steprun">,
+      leaseToken: string,
+      requests: UploadRequest[],
+    ) => Promise<UploadGrant[]>;
+    recordLogChunks: (
+      runner: RunnerIdentity,
+      stepRunId: Id<"steprun">,
+      leaseToken: string,
+      chunks: LogChunkInput[],
+    ) => Promise<void>;
+    submitQuestion: (
+      runner: RunnerIdentity,
+      stepRunId: Id<"steprun">,
+      leaseToken: string,
+      input: QuestionInput,
+    ) => Promise<{ questionId: Id<"question"> }>;
+    submitResult: (
+      runner: RunnerIdentity,
+      stepRunId: Id<"steprun">,
+      leaseToken: string,
+      input: ResultInput,
+    ) => Promise<ResultRecord>;
+    /** Operator surface, Project `member`. */
+    cancel: (principal: Principal, stepRunId: Id<"steprun">) => Promise<void>;
+  };
 }
 
 export function createDomain(deps: AppDeps): Domain {
@@ -97,6 +172,31 @@ export function createDomain(deps: AppDeps): Domain {
       list: (principal, projectId, filters, cursor, limit) =>
         runsDomain.listRuns(deps, principal, projectId, filters, cursor, limit),
       get: (principal, projectId, runId) => runsDomain.getRun(deps, principal, projectId, runId),
+    },
+    runners: {
+      authenticate: (bearerAuthorizationHeader) =>
+        runnersDomain.authenticateRunner(deps, runnersDomain.parseBearerSecret(bearerAuthorizationHeader)),
+      join: (token) => runnersDomain.joinRunner(deps, token),
+      reportCapabilities: (runner, capsHash, capabilities, releaseVersion) =>
+        runnersDomain.reportCapabilities(deps, runner, capsHash, capabilities, releaseVersion),
+      selfDrain: (runner) => runnersDomain.selfDrain(deps, runner),
+      heartbeat: (runner, input) => runnersDomain.heartbeat(deps, runner, input),
+      mintJoinToken: (principal) => runnersDomain.mintJoinToken(deps, principal),
+      setPolicy: (principal, runnerId, policy) => runnersDomain.setRunnerPolicy(deps, principal, runnerId, policy),
+      drain: (principal, runnerId) => runnersDomain.drainRunner(deps, principal, runnerId),
+      revoke: (principal, runnerId) => runnersDomain.revokeRunner(deps, principal, runnerId),
+    },
+    stepRuns: {
+      claim: (runner, input) => claimDomain.claimStepRun(deps, runner, input),
+      mintUploadGrants: (runner, stepRunId, leaseToken, requests) =>
+        turnDomain.mintUploadGrants(deps, runner, stepRunId, leaseToken, requests),
+      recordLogChunks: (runner, stepRunId, leaseToken, chunks) =>
+        turnDomain.recordLogChunks(deps, runner, stepRunId, leaseToken, chunks),
+      submitQuestion: (runner, stepRunId, leaseToken, input) =>
+        turnDomain.submitQuestion(deps, runner, stepRunId, leaseToken, input),
+      submitResult: (runner, stepRunId, leaseToken, input) =>
+        turnDomain.submitResult(deps, runner, stepRunId, leaseToken, input),
+      cancel: (principal, stepRunId) => stepRunOpsDomain.cancelStepRun(deps, principal, stepRunId),
     },
   };
 }

@@ -15,7 +15,17 @@ import { ForbiddenError, NotFoundError } from "./errors.js";
 export type ProjectRole = "admin" | "member";
 export type Project = typeof projects.$inferSelect;
 
-async function getOrgRole(
+/**
+ * Exported for `domain/runners.ts`: the Runner pool is org-wide, not
+ * Project-scoped (see `db/schema/runners.ts` — no `project_id`), so its
+ * operator actions (mint a join token, set policy, drain, revoke) gate on
+ * org `owner`, the same role this file already resolves for Project
+ * creation. Reused rather than reimplemented — a second copy of "how do we
+ * find someone's org role" is exactly the kind of duplicate this codebase's
+ * DRY rule (third occurrence, not second) still doesn't justify skipping the
+ * export for.
+ */
+export async function getOrgRole(
   deps: Pick<AppDeps, "db">,
   principal: Principal,
 ): Promise<"owner" | "member" | null> {

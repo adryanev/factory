@@ -6,16 +6,15 @@
  * control plane itself — a Runner-shaped test only needs to be an ordinary
  * HTTP client.
  */
-import { serve, type ServerType } from "@hono/node-server";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
-import { createApp } from "../../src/app.js";
 import { createDatabase } from "../../src/db/client.js";
 import { MIGRATIONS_FOLDER } from "../../src/db/migrations-path.js";
-import type { AppDeps, Clock, RandomSource } from "../../src/deps.js";
+import { createClaimConnectionLimiter, type AppDeps, type Clock, type RandomSource } from "../../src/deps.js";
 import { bootstrapBreakGlassAccount } from "../../src/domain/auth.js";
+import { bootControlPlane } from "../../src/boot.js";
 import { CSRF_HEADER_NAME, CSRF_HEADER_VALUE } from "../../src/csrf.js";
 import { createFakeGithubOAuthClient, type FakeGithubOAuthClient } from "./fake-github-oauth.js";
 import type { GithubIdentity } from "../../src/domain/github-identity.js";
@@ -64,7 +63,14 @@ function sessionCookieFromResponse(response: Response): string {
   return setCookie.split(";")[0]!;
 }
 
-export async function startTestRig(): Promise<TestRig> {
+export interface TestRigOptions {
+  /** Defaults to a small, fast range — production is 20000-30000ms (spec); tests that need to prove the herd-breakup behavior without a 20s wait inject a tiny one instead. */
+  claimHoldRangeMs?: { min: number; max: number };
+  /** Defaults to 2000 (spec: "Batas 2000 koneksi menggantung per instance"); the connection-cap test injects a tiny one so it doesn't need 2000 real hanging sockets. */
+  maxHangingClaims?: number;
+}
+
+export async function startTestRig(options: TestRigOptions = {}): Promise<TestRig> {
   const container: StartedPostgreSqlContainer = await new PostgreSqlContainer(
     "postgres:16-alpine",
   ).start();
@@ -79,21 +85,19 @@ export async function startTestRig(): Promise<TestRig> {
 
   const deps: AppDeps = {
     db: createDatabase(pool),
+    pool,
     clock,
     random: seededRandom(42),
     githubOAuth,
     gitHost,
+    claimHoldRangeMs: options.claimHoldRangeMs ?? { min: 150, max: 350 },
+    claimLimiter: createClaimConnectionLimiter(options.maxHangingClaims ?? 2000),
   };
 
   await bootstrapBreakGlassAccount(deps, BREAK_GLASS_TEST_PASSWORD);
 
-  const app = createApp(deps);
-
-  const { server, port } = await new Promise<{ server: ServerType; port: number }>((resolve) => {
-    const started = serve({ fetch: app.fetch, port: 0 }, (info) => {
-      resolve({ server: started, port: info.port });
-    });
-  });
+  // Sweep-before-listen, exactly the composition `main.ts` uses (see `boot.ts`).
+  const { server, port } = await bootControlPlane(deps, 0);
 
   const baseUrl = `http://127.0.0.1:${port}`;
 

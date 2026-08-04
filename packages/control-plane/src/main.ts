@@ -5,13 +5,12 @@
  * injected. Everything downstream of this file receives its dependencies
  * explicitly.
  */
-import { serve } from "@hono/node-server";
 import { Pool } from "pg";
-import { createApp } from "./app.js";
 import { createDeps } from "./deps.js";
 import { assertMigrationsApplied, MigrationGateError } from "./db/migration-gate.js";
 import { MIGRATIONS_FOLDER } from "./db/migrations-path.js";
 import { bootstrapBreakGlassAccount } from "./domain/auth.js";
+import { bootControlPlane } from "./boot.js";
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
@@ -46,10 +45,9 @@ async function main(): Promise<void> {
   // rotation (see `domain/auth.ts`).
   await bootstrapBreakGlassAccount(deps, requiredEnv("BREAK_GLASS_PASSWORD"));
 
-  const app = createApp(deps);
-  serve({ fetch: app.fetch, port }, (info) => {
-    console.log(`control plane listening on http://localhost:${info.port}`);
-  });
+  // Sweep runs before the listener opens — see `boot.ts`.
+  const { port: boundPort } = await bootControlPlane(deps, port);
+  console.log(`control plane listening on http://localhost:${boundPort}`);
 }
 
 main().catch((error: unknown) => {

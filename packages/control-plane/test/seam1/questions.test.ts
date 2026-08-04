@@ -103,6 +103,8 @@ async function claimAndAsk(
   reviewerPrincipalIds: string[],
   definition = APPROVAL_DEFINITION,
   sessionId = "sess-abc",
+  questionKind: "approval" | "edit-artifact" = "approval",
+  artifactKey?: string,
 ): Promise<{ questionId: string; groupId: string; stepRun: { id: string; lease_token: string; turn: number }; runId: string }> {
   const seeded = await seedReadyStepRun(
     rig.pool,
@@ -130,8 +132,9 @@ async function claimAndAsk(
     question: {
       id: generateId("question"),
       group_id: groupId,
-      kind: "approval",
+      kind: questionKind,
       body: "Approve this plan?",
+      ...(artifactKey !== undefined ? { artifact_key: artifactKey } : {}),
     },
     ref: { branch: `run/${stepRun.id}/review/t1-a1`, sha: "cafebabe" },
     session_blob_key: grant.blob_key,
@@ -438,5 +441,63 @@ describe("Step human-in-the-loop (issue 13)", () => {
     const resumed = await runner.client.claim(runner.secret);
     const next = (resumed.body as { step_run: { ref: { branch: string; sha: string } } | null }).step_run;
     expect(next!.ref).toEqual({ branch: `run/${stepRun.id}/review/t1-a1`, sha: "cafebabe" });
+  });
+
+  it("edit-artifact is a group-authorized draft write: the uploaded bytes become an immutable human Artifact on the next StepRun", async () => {
+    const editDefinition = APPROVAL_DEFINITION.replace("kind: approval", "kind: edit-artifact");
+    const runner = await joinRunner(rig, ownerCookie);
+    const { questionId, stepRun, runId } = await claimAndAsk(
+      rig,
+      ownerCookie,
+      ownerPrincipalId,
+      runner,
+      [ownerPrincipalId],
+      editDefinition,
+      "sess-edit",
+      "edit-artifact",
+      "prd",
+    );
+
+    const outsider = await githubLogin(rig, 6120);
+    const denied = await rig.fetchWithCsrf(`${rig.baseUrl}/questions/${questionId}/artifact-upload`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: outsider.cookie },
+      body: JSON.stringify({ sizeBytes: 16 }),
+    });
+    expect(denied.status).toBe(403);
+
+    const content = "# Human revision\n";
+    const grantResponse = await rig.fetchWithCsrf(`${rig.baseUrl}/questions/${questionId}/artifact-upload`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: ownerCookie },
+      body: JSON.stringify({ sizeBytes: Buffer.byteLength(content) }),
+    });
+    expect(grantResponse.status).toBe(200);
+    const grant = (await grantResponse.json()) as { uploadUrl: string; blobKey: string };
+    rig.objectStore.putFromUrl(grant.uploadUrl, content);
+
+    const answered = await answer(rig, ownerCookie, questionId, { kind: "edit-artifact", content });
+    expect(answered.status).toBe(200);
+
+    const artifactRows = await rig.pool.query<{ step_run_id: string; key: string; authored_by_principal_id: string; blob_key: string }>(
+      `select a.step_run_id, a.key, a.authored_by_principal_id, a.blob_key
+       from artifacts a join step_runs sr on sr.id = a.step_run_id
+       where sr.run_id = $1 and a.key = 'prd'`,
+      [runId],
+    );
+    expect(artifactRows.rows).toHaveLength(1);
+    expect(artifactRows.rows[0]).toMatchObject({ key: "prd", authored_by_principal_id: ownerPrincipalId });
+    expect(artifactRows.rows[0]!.step_run_id).not.toBe(stepRun.id);
+    expect(rig.objectStore.objects.get(artifactRows.rows[0]!.blob_key)).toBe(content);
+
+    const project = await rig.pool.query<{ project_id: string }>("select project_id from runs where id = $1", [runId]);
+    const history = await rig.fetchWithCsrf(`${rig.baseUrl}/projects/${project.rows[0]!.project_id}/runs/${runId}/artifacts?key=prd`, {
+      headers: { cookie: ownerCookie },
+    });
+    expect(history.status).toBe(200);
+    const historyBody = (await history.json()) as { artifacts: { authoredByPrincipalId: string | null; turn: number }[] };
+    expect(historyBody.artifacts).toEqual([
+      expect.objectContaining({ authoredByPrincipalId: ownerPrincipalId, turn: 2 }),
+    ]);
   });
 });

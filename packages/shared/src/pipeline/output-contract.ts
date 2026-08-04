@@ -152,6 +152,20 @@ export const usageReportSchema = z
   .strict();
 export type UsageReport = z.infer<typeof usageReportSchema>;
 
+/**
+ * A decision the agent wants the grilling screen to surface separately from
+ * the transcript. It is part of the `done` Output, not a maintained summary
+ * table, so the screen can query the immutable StepRun history.
+ */
+export const decisionSchema = z
+  .object({
+    question: z.string().min(1),
+    answer: z.string().min(1),
+    rationale: z.string().optional(),
+  })
+  .strict();
+export type Decision = z.infer<typeof decisionSchema>;
+
 /** The tag name is a system constant. Nobody ever types it. */
 export const FACTORY_OUTPUT_TAG = "factory-output";
 
@@ -173,6 +187,7 @@ export function compileStepOutputContract(step: StepOutputContractSource): z.Zod
   const doneArm = z.object({
     kind: z.literal("done"),
     outputs: compileOutputsSchema(step.outputs),
+    decisions: z.array(decisionSchema).optional(),
     // Optional token usage, reported by the agent (issue 12). Absent →
     // "tidak didukung" in the cost UI; present → the control plane prices it
     // once at StepRun end against the current price version.
@@ -241,6 +256,9 @@ export function generateFormatInstructions(step: StepOutputContractSource): stri
   // "tidak didukung" in the cost UI, never an estimate.
   lines.push(
     '"usage" (optional): report the token counts the agent call returned, as {"usage":{"input_tokens":<number>,"output_tokens":<number>}}',
+  );
+  lines.push(
+    '"decisions" (optional): list decisions made during this turn as [{"question":"...","answer":"...","rationale":"..."}]',
   );
 
   if (step.ask) {

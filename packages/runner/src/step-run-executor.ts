@@ -28,6 +28,7 @@ import {
   resolveEffectiveStep,
   validatePipelineDefinition,
   type OutputsMap,
+  type Decision,
   type Question,
   type QuestionKind,
 } from "@factory/shared";
@@ -186,7 +187,7 @@ export function parseFactoryOutputTag(stdout: string): unknown {
 export type ClassifiedAgentOutput =
   | { kind: "invalid" }
   | { kind: "question"; question: Question }
-  | { kind: "done"; value: { kind: "done"; outputs: unknown } };
+  | { kind: "done"; value: { kind: "done"; outputs: unknown; decisions?: Decision[] } };
 
 /**
  * Classifies the turn's Output against the step's discriminated union (the
@@ -209,11 +210,16 @@ export function classifyAgentOutput(
   if (!parsed.success) {
     return { kind: "invalid" };
   }
-  const value = parsed.data as { kind: "question" | "done"; question?: unknown; outputs?: unknown };
+  const value = parsed.data as {
+    kind: "question" | "done";
+    question?: unknown;
+    outputs?: unknown;
+    decisions?: Decision[];
+  };
   if (value.kind === "question") {
     return { kind: "question", question: value.question as Question };
   }
-  return { kind: "done", value: value as { kind: "done"; outputs: unknown } };
+  return { kind: "done", value: value as { kind: "done"; outputs: unknown; decisions?: Decision[] } };
 }
 
 function repoUrlFor(owner: string, name: string): string {

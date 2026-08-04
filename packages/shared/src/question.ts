@@ -135,6 +135,7 @@ export function renderQuestionForHuman(question: Question): {
   options?: { id: string; label: string }[];
   multi: boolean;
   allowOther: boolean;
+  artifactKey?: string;
 } {
   switch (question.kind) {
     case "choice":
@@ -146,6 +147,12 @@ export function renderQuestionForHuman(question: Question): {
         allowOther: question.allowOther,
       };
     default:
-      return { kind: question.kind, body: question.body, multi: false, allowOther: false };
+      return {
+        kind: question.kind,
+        body: question.body,
+        multi: false,
+        allowOther: false,
+        ...(question.kind === "edit-artifact" ? { artifactKey: question.artifactKey } : {}),
+      };
   }
 }

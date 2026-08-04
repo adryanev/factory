@@ -469,4 +469,52 @@ steps:
 
     expect(response.status).toBe(403);
   });
+
+  it("rewind creates a new manual Run with parent_run_id and leaves the source Run readable", async () => {
+    const project = await createProject(rig, ownerCookie, "rewind-project");
+    const repo = await createRepository(rig, project.id, "backend");
+    const yaml = "version: 1\nname: rewindable\nrepo: backend\nsteps:\n  plan:\n    run: echo plan\n";
+    rig.gitHost.registerRef(repo, "main", "sha-rewind-1");
+    rig.gitHost.registerFile(repo, "sha-rewind-1", ".factory/pipeline.yaml", yaml);
+
+    const parentRunId = generateId("run");
+    const triggered = await trigger(rig, ownerCookie, project.id, {
+      id: parentRunId,
+      repositoryId: repo.id,
+      pipelinePath: ".factory/pipeline.yaml",
+      refBranch: "main",
+    });
+    expect(triggered.status).toBe(201);
+    const parentBody = (await triggered.json()) as { stepRuns: { id: string }[] };
+    await rig.pool.query(
+      "update step_runs set output_data = $1 where id = $2",
+      [JSON.stringify({ kind: "done", outputs: {}, decisions: [{ question: "Scope?", answer: "Checkout" }] }), parentBody.stepRuns[0]!.id],
+    );
+    const summaryResponse = await rig.fetchWithCsrf(`${rig.baseUrl}/projects/${project.id}/runs/${parentRunId}/summary`, {
+      headers: { cookie: ownerCookie },
+    });
+    expect(summaryResponse.status).toBe(200);
+    expect(await summaryResponse.json()).toEqual({ draftRevisions: 0, humanEdits: 0, decisions: 1, openQuestions: 0 });
+
+    const childRunId = generateId("run");
+    const rewound = await rig.fetchWithCsrf(`${rig.baseUrl}/projects/${project.id}/runs/${parentRunId}/rewind`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: ownerCookie },
+      body: JSON.stringify({ id: childRunId, stepRunId: parentBody.stepRuns[0]!.id }),
+    });
+
+    expect(rewound.status).toBe(201);
+    const child = (await rewound.json()) as {
+      run: { id: string; parentRunId: string | null; triggerKind: string };
+      stepRuns: { outcome: string }[];
+    };
+    expect(child.run).toMatchObject({ id: childRunId, parentRunId, triggerKind: "manual" });
+    expect(child.stepRuns).toEqual([expect.objectContaining({ outcome: "ready" })]);
+
+    const source = await rig.pool.query<{ id: string; parent_run_id: string | null }>(
+      "select id, parent_run_id from runs where id = $1",
+      [parentRunId],
+    );
+    expect(source.rows[0]).toEqual({ id: parentRunId, parent_run_id: null });
+  });
 });

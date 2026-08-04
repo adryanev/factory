@@ -14,6 +14,7 @@ export {
   outputDescriptorSchema,
   outputsMapSchema,
   usageReportSchema,
+  decisionSchema,
 } from "./output-contract.js";
 export type {
   OutputDescriptor,
@@ -21,6 +22,7 @@ export type {
   ScalarType,
   FlatObjectDescriptor,
   UsageReport,
+  Decision,
 } from "./output-contract.js";
 
 export {

@@ -14,7 +14,7 @@ import {
   type Question,
 } from "./index.js";
 
-function question(kind: "text" | "approval" | "choice"): Question {
+function question(kind: "text" | "approval" | "choice" | "edit-artifact"): Question {
   switch (kind) {
     case "text":
       return { kind: "text", body: "Which approach should I take?" };
@@ -31,6 +31,8 @@ function question(kind: "text" | "approval" | "choice"): Question {
         multi: false,
         allowOther: true,
       };
+    case "edit-artifact":
+      return { kind: "edit-artifact", body: "Update the PRD", artifactKey: "prd" };
   }
 }
 
@@ -39,7 +41,8 @@ describe("Answer schema (issue 13, AC4)", () => {
     const textAnswer: Answer = { kind: "text", value: "Use approach two." };
     const choiceAnswer: Answer = { kind: "choice", ids: ["a", "b"] };
     const approvalAnswer: Answer = { kind: "approval", approved: false, reason: "scope" };
-    for (const answer of [textAnswer, choiceAnswer, approvalAnswer]) {
+    const editAnswer: Answer = { kind: "edit-artifact", content: "# Revised PRD" };
+    for (const answer of [textAnswer, choiceAnswer, approvalAnswer, editAnswer]) {
       expect(answerSchema.safeParse(answer).success).toBe(true);
     }
     // The union is closed — an unknown kind is rejected, and so is an arm
@@ -50,7 +53,7 @@ describe("Answer schema (issue 13, AC4)", () => {
   });
 
   it("the Question schema still accepts every declared kind", () => {
-    for (const q of [question("text"), question("approval"), question("choice")]) {
+    for (const q of [question("text"), question("approval"), question("choice"), question("edit-artifact")]) {
       expect(questionSchema.safeParse(q).success).toBe(true);
     }
   });
@@ -80,5 +83,14 @@ describe("renderAnswerForAgent (issue 13, AC5)", () => {
 
   it("a text answer is the free-form body", () => {
     expect(renderAnswerForAgent(question("text"), { kind: "text", value: "Go green." })).toContain("Go green.");
+  });
+
+  it("an edit-artifact answer sends the edited content back to the agent", () => {
+    const rendered = renderAnswerForAgent(question("edit-artifact"), {
+      kind: "edit-artifact",
+      content: "# Revised PRD",
+    });
+    expect(rendered).toContain("edited the artifact");
+    expect(rendered).toContain("# Revised PRD");
   });
 });

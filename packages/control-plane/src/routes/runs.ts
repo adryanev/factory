@@ -8,7 +8,7 @@ import { createRoute, z, type OpenAPIHono } from "@hono/zod-openapi";
 import { errorResponseSchema, type Id } from "@factory/shared";
 import type { AppEnv } from "../http-env.js";
 import type { RouteDeps } from "../domain/index.js";
-import type { Run, RunListFilters, StepRun } from "../domain/runs.js";
+import type { GrillingSummary, Run, RunListFilters, StepRun } from "../domain/runs.js";
 import { requirePrincipal } from "./require-principal.js";
 
 const DEFAULT_LIST_LIMIT = 20;
@@ -19,6 +19,7 @@ const runIdParamSchema = z.object({
   id: z.string().openapi({ param: { name: "id", in: "path" } }),
   runId: z.string().openapi({ param: { name: "runId", in: "path" } }),
 });
+const topRunIdParamSchema = z.object({ id: z.string().openapi({ param: { name: "id", in: "path" } }) });
 
 const runSchema = z
   .object({
@@ -199,6 +200,115 @@ const getRunRoute = createRoute({
   },
 });
 
+const cancelRunRoute = createRoute({
+  method: "post",
+  path: "/projects/{id}/runs/{runId}/cancel",
+  summary:
+    "Requests cancellation of a Run. The acknowledgement records cancel_requested_at and immediately cancels live StepRuns; the final verdict remains a Graph concern.",
+  request: { params: runIdParamSchema },
+  responses: {
+    200: { description: "Cancellation requested.", content: { "application/json": { schema: runSchema } } },
+    401: { description: "Not logged in.", content: { "application/json": { schema: errorResponseSchema } } },
+    403: { description: "Not a Project member.", content: { "application/json": { schema: errorResponseSchema } } },
+    404: { description: "No such Run.", content: { "application/json": { schema: errorResponseSchema } } },
+  },
+});
+
+const rewindRunRoute = createRoute({
+  method: "post",
+  path: "/projects/{id}/runs/{runId}/rewind",
+  summary:
+    "Creates a new manual Run from a selected StepRun. The old Run and its Artifacts remain intact; the new Run carries parent_run_id.",
+  request: {
+    params: runIdParamSchema,
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            id: z.string().min(1),
+            stepRunId: z.string().min(1),
+          }).openapi("RewindRunRequest"),
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: "New child Run created.",
+      content: { "application/json": { schema: z.object({ run: runSchema, stepRuns: z.array(stepRunSchema) }) } },
+    },
+    400: { description: "Invalid rewind or duplicate new Run id.", content: { "application/json": { schema: errorResponseSchema } } },
+    401: { description: "Not logged in.", content: { "application/json": { schema: errorResponseSchema } } },
+    403: { description: "Not a Project member.", content: { "application/json": { schema: errorResponseSchema } } },
+    404: { description: "No such Run or StepRun.", content: { "application/json": { schema: errorResponseSchema } } },
+  },
+});
+
+const grillingSummaryRoute = createRoute({
+  method: "get",
+  path: "/projects/{id}/runs/{runId}/summary",
+  summary:
+    "Returns four query-derived reopen numbers for the grilling screen: draft revisions, human edits, recorded decisions, and open Questions.",
+  request: { params: runIdParamSchema },
+  responses: {
+    200: {
+      description: "Ok.",
+      content: {
+        "application/json": {
+          schema: z.object({
+            draftRevisions: z.number().int().nonnegative(),
+            humanEdits: z.number().int().nonnegative(),
+            decisions: z.number().int().nonnegative(),
+            openQuestions: z.number().int().nonnegative(),
+          }).openapi("GrillingSummary"),
+        },
+      },
+    },
+    401: { description: "Not logged in.", content: { "application/json": { schema: errorResponseSchema } } },
+    403: { description: "Not a Project member.", content: { "application/json": { schema: errorResponseSchema } } },
+    404: { description: "No such Run.", content: { "application/json": { schema: errorResponseSchema } } },
+  },
+});
+
+const cancelRunByIdRoute = createRoute({
+  method: "post",
+  path: "/runs/{id}/cancel",
+  summary: "Requests cancellation of a Run by id. Project membership is resolved from the Run.",
+  request: { params: topRunIdParamSchema },
+  responses: {
+    200: { description: "Cancellation requested.", content: { "application/json": { schema: runSchema } } },
+    401: { description: "Not logged in.", content: { "application/json": { schema: errorResponseSchema } } },
+    403: { description: "Not a Project member.", content: { "application/json": { schema: errorResponseSchema } } },
+    404: { description: "No such Run.", content: { "application/json": { schema: errorResponseSchema } } },
+  },
+});
+
+const rewindRunByIdRoute = createRoute({
+  method: "post",
+  path: "/runs/{id}/rewind",
+  summary: "Creates a child Run by parent id. The old Run and its Artifacts remain intact.",
+  request: {
+    params: topRunIdParamSchema,
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ id: z.string().min(1), stepRunId: z.string().min(1) }).openapi("RewindRunByIdRequest"),
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: "New child Run created.",
+      content: { "application/json": { schema: z.object({ run: runSchema, stepRuns: z.array(stepRunSchema) }) } },
+    },
+    400: { description: "Invalid rewind or duplicate new Run id.", content: { "application/json": { schema: errorResponseSchema } } },
+    401: { description: "Not logged in.", content: { "application/json": { schema: errorResponseSchema } } },
+    403: { description: "Not a Project member.", content: { "application/json": { schema: errorResponseSchema } } },
+    404: { description: "No such Run or StepRun.", content: { "application/json": { schema: errorResponseSchema } } },
+  },
+});
+
 export function registerRunRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDeps): void {
   app.openapi(triggerRunRoute, async (c) => {
     const principal = requirePrincipal(c);
@@ -242,5 +352,54 @@ export function registerRunRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDeps): vo
       { run: toRunDetailResponse(run, definitionText, definitionFiles), stepRuns: stepRuns.map(toStepRunResponse) },
       200,
     );
+  });
+
+  app.openapi(cancelRunRoute, async (c) => {
+    const principal = requirePrincipal(c);
+    const { id: projectId, runId } = c.req.valid("param");
+    const run = await deps.domain.runs.cancel(principal, projectId as Id<"project">, runId as Id<"run">);
+    return c.json(toRunResponse(run), 200);
+  });
+
+  app.openapi(rewindRunRoute, async (c) => {
+    const principal = requirePrincipal(c);
+    const { id: projectId, runId: parentRunId } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const { run, stepRuns } = await deps.domain.runs.rewind(principal, projectId as Id<"project">, {
+      id: body.id as Id<"run">,
+      parentRunId: parentRunId as Id<"run">,
+      stepRunId: body.stepRunId as Id<"steprun">,
+    });
+    return c.json({ run: toRunResponse(run), stepRuns: stepRuns.map(toStepRunResponse) }, 201);
+  });
+
+  app.openapi(grillingSummaryRoute, async (c) => {
+    const principal = requirePrincipal(c);
+    const { id: projectId, runId } = c.req.valid("param");
+    const summary: GrillingSummary = await deps.domain.runs.summary(
+      principal,
+      projectId as Id<"project">,
+      runId as Id<"run">,
+    );
+    return c.json(summary, 200);
+  });
+
+  app.openapi(cancelRunByIdRoute, async (c) => {
+    const principal = requirePrincipal(c);
+    const { id } = c.req.valid("param");
+    const run = await deps.domain.runs.cancelById(principal, id as Id<"run">);
+    return c.json(toRunResponse(run), 200);
+  });
+
+  app.openapi(rewindRunByIdRoute, async (c) => {
+    const principal = requirePrincipal(c);
+    const { id: parentRunId } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const { run, stepRuns } = await deps.domain.runs.rewindById(principal, {
+      id: body.id as Id<"run">,
+      parentRunId: parentRunId as Id<"run">,
+      stepRunId: body.stepRunId as Id<"steprun">,
+    });
+    return c.json({ run: toRunResponse(run), stepRuns: stepRuns.map(toStepRunResponse) }, 201);
   });
 }

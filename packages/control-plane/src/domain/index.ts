@@ -27,7 +27,16 @@ import type { Principal } from "./principal.js";
 import type { LoginResult } from "./auth.js";
 import type { Project, ProjectRole } from "./projects.js";
 import type { Group } from "./groups.js";
-import type { RunListFilters, RunPage, RunWithGraph, TriggerRunInput, TriggeredRun } from "./runs.js";
+import type {
+  GrillingSummary,
+  Run,
+  RunListFilters,
+  RunPage,
+  RunWithGraph,
+  RewindRunInput,
+  TriggerRunInput,
+  TriggeredRun,
+} from "./runs.js";
 import type { DesiredState, HeartbeatLease, HeartbeatReply, RunnerIdentity } from "./runners.js";
 import type { ClaimedStepRun, ClaimInput } from "./step-run-claim.js";
 import * as stepRunLogsDomain from "./step-run-logs.js";
@@ -36,6 +45,7 @@ import * as costsDomain from "./costs.js";
 import * as stepRunQuestionsDomain from "./step-run-questions.js";
 import type {
   AnswerQuestionResult,
+  ArtifactEditUpload,
   QuestionState,
 } from "./step-run-questions.js";
 import type {
@@ -47,14 +57,24 @@ import type {
   UploadGrant,
   UploadRequest,
 } from "./step-run-turn.js";
-import type { ArtifactMeta, ArtifactRead } from "./step-run-artifacts.js";
+import type { ArtifactHistoryMeta, ArtifactMeta, ArtifactRead } from "./step-run-artifacts.js";
 import type { AttemptCost, ProjectCost, ProjectCostPrincipal, RunCost, StepRunCost } from "./costs.js";
 import type { ServiceAccountInfo, StoredSecret, PutSecretInput } from "./secrets.js";
 
 export type { Principal } from "./principal.js";
 export type { Project, ProjectRole } from "./projects.js";
 export type { Group } from "./groups.js";
-export type { Run, StepRun, RunListFilters, RunPage, RunWithGraph, TriggerRunInput, TriggeredRun } from "./runs.js";
+export type {
+  GrillingSummary,
+  RewindRunInput,
+  Run,
+  StepRun,
+  RunListFilters,
+  RunPage,
+  RunWithGraph,
+  TriggerRunInput,
+  TriggeredRun,
+} from "./runs.js";
 export {
   UnauthorizedError,
   ForbiddenError,
@@ -76,7 +96,7 @@ export type {
   UploadGrant,
   UploadRequest,
 } from "./step-run-turn.js";
-export type { ArtifactMeta, ArtifactRead } from "./step-run-artifacts.js";
+export type { ArtifactHistoryMeta, ArtifactMeta, ArtifactRead } from "./step-run-artifacts.js";
 export type { AttemptCost, ProjectCost, ProjectCostPrincipal, RunCost, StepRunCost } from "./costs.js";
 export type { ServiceAccountInfo, StoredSecret, PutSecretInput } from "./secrets.js";
 
@@ -112,6 +132,10 @@ export interface Domain {
   };
   runs: {
     trigger: (principal: Principal, projectId: Id<"project">, input: TriggerRunInput) => Promise<TriggeredRun>;
+    cancel: (principal: Principal, projectId: Id<"project">, runId: Id<"run">) => Promise<Run>;
+    cancelById: (principal: Principal, runId: Id<"run">) => Promise<Run>;
+    rewind: (principal: Principal, projectId: Id<"project">, input: RewindRunInput) => Promise<TriggeredRun>;
+    rewindById: (principal: Principal, input: RewindRunInput) => Promise<TriggeredRun>;
     list: (
       principal: Principal,
       projectId: Id<"project">,
@@ -120,6 +144,11 @@ export interface Domain {
       limit: number,
     ) => Promise<RunPage>;
     get: (principal: Principal, projectId: Id<"project">, runId: Id<"run">) => Promise<RunWithGraph>;
+    summary: (
+      principal: Principal,
+      projectId: Id<"project">,
+      runId: Id<"run">,
+    ) => Promise<GrillingSummary>;
   };
   runners: {
     /** Bearer secret -> `RunnerIdentity`. Throws `UnauthorizedError` for a missing/malformed header, a wrong secret, or a revoked one — see `runners.ts`'s doc on why revoke is fencing, enforced right here. */
@@ -184,6 +213,13 @@ export interface Domain {
     ) => Promise<ArtifactMeta[]>;
     /** Web surface, Project `member`: one artifact plus a freshly-minted presigned GET. */
     getArtifact: (principal: Principal, artifactId: Id<"artifact">) => Promise<ArtifactRead>;
+    /** Web surface, Project `member`: immutable artifact history for one Run. */
+    listRunArtifacts: (
+      principal: Principal,
+      projectId: Id<"project">,
+      runId: Id<"run">,
+      key?: string,
+    ) => Promise<ArtifactHistoryMeta[]>;
   };
   questions: {
     /** Web surface, group member: the "Menunggu saya" list — every open Question whose audience Group contains the caller. */
@@ -196,6 +232,11 @@ export interface Domain {
       questionId: Id<"question">,
       answer: import("@factory/shared").Answer,
     ) => Promise<AnswerQuestionResult>;
+    mintArtifactEditUpload: (
+      principal: Principal,
+      questionId: Id<"question">,
+      sizeBytes: number,
+    ) => Promise<ArtifactEditUpload>;
   };
   secrets: {
     createServiceAccount: (
@@ -256,9 +297,15 @@ export function createDomain(deps: AppDeps): Domain {
     },
     runs: {
       trigger: (principal, projectId, input) => runsDomain.triggerRun(deps, principal, projectId, input),
+      cancel: (principal, projectId, runId) => runsDomain.cancelRun(deps, principal, projectId, runId),
+      cancelById: (principal, runId) => runsDomain.cancelRunById(deps, principal, runId),
+      rewind: (principal, projectId, input) => runsDomain.rewindRun(deps, principal, projectId, input),
+      rewindById: (principal, input) => runsDomain.rewindRunById(deps, principal, input),
       list: (principal, projectId, filters, cursor, limit) =>
         runsDomain.listRuns(deps, principal, projectId, filters, cursor, limit),
       get: (principal, projectId, runId) => runsDomain.getRun(deps, principal, projectId, runId),
+      summary: (principal, projectId, runId) =>
+        runsDomain.getGrillingSummary(deps, principal, projectId, runId),
     },
     runners: {
       authenticate: (bearerAuthorizationHeader) =>
@@ -290,12 +337,16 @@ export function createDomain(deps: AppDeps): Domain {
         stepRunArtifactsDomain.listStepRunArtifacts(deps, principal, stepRunId, key),
       getArtifact: (principal, artifactId) =>
         stepRunArtifactsDomain.getArtifact(deps, principal, artifactId),
+      listRunArtifacts: (principal, projectId, runId, key) =>
+        stepRunArtifactsDomain.listRunArtifacts(deps, principal, projectId, runId, key),
     },
     questions: {
       listWaiting: (principal) => stepRunQuestionsDomain.listWaitingQuestions(deps, principal),
       get: (principal, questionId) => stepRunQuestionsDomain.getQuestion(deps, principal, questionId),
       answer: (principal, questionId, answer) =>
         stepRunQuestionsDomain.answerQuestion(deps, principal, questionId, answer),
+      mintArtifactEditUpload: (principal, questionId, sizeBytes) =>
+        stepRunQuestionsDomain.mintArtifactEditUpload(deps, principal, questionId, sizeBytes),
     },
     secrets: {
       createServiceAccount: (principal, projectId, name) =>

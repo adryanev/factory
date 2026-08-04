@@ -33,6 +33,28 @@ function approvalQuestion(overrides: Partial<QuestionState> = {}): QuestionState
   };
 }
 
+function choiceQuestion(overrides: Partial<QuestionState> = {}): QuestionState {
+  return {
+    ...approvalQuestion(),
+    kind: "choice",
+    body: "Pick a direction",
+    options: [{ id: "a", label: "Option A" }, { id: "b", label: "Option B" }],
+    multi: false,
+    allowOther: false,
+    ...overrides,
+  };
+}
+
+function editArtifactQuestion(overrides: Partial<QuestionState> = {}): QuestionState {
+  return {
+    ...approvalQuestion(),
+    kind: "edit-artifact",
+    body: "Edit the PRD directly",
+    artifactKey: "prd",
+    ...overrides,
+  };
+}
+
 describe("AnswerForm", () => {
   it("submits an approval with a reason", async () => {
     const user = userEvent.setup();
@@ -81,5 +103,28 @@ describe("AnswerForm", () => {
     expect(screen.getByTestId("race-lost")).toHaveTextContent("answered by user_winner");
     // The draft is not discarded — the reason is still in the field.
     expect((screen.getByLabelText("reason") as HTMLTextAreaElement).value).toBe("my careful typed reason");
+  });
+
+  it("keeps a text box beside choice controls, even when allowOther is false", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async (answer: Answer) => ({ status: "accepted" } as const));
+    render(<AnswerForm question={choiceQuestion()} onSubmit={onSubmit} onAnswered={() => {}} />);
+
+    expect(screen.getByRole("radio", { name: /option a/i })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("answer"), "Only for high-value orders");
+    await user.click(screen.getByRole("button", { name: /submit choice/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith({ kind: "choice", ids: [], other: "Only for high-value orders" });
+  });
+
+  it("submits an edit-artifact answer with the edited content", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async (answer: Answer) => ({ status: "accepted" } as const));
+    render(<AnswerForm question={editArtifactQuestion()} onSubmit={onSubmit} onAnswered={() => {}} />);
+
+    await user.type(screen.getByLabelText("draft content"), "# New PRD");
+    await user.click(screen.getByRole("button", { name: /save draft and submit/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith({ kind: "edit-artifact", content: "# New PRD" });
   });
 });

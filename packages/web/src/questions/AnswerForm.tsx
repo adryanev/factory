@@ -84,7 +84,13 @@ export function AnswerForm({ question, onSubmit, onAnswered }: AnswerFormProps):
         <ChoiceForm question={question} draft={currentDraft} onChange={setDraft} submitting={submitting} onSubmit={submit} />
       ) : null}
       {kind === "edit-artifact" ? (
-        <p data-testid="edit-artifact">Artifact editing is not available here yet.</p>
+        <EditArtifactForm
+          question={question}
+          draft={currentDraft}
+          onChange={setDraft}
+          submitting={submitting}
+          onSubmit={submit}
+        />
       ) : null}
     </div>
   );
@@ -210,19 +216,43 @@ function ChoiceForm({ question, draft, onChange, submitting, onSubmit }: DraftFo
           </label>
         ))}
       </div>
-      {question.allowOther ? (
-        <textarea
-          aria-label="other"
-          placeholder="Other…"
-          value={other}
-          onChange={(event) => {
-            setOther(event.target.value);
-            onChange({ kind: "choice", ids: current.ids, ...(event.target.value ? { other: event.target.value } : {}) });
-          }}
-        />
-      ) : null}
+      <textarea
+        aria-label={question.allowOther ? "other" : "answer"}
+        placeholder={question.allowOther ? "Other context (optional)" : "Add context to your choice (optional)"}
+        value={other}
+        onChange={(event) => {
+          setOther(event.target.value);
+          onChange({ kind: "choice", ids: current.ids, ...(event.target.value ? { other: event.target.value } : {}) });
+        }}
+      />
       <button type="submit" disabled={submitting}>
         Submit choice
+      </button>
+    </form>
+  );
+}
+
+function EditArtifactForm({ question, draft, onChange, submitting, onSubmit }: DraftFormProps): React.JSX.Element {
+  const current = draft as Extract<Answer, { kind: "edit-artifact" }>;
+  return (
+    <form
+      data-testid="edit-artifact"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void onSubmit({ kind: "edit-artifact", content: current.content });
+      }}
+    >
+      <p>{question.body}</p>
+      <p>
+        <small>Artifact: {question.artifactKey ?? "draft"}</small>
+      </p>
+      <textarea
+        aria-label="draft content"
+        value={current.content}
+        onChange={(event) => onChange({ kind: "edit-artifact", content: event.target.value })}
+      />
+      <button type="submit" disabled={submitting || current.content.trim() === ""}>
+        Save draft and submit
       </button>
     </form>
   );

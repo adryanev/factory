@@ -19,6 +19,7 @@ const artifactMetaSchema = z
     kind: z.enum(ARTIFACT_KINDS),
     contentType: z.string(),
     sizeBytes: z.number().int().nonnegative(),
+    authoredByPrincipalId: z.string().nullable(),
     createdAt: z.string(),
   })
   .openapi("Artifact");
@@ -34,6 +35,31 @@ const artifactReadSchema = artifactMetaSchema
 
 const stepRunIdParamSchema = z.object({ id: z.string().openapi({ param: { name: "id", in: "path" } }) });
 const artifactIdParamSchema = z.object({ id: z.string().openapi({ param: { name: "id", in: "path" } }) });
+const runArtifactsParamSchema = z.object({
+  id: z.string().openapi({ param: { name: "id", in: "path" } }),
+  runId: z.string().openapi({ param: { name: "runId", in: "path" } }),
+});
+const artifactHistorySchema = artifactMetaSchema.extend({ stepRunId: z.string(), turn: z.number() }).openapi("ArtifactHistory");
+
+const listRunArtifactsRoute = createRoute({
+  method: "get",
+  path: "/projects/{id}/runs/{runId}/artifacts",
+  summary:
+    "Lists immutable artifact history for a Run. `key=prd` is the grilling draft history, ordered by turn, with human-authored rows marked.",
+  request: {
+    params: runArtifactsParamSchema,
+    query: z.object({ key: z.string().optional() }),
+  },
+  responses: {
+    200: {
+      description: "Ok.",
+      content: { "application/json": { schema: z.object({ artifacts: z.array(artifactHistorySchema) }) } },
+    },
+    401: { description: "Not logged in.", content: { "application/json": { schema: errorResponseSchema } } },
+    403: { description: "Not a Project member.", content: { "application/json": { schema: errorResponseSchema } } },
+    404: { description: "No such Run.", content: { "application/json": { schema: errorResponseSchema } } },
+  },
+});
 
 const listArtifactsRoute = createRoute({
   method: "get",
@@ -73,6 +99,34 @@ const getArtifactRoute = createRoute({
 });
 
 export function registerStepRunArtifactRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDeps): void {
+  app.openapi(listRunArtifactsRoute, async (c) => {
+    const principal = requirePrincipal(c);
+    const { id: projectId, runId } = c.req.valid("param");
+    const { key } = c.req.valid("query");
+    const artifacts = await deps.domain.stepRuns.listRunArtifacts(
+      principal,
+      projectId as Id<"project">,
+      runId as Id<"run">,
+      key,
+    );
+    return c.json(
+      {
+        artifacts: artifacts.map((artifact) => ({
+          id: artifact.id,
+          key: artifact.key,
+          kind: artifact.kind,
+          contentType: artifact.contentType,
+          sizeBytes: artifact.sizeBytes,
+          authoredByPrincipalId: artifact.authoredByPrincipalId,
+          createdAt: artifact.createdAt.toISOString(),
+          stepRunId: artifact.stepRunId,
+          turn: artifact.turn,
+        })),
+      },
+      200,
+    );
+  });
+
   app.openapi(listArtifactsRoute, async (c) => {
     const principal = requirePrincipal(c);
     const { id } = c.req.valid("param");
@@ -83,10 +137,11 @@ export function registerStepRunArtifactRoutes(app: OpenAPIHono<AppEnv>, deps: Ro
         artifacts: artifacts.map((artifact) => ({
           id: artifact.id,
           key: artifact.key,
-          kind: artifact.kind,
-          contentType: artifact.contentType,
-          sizeBytes: artifact.sizeBytes,
-          createdAt: artifact.createdAt.toISOString(),
+           kind: artifact.kind,
+           contentType: artifact.contentType,
+           sizeBytes: artifact.sizeBytes,
+           authoredByPrincipalId: artifact.authoredByPrincipalId,
+           createdAt: artifact.createdAt.toISOString(),
         })),
       },
       200,
@@ -101,10 +156,11 @@ export function registerStepRunArtifactRoutes(app: OpenAPIHono<AppEnv>, deps: Ro
       {
         id: artifact.id,
         key: artifact.key,
-        kind: artifact.kind,
-        contentType: artifact.contentType,
-        sizeBytes: artifact.sizeBytes,
-        createdAt: artifact.createdAt.toISOString(),
+         kind: artifact.kind,
+         contentType: artifact.contentType,
+         sizeBytes: artifact.sizeBytes,
+         authoredByPrincipalId: artifact.authoredByPrincipalId,
+         createdAt: artifact.createdAt.toISOString(),
         getUrl: artifact.getUrl,
         expiresAt: artifact.expiresAt.toISOString(),
       },

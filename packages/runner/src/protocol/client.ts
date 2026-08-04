@@ -5,6 +5,8 @@
  * in the `/claim` payload, and this client is how it claims, heartbeats, and
  * reports the turn's outcome. Wire shapes are the spec's own `snake_case`.
  */
+import type { JoinManifestEntry } from "@factory/shared";
+
 export interface GitTokenWire {
   token: string;
   expiresAt: string;
@@ -32,6 +34,13 @@ export interface ClaimedStepRun {
   egressAllowlist: string[];
   /** The Group an interactive Step's ask: addresses, resolved at claim (null for non-interactive Steps). */
   askGroupId: string | null;
+  /**
+   * The Join manifest (issue #11, AC7): the upstream branches this Join Step
+   * gathers, as data. Empty for a Step that joins nothing. The Runner fetches
+   * only the entries whose `repo` equals its own repository; the rest are
+   * reads, never checkouts (ticket 21).
+   */
+  joinManifest: JoinManifestEntry[];
 }
 
 export interface HeartbeatReply {
@@ -143,6 +152,9 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
         throw new Error(`claim failed: HTTP ${status}`);
       }
       const stepRun = body.step_run as ClaimedStepRun | null;
+      if (stepRun) {
+        stepRun.joinManifest = stepRun.joinManifest ?? [];
+      }
       return stepRun;
     },
 

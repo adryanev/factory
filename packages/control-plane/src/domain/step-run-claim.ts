@@ -11,7 +11,14 @@
  * deferred in "Out of Scope": "aturan 'ukur sebelum optimasi' menahannya").
  */
 import { and, eq } from "drizzle-orm";
-import { isProtocolVersionSupported, renderFinalPrompt, validatePipelineDefinition, type Id } from "@factory/shared";
+import {
+  isProtocolVersionSupported,
+  renderFinalPrompt,
+  resolveEffectiveStep,
+  validatePipelineDefinition,
+  type Id,
+  type JoinManifest,
+} from "@factory/shared";
 import { githubAppInstallations, groups, projects, repositories, runs, stepRuns } from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
 import { loadSqlStatement } from "../db/sql/load.js";
@@ -19,6 +26,7 @@ import { ProtocolVersionError } from "./errors.js";
 import type { InstallationToken, RepoRef } from "./git-host.js";
 import type { RunnerIdentity } from "./runners.js";
 import { resolveSecretsForPrincipal } from "./secrets.js";
+import { buildJoinManifest, type RunRow } from "./graph-advance.js";
 
 const CLAIM_QUERY = loadSqlStatement("claim_step_run.sql");
 const POLL_INTERVAL_MS = 1000; // spec: "poll kueri klaim tiap 1 detik per koneksi menggantung"
@@ -83,6 +91,14 @@ export interface ClaimedStepRun {
    * will be refused at the door.
    */
   askGroupId: Id<"group"> | null;
+  /**
+   * The Join manifest (issue #11, AC7): one entry per branch of every
+   * fan-out Step this StepRun joins (`[{ key, repo, branch, sha, outcome,
+   * outputs }]`), so a Join Step reads its upstream branches as data and
+   * fetches only the branches sharing its own repo — cross-repo branches are
+   * reads, never checkouts (ticket 21). Empty for a Step that joins nothing.
+   */
+  joinManifest: JoinManifest;
 }
 
 export interface ClaimInput {
@@ -134,8 +150,10 @@ async function hydrateClaimedRow(
   // shared `renderFinalPrompt` the Runner uses to build the prompt it sends,
   // persisted on the row the moment the turn is claimed so the UI can show
   // "prompt final yang dikirim" — not the verbatim file content. Null for
-  // run: Steps, which have no prompt.
-  const step = parseSnapshotStep(run.definition, row.step_key);
+  // run: Steps, which have no prompt. A fan-out branch resolves its *effective*
+  // Step (parent Step merged with the Branch's overrides, `resolveEffectiveStep`)
+  // so a branch with its own agent/prompt runs and is displayed as itself.
+  const step = parseSnapshotStep(run.definition, row.step_key, row.branch_key);
   const finalPrompt = step ? finalPromptForStep(run.definitionFiles, step) : null;
   if (finalPrompt !== null) {
     await deps.db
@@ -153,6 +171,18 @@ async function hydrateClaimedRow(
       .from(groups)
       .where(and(eq(groups.projectId, run.projectId), eq(groups.name, step.ask.group)));
     askGroupId = group?.id ?? null;
+  }
+
+  // The Join manifest (AC7) — assembled for a Step whose `after:` includes a
+  // fan-out source; empty otherwise. `buildJoinManifest` needs the parsed
+  // pipeline, so re-derive it once here.
+  let joinManifest: JoinManifest = [];
+  if (step) {
+    const validation =
+      typeof run.definition === "string" ? validatePipelineDefinition(run.definition) : null;
+    if (validation?.valid) {
+      joinManifest = (await buildJoinManifest(deps.db, run as RunRow, validation.pipeline, step)) ?? [];
+    }
   }
 
   return {
@@ -177,15 +207,20 @@ async function hydrateClaimedRow(
     secrets: await resolveSecretsForPrincipal(deps, run.projectId, run.credentialPrincipalId),
     egressAllowlist: project.egressAllowlist,
     askGroupId,
+    joinManifest,
   };
 }
 
-/** Parses the claimed run's definition snapshot and returns the Step named by `stepKey`, or undefined when the snapshot is unusable. */
-function parseSnapshotStep(definition: unknown, stepKey: string): import("@factory/shared").Pipeline["steps"][string] | undefined {
+/** Parses the claimed run's definition snapshot and resolves the *effective* Step named by `stepKey` — Branch overrides applied when `branchKey` is set. Returns undefined when the snapshot is unusable. */
+function parseSnapshotStep(
+  definition: unknown,
+  stepKey: string,
+  branchKey: string | null,
+): import("@factory/shared").Pipeline["steps"][string] | undefined {
   if (typeof definition !== "string") return undefined;
   const validation = validatePipelineDefinition(definition);
   if (!validation.valid) return undefined;
-  return validation.pipeline.steps[stepKey];
+  return resolveEffectiveStep(validation.pipeline, stepKey, branchKey);
 }
 
 /** The final prompt for a Step — its own prompt text (promptFile content or inline prompt) plus the format-instruction block. Null when the Step has no prompt. */

@@ -1,7 +1,7 @@
 export { validatePipelineDefinition } from "./validate.js";
 export type { ValidationResult, ValidationIssue } from "./validate.js";
 
-export { pipelineSchema, stepSchema, branchSchema, outputRefSchema, joinPolicySchema, askSchema } from "./schema.js";
+export { pipelineSchema, stepSchema, branchSchema, outputRefSchema, joinPolicySchema, askSchema, resolveEffectiveStep } from "./schema.js";
 export type { Pipeline, Step, Branch, OutputRef, JoinPolicy } from "./types.js";
 
 export {
@@ -29,3 +29,10 @@ export { KEY_PATTERN, isValidKey } from "./key.js";
 export { DURATION_PATTERN, durationSchema, humanTimeoutSchema } from "./duration.js";
 
 export { stepRunBranchName, type StepRunBranchInput } from "./step-run-branch.js";
+
+export {
+  joinManifestSchema,
+  joinManifestEntrySchema,
+  type JoinManifest,
+  type JoinManifestEntry,
+} from "./join-manifest.js";

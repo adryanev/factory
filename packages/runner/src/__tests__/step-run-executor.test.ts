@@ -4,7 +4,16 @@
  * the token teardown are provable deterministically.
  */
 import { describe, expect, it } from "vitest";
-import { compileStepOutputContract, FACTORY_OUTPUT_TAG, type ArtifactKind } from "@factory/shared";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  compileStepOutputContract,
+  FACTORY_OUTPUT_TAG,
+  type ArtifactKind,
+  type JoinManifestEntry,
+} from "@factory/shared";
 import type { GitOps } from "../git/ops.js";
 import type { ClaimedStepRun, HeartbeatReply, LogChunkWire, ProtocolClient, ResultReply } from "../protocol/client.js";
 import {
@@ -41,6 +50,7 @@ function claimFixture(overrides: Partial<ClaimedStepRun> = {}): ClaimedStepRun {
     secrets: { DEPLOY_KEY: "super-secret-value" },
     egressAllowlist: ["github.com", "registry.npmjs.org"],
     askGroupId: null,
+    joinManifest: [],
     ...overrides,
   };
 }
@@ -711,6 +721,101 @@ describe("agent Steps: the executor flow", () => {
       expect(spec.prompt).toContain(`<${FACTORY_OUTPUT_TAG}>`);
       expect(spec.maxRetries).toBe(2); // claude is resumable and installed.
       expect(spec.agent).toBe("claude");
+    }
+  });
+});
+
+describe("fan-out and Join: the Runner's half (issue #11)", () => {
+  it("resolveStep applies a fan-out branch's overrides — a branch with its own agent runs as itself", () => {
+    const definition = `version: 1
+name: p
+repo: backend
+steps:
+  implement:
+    branches:
+      - key: agent-a
+        agent: codex
+      - key: agent-b
+        agent: claude
+    prompt: do the work
+    outputs:
+      x: { type: string }
+`;
+    const base = { definition, definitionFiles: {}, runId: "run_1", id: "steprun_1" };
+    const codexBranch = resolveStep({ ...base, stepKey: "implement", branchKey: "agent-a" } as never);
+    expect(codexBranch).toMatchObject({ kind: "agent", agent: "codex" });
+    const claudeBranch = resolveStep({ ...base, stepKey: "implement", branchKey: "agent-b" } as never);
+    expect(claudeBranch).toMatchObject({ kind: "agent", agent: "claude" });
+    // The parent Step's fields are the whole story for a branchesFrom branch.
+    const plain = resolveStep({ ...base, stepKey: "implement", branchKey: null } as never);
+    expect(plain).toMatchObject({ kind: "agent" });
+  });
+
+  it("a Join claim writes its manifest to the clone root, hands the path to the shell turn spec, and removes it after", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "factory-manifest-test-"));
+    try {
+      const manifest: JoinManifestEntry[] = [
+        { key: "agent-a", repo: "backend", branch: "run/run_1/implement/agent-a/t1-a1", sha: "sha-a", outcome: "succeeded", outputs: null },
+        { key: "agent-b", repo: "frontend", branch: "run/run_1/implement/agent-b/t1-a1", sha: null, outcome: "failed", outputs: null },
+      ];
+      let capturedSpec: (TurnSpec & { kind: "shell" }) | undefined;
+      let fileContentAtTurnStart: string | null = null;
+      const deps = {
+        protocol: fakeProtocol(),
+        git: fakeGit(),
+        repoDirFor: () => dir,
+        sandboxImage: "factory-sandbox",
+        heartbeatIntervalMs: 100,
+        capabilities: { agentClis: [] as string[] },
+        startTurn(spec: TurnSpec): Turn {
+          capturedSpec = spec as TurnSpec & { kind: "shell" };
+          fileContentAtTurnStart = spec.manifestFile ? readFileSync(spec.manifestFile, "utf-8") : null;
+          return fakeTurn();
+        },
+      };
+      await executeClaimedTurn(deps, claimFixture({ joinManifest: manifest }));
+
+      // The manifest file existed in the clone root while the turn ran, with
+      // the exact [{ key, repo, branch, sha, outcome, outputs }] content.
+      expect(capturedSpec?.manifestFile).toBe(path.join(dir, ".factory-manifest.json"));
+      expect(fileContentAtTurnStart).toBe(JSON.stringify(manifest, null, 2));
+      // Cross-repo branches are data, not checkouts: the entry's repo stays
+      // as delivered — the manifest is the only bridge.
+      expect(capturedSpec?.kind).toBe("shell");
+      // And it is gone after the turn, so it never rides the pushed branch.
+      await expect(readFile(path.join(dir, ".factory-manifest.json"), "utf-8")).rejects.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a Join agent turn gets the manifest path AND a prompt note naming the manifest file", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "factory-manifest-agent-"));
+    try {
+      const manifest: JoinManifestEntry[] = [{ key: "agent-a", repo: "backend", branch: "run/run_1/implement/agent-a/t1-a1", sha: "sha-a", outcome: "succeeded", outputs: null }];
+      const protocol = fakeProtocol();
+      const { deps, startTurnCalls } = makeDeps({ protocol, turn: tagResult('{"kind":"done","outputs":{"x":"y"}}') });
+      deps.repoDirFor = () => dir;
+      await executeClaimedTurn(deps, agentClaim({ joinManifest: manifest }));
+
+      const spec = startTurnCalls[0]! as TurnSpec & { kind: "agent" };
+      expect(spec.manifestFile).toBe(path.join(dir, ".factory-manifest.json"));
+      expect(spec.prompt).toContain(".factory-manifest.json");
+      expect(spec.prompt).toContain("outcome");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a non-Join claim carries no manifestFile — the seam stays silent", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "factory-no-manifest-"));
+    try {
+      const { deps, startTurnCalls } = makeDeps({ repoDirFor: () => dir });
+      await executeClaimedTurn(deps, claimFixture());
+      const spec = startTurnCalls[0]! as TurnSpec & { kind: "shell" };
+      expect(spec.manifestFile).toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });

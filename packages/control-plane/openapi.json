@@ -583,6 +583,49 @@
               "ask_group_id": {
                 "type": "string",
                 "nullable": true
+              },
+              "join_manifest": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "repo": {
+                      "type": "string"
+                    },
+                    "branch": {
+                      "type": "string"
+                    },
+                    "sha": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "running",
+                        "awaiting-human",
+                        "succeeded",
+                        "failed",
+                        "skipped",
+                        "cancelled"
+                      ]
+                    },
+                    "outputs": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "repo",
+                    "branch",
+                    "sha",
+                    "outcome"
+                  ]
+                }
               }
             },
             "required": [
@@ -599,7 +642,8 @@
               "git_tokens",
               "secrets",
               "egress_allowlist",
-              "ask_group_id"
+              "ask_group_id",
+              "join_manifest"
             ]
           }
         },

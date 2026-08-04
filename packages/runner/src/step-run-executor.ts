@@ -17,12 +17,15 @@
  * runner stops the sandbox via `turn.cancel()` and reports nothing (the row
  * is already cancelled; a `/result` for it would be 409).
  */
+import path from "node:path";
+import { writeFile, rm } from "node:fs/promises";
 import {
   compileStepOutputContract,
   createLiteralRedactor,
   FACTORY_OUTPUT_TAG,
   generateId,
   renderFinalPrompt,
+  resolveEffectiveStep,
   validatePipelineDefinition,
   type OutputsMap,
   type Question,
@@ -78,14 +81,17 @@ export type ResolvedRunStep =
     };
 
 /**
- * Parses the claimed definition and resolves this StepRun's Step. A `run:`
- * Step yields the shell branch; an agent Step (`prompt:`/`promptFile:`) is
- * resolved with the *final* prompt built from `outputs:` and `ask:` through
- * the shared `renderFinalPrompt` — the format-instruction block the Runner
- * generates (issue 9, AC4). Throws for a definition this Runner cannot
- * execute.
+ * Parses the claimed definition and resolves this StepRun's *effective*
+ * Step. A fan-out branch (`branch_key` set) resolves to the fan-out Step
+ * merged with its Branch's overrides via the shared `resolveEffectiveStep` —
+ * the same resolution the control plane uses to pin the final prompt at
+ * claim, so the two sides can never drift (issue #11). A `run:` Step yields
+ * the shell branch; an agent Step (`prompt:`/`promptFile:`) is resolved with
+ * the *final* prompt built from `outputs:` and `ask:` through the shared
+ * `renderFinalPrompt` — the format-instruction block the Runner generates
+ * (issue 9, AC4). Throws for a definition this Runner cannot execute.
  */
-export function resolveStep(claimed: Pick<ClaimedStepRun, "id" | "definition" | "definitionFiles" | "stepKey">): ResolvedRunStep {
+export function resolveStep(claimed: Pick<ClaimedStepRun, "id" | "definition" | "definitionFiles" | "stepKey" | "branchKey">): ResolvedRunStep {
   if (typeof claimed.definition !== "string") {
     throw new Error(`claimed step run ${claimed.id}: definition is not YAML text`);
   }
@@ -93,7 +99,7 @@ export function resolveStep(claimed: Pick<ClaimedStepRun, "id" | "definition" | 
   if (!validation.valid) {
     throw new Error(`claimed step run ${claimed.id}: definition failed validation`);
   }
-  const step = validation.pipeline.steps[claimed.stepKey];
+  const step = resolveEffectiveStep(validation.pipeline, claimed.stepKey, claimed.branchKey);
   if (!step) {
     throw new Error(`claimed step run ${claimed.id}: no step '${claimed.stepKey}' in the definition`);
   }
@@ -330,6 +336,15 @@ export async function executeClaimedTurn(deps: StepRunExecutorDeps, claimed: Cla
   const cloneDir = deps.repoDirFor(claimed.repository.owner, claimed.repository.name);
   const step = resolveStep(claimed);
 
+  // The Join manifest (issue #11, AC7): written to the host clone root so
+  // the seam can carry it into the sandbox worktree as `.factory-manifest.json`,
+  // cleaned up whatever happens. It is *not* the join Step's own git changes —
+  // the manifest the branch already pushed is the work the turn commits.
+  const manifestHostPath = path.join(cloneDir, ".factory-manifest.json");
+  if (claimed.joinManifest.length > 0) {
+    await writeFile(manifestHostPath, JSON.stringify(claimed.joinManifest, null, 2));
+  }
+
   const uploader =
     deps.logUploaderFor?.(claimed) ??
     createProtocolLogChunkUploader({ protocol: deps.protocol }, claimed.id, claimed.leaseToken, claimed.attempt);
@@ -346,6 +361,11 @@ export async function executeClaimedTurn(deps: StepRunExecutorDeps, claimed: Cla
   // flush while the lease is still valid, and the outer finally is the backstop
   // for the early-return (cancel) path.
   const stopLogging = () => logSink.stop().catch(() => {});
+  // Best-effort: the manifest must never land on the branch the turn pushes.
+  const removeManifestFromWorktree = (worktreePath: string | null) => {
+    if (!worktreePath) return;
+    return rm(path.join(worktreePath, ".factory-manifest.json"), { force: true }).catch(() => {});
+  };
 
   try {
     await deps.git.ensureRepo(cloneDir, repoUrl);
@@ -391,6 +411,7 @@ export async function executeClaimedTurn(deps: StepRunExecutorDeps, claimed: Cla
     if (step.kind === "shell") {
       if (result.exitCode !== 0) {
         await stopLogging();
+        await removeManifestFromWorktree(result.preservedWorktreePath);
         await deps.protocol.reportResult({
           stepRunId: claimed.id,
           leaseToken: claimed.leaseToken,
@@ -399,6 +420,7 @@ export async function executeClaimedTurn(deps: StepRunExecutorDeps, claimed: Cla
         });
         return;
       }
+      await removeManifestFromWorktree(result.preservedWorktreePath);
       const sha = await commitAndPush(deps, claimed, cloneDir, repoUrl, branch, result);
       await stopLogging();
       // The turn's diff is materialized as an artifact after the push, before
@@ -425,6 +447,7 @@ export async function executeClaimedTurn(deps: StepRunExecutorDeps, claimed: Cla
       ...(step.outputs !== undefined ? { outputs: step.outputs } : {}),
       ...(step.ask !== undefined ? { ask: step.ask } : {}),
     });
+    await removeManifestFromWorktree(result.preservedWorktreePath);
     const sha = await commitAndPush(deps, claimed, cloneDir, repoUrl, branch, result);
     await stopLogging();
 
@@ -493,6 +516,7 @@ export async function executeClaimedTurn(deps: StepRunExecutorDeps, claimed: Cla
     });
   } finally {
     await stopLogging();
+    await rm(manifestHostPath, { force: true }).catch(() => {});
     await revokeTurnTokens(deps.git, claimed);
   }
 }
@@ -534,6 +558,9 @@ async function materializeDiff(
   }));
 }
 
+/** The relative name the manifest file rides into the sandbox worktree under (see `agent-runtime/runtime.ts`). */
+const MANIFEST_WORKTREE_NAME = ".factory-manifest.json";
+
 /** Builds the seam spec for the resolved Step — shell or agent (issue 9). */
 function turnSpecFor(
   deps: StepRunExecutorDeps,
@@ -554,14 +581,22 @@ function turnSpecFor(
     secrets: claimed.secrets,
     // AC6: default-deny egress allowlist for the sandbox.
     egressAllowlist: claimed.egressAllowlist,
+    // The Join manifest (issue #11, AC7), when this StepRun joins a fan-out.
+    ...(claimed.joinManifest.length > 0
+      ? { manifestFile: path.join(deps.repoDirFor(claimed.repository.owner, claimed.repository.name), ".factory-manifest.json") }
+      : {}),
   };
   if (step.kind === "shell") {
     return { kind: "shell", command: step.run, ...common };
   }
+  const manifestNote =
+    claimed.joinManifest.length > 0
+      ? `\n\nA manifest of the upstream branches you are joining is available at ${MANIFEST_WORKTREE_NAME} in your working directory: [{ key, repo, branch, sha, outcome, outputs }]. Read it to see every branch's outcome and structured output.`
+      : "";
   return {
     kind: "agent",
     agent: step.agent,
-    prompt: step.finalPrompt,
+    prompt: `${step.finalPrompt}${manifestNote}`,
     outputContract: compileStepOutputContract({
       ...(step.outputs !== undefined ? { outputs: step.outputs } : {}),
       ...(step.ask !== undefined ? { ask: step.ask } : {}),

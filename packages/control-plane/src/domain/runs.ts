@@ -32,7 +32,7 @@
  *
  * See the written report for this as an open question for review.
  */
-import { and, asc, desc, eq, isNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, lt } from "drizzle-orm";
 import {
   generateId,
   validatePipelineDefinition,
@@ -47,6 +47,7 @@ import { requireProjectMembership } from "./projects.js";
 import { recordAuditEvent } from "./audit.js";
 import { DomainValidationError, NotFoundError } from "./errors.js";
 import { RefNotFoundError, type RepoRef } from "./git-host.js";
+import { isFanOutStep, materializeFanOut } from "./graph-advance.js";
 
 export type Run = typeof runs.$inferSelect;
 export type StepRun = typeof stepRuns.$inferSelect;
@@ -155,6 +156,21 @@ async function findRepositoryByName(
     .from(repositories)
     .where(and(eq(repositories.projectId, projectId), eq(repositories.name, name)));
   return repo;
+}
+
+/**
+ * Root Steps that are fan-out sources — materialized at trigger by giving
+ * birth to their branches directly, since they have no upstream to wait for
+ * ("Step non-fan-out di muka, cabang saat hulu sukses": a root fan-out's
+ * `branches:` list *is* the "di muka"). A root `branchesFrom:` has no
+ * upstream Output at trigger, so it stays unmaterialized until its source
+ * Step succeeds (`graph-advance.ts` treats `branchesFrom.step` as a
+ * dependency).
+ */
+function rootFanOutConstantStepIds(pipeline: Pipeline): string[] {
+  return Object.entries(pipeline.steps)
+    .filter(([, step]) => step.after.length === 0 && isFanOutStep(step) && step.branches !== undefined)
+    .map(([id]) => id);
 }
 
 /**
@@ -336,6 +352,20 @@ export async function triggerRun(
           .returning();
         createdStepRuns.push(stepRun!);
       }
+
+      // Root `branches:` fan-outs are born at trigger, in the same
+      // transaction as the Run itself (issue #11, AC5). A failed root fan-out
+      // (empty list, duplicate keys, unknown branch repo) leaves a `failed`
+      // decision row. The branch rows (and any decision rows) are appended to
+      // the initial Graph.
+      for (const stepId of rootFanOutConstantStepIds(pipeline)) {
+        await materializeFanOut({ db: tx, now: deps.clock.now }, insertedRun!, pipeline, stepId);
+      }
+      const fanOutRows = await tx
+        .select()
+        .from(stepRuns)
+        .where(and(eq(stepRuns.runId, insertedRun!.id), isNotNull(stepRuns.branchKey)));
+      createdStepRuns.push(...fanOutRows);
 
       return { run: insertedRun!, stepRuns: createdStepRuns };
     });

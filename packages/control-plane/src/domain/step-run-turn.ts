@@ -29,7 +29,7 @@ import type { Database } from "../db/client.js";
 import type { AppDeps } from "../deps.js";
 import { DomainValidationError, LeaseConflictError } from "./errors.js";
 import type { RunnerIdentity } from "./runners.js";
-import { scheduleDependentsOf } from "./graph-advance.js";
+import { advanceGraph, finalizeRunIfDone, parsePipelineSnapshot, type RunRow } from "./graph-advance.js";
 
 type StepRunRow = typeof stepRuns.$inferSelect;
 
@@ -514,13 +514,15 @@ async function recordArtifacts(
  * recorded outcome at `200`; the row having moved on (a different token now
  * current, or `cancelled`) is `409`, and the Runner is fenced.
  *
- * On a first-time `succeeded` commit of a non-fan-out StepRun, also calls
- * `graph-advance.ts`'s `scheduleDependentsOf` — the "advance the Graph"
- * mechanism issue #4 left unbuilt because nothing could move a StepRun to a
- * terminal state before this function existed (see that file's header for
- * the full reasoning and the shape chosen). Never re-runs on an idempotent
- * replay — only the branch that actually just flipped the row to
- * `succeeded` calls it.
+ * The terminal transition and the Graph advance it triggers happen in **one
+ * Postgres transaction**: the StepRun's `/result` commit, the fan-out
+ * decision (issue #11 — a fan-out source's branches are born here, "cabang
+ * lahir saat hulu sukses, keduanya dalam satu transaksi"), the Join
+ * verdicts, skip propagation, and — the moment nothing is left in flight —
+ * the Run's single write of `outcome`/`ended_at`. On a first-time commit
+ * (never on an idempotent replay), `advanceGraph` re-evaluates every Step
+ * that depends on this one from the opposite end (a Step finishing instead
+ * of a Run starting); see `graph-advance.ts` for the full model.
  *
  * The invariant of the turn's commit point (spec: "push branch → unggah blob
  * → POST result ... StepRun `succeeded` ada ⇒ ref ada") is enforced here,
@@ -560,60 +562,63 @@ export async function submitResult(
     );
   }
 
+  const [run] = await deps.db.select().from(runs).where(eq(runs.id, row.runId));
+  if (!run) {
+    throw new LeaseConflictError("step run references a missing run");
+  }
+
   // The authoritative Output gate (AC6/AC7). The Runner may have validated
   // for live feedback while the session was still alive; this is where the
   // Output is allowed or rejected for good, because it is the only thing
   // that moves scheduling. A rejected Output makes the whole turn `failed`
   // with `reason: output-invalid`, consuming the ordinary attempt — the
   // branch it already pushed is an orphan for the retention GC.
-  let checked: ReturnType<typeof checkStepOutput> = { kind: "no-contract" };
+  let outcome: "succeeded" | "failed" = input.outcome;
+  let reason = input.reason ?? null;
+  let outputData: unknown = input.outputData;
   if (input.outcome === "succeeded") {
-    const [run] = await deps.db.select().from(runs).where(eq(runs.id, row.runId));
-    checked = checkStepOutput(run?.definition, row.stepKey, input.outputData);
-  }
-  if (checked.kind === "invalid") {
-    const [updated] = await deps.db
-      .update(stepRuns)
-      .set({
-        outcome: "failed",
-        reason: "output-invalid",
-        outputRefBranch: input.ref?.branch ?? null,
-        outputRefSha: input.ref?.sha ?? null,
-        outputData: null,
-      })
-      .where(eq(stepRuns.id, stepRunId))
-      .returning();
-    await clearGrants(deps, row);
-    return toResultRecord(updated!);
+    const checked = checkStepOutput(run.definition, row.stepKey, input.outputData);
+    if (checked.kind === "invalid") {
+      outcome = "failed";
+      reason = "output-invalid";
+      outputData = null;
+    }
   }
 
-  const recorded = await deps.db.transaction(async (tx) => {
-    if (input.outcome === "succeeded") {
+  // The parsed Pipeline this Run's snapshot carries — used by the advance to
+  // re-evaluate the Graph. A re-validation failure here is a control-plane
+  // inconsistency (the definition validated at trigger); the terminal commit
+  // still stands, the advance just does nothing.
+  const pipeline = parsePipelineSnapshot(run.definition);
+
+  const updated = await deps.db.transaction(async (tx) => {
+    if (outcome === "succeeded") {
       await recordArtifacts(tx, deps.clock.now(), row, input.artifacts ?? []);
     }
-    const [updated] = await tx
+    const [committed] = await tx
       .update(stepRuns)
       .set({
-        outcome: input.outcome,
-        reason: input.reason ?? null,
+        outcome,
+        reason,
         outputRefBranch: input.ref?.branch ?? null,
         outputRefSha: input.ref?.sha ?? null,
-        outputData: input.outputData ?? null,
+        outputData: outputData ?? null,
       })
       .where(eq(stepRuns.id, stepRunId))
       .returning();
-    return updated!;
+
+    if (committed && pipeline) {
+      await advanceGraph({ db: tx, now: deps.clock.now }, run, pipeline, row.stepKey);
+      await finalizeRunIfDone({ db: tx, now: deps.clock.now }, run.id, pipeline);
+    }
+    return committed;
   });
 
   // The batch is consumed by this commit point — whether it recorded
   // artifacts or not, no later /uploads for this attempt may reference it.
   await clearGrants(deps, row);
 
-  if (input.outcome === "succeeded" && row.branchKey === null) {
-    await scheduleDependentsOf(deps, row.runId, row.stepKey);
-  }
-
-  return toResultRecord(recorded);
+  return toResultRecord(updated!);
 }
 
 /** Removes the grant batch of one (StepRun, attempt) — a batch is consumed the moment its turn commits. */

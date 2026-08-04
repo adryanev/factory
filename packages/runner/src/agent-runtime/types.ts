@@ -52,6 +52,14 @@ export interface ShellTurnSpec {
   egressAllowlist?: string[];
   /** Streamed stdout line sink (a future live-tail/log-chunks consumer). */
   onLine?: (line: string) => void;
+  /**
+   * Host path to this StepRun's Join manifest (issue #11, AC7) — the
+   * upstream branches as `[{ key, repo, branch, sha, outcome, outputs }]`.
+   * The seam copies it into the sandbox worktree as `.factory-manifest.json`
+   * before the turn starts, so both shell and agent turns read it by that
+   * relative name. Absent for a Step that joins nothing.
+   */
+  manifestFile?: string;
 }
 
 /**
@@ -101,6 +109,13 @@ export interface AgentTurnSpec {
   egressAllowlist?: string[];
   /** Streamed stdout line sink (the live-log chunk source). */
   onLine?: (line: string) => void;
+  /**
+   * Host path to this StepRun's Join manifest (issue #11, AC7) — copied into
+   * the sandbox worktree as `.factory-manifest.json` before the turn starts;
+   * the final prompt names it for the agent. Absent for a Step that joins
+   * nothing.
+   */
+  manifestFile?: string;
 }
 
 /**

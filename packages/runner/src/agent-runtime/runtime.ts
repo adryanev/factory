@@ -123,6 +123,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps) {
           baseBranch: spec.baseRef,
           sandbox: sandboxProvider,
           cwd: spec.workingDirectory,
+          // The Join manifest (issue #11, AC7) rides into the worktree as a
+          // well-known relative file so both shell and agent turns can read
+          // it — the executor wrote it to the host repo root, and sandcastle
+          // copies `copyToWorktree` paths into the worktree at creation.
+          ...(spec.manifestFile ? { copyToWorktree: [".factory-manifest.json"] } : {}),
         });
 
         try {
@@ -226,6 +231,10 @@ function startAgentTurn(deps: TurnRuntimeDeps, spec: AgentTurnSpec): Turn {
         }),
         ...(spec.resumeSession !== undefined ? { resumeSession: spec.resumeSession } : {}),
         signal: abort.signal,
+        // The Join manifest (issue #11, AC7) is copied from the host repo
+        // root into the worktree before the agent starts, as the well-known
+        // relative file the final prompt names.
+        ...(spec.manifestFile ? { copyToWorktree: [".factory-manifest.json"] } : {}),
         ...(spec.onLine
           ? {
               logging: {

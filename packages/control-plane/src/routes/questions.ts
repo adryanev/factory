@@ -139,6 +139,42 @@ const answerRoute = createRoute({
   },
 });
 
+const artifactEditUploadRoute = createRoute({
+  method: "post",
+  path: "/questions/{id}/artifact-upload",
+  summary:
+    "Mints the browser PUT for an edit-artifact answer. Only a member of the Question's Group may mint it; the existing Question CAS remains the single turn owner.",
+  request: {
+    params: questionIdParamSchema,
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ sizeBytes: z.number().int().nonnegative() }).openapi("ArtifactEditUploadRequest"),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Presigned upload granted.",
+      content: {
+        "application/json": {
+          schema: z.object({
+            key: z.string(),
+            contentType: z.literal("text/markdown"),
+            uploadUrl: z.string(),
+            blobKey: z.string(),
+            expiresAt: z.string(),
+          }),
+        },
+      },
+    },
+    401: { description: "Not logged in.", content: { "application/json": { schema: errorResponseSchema } } },
+    403: { description: "Not a member of the Question's Group.", content: { "application/json": { schema: errorResponseSchema } } },
+    404: { description: "No such Question.", content: { "application/json": { schema: errorResponseSchema } } },
+  },
+});
+
 export function registerQuestionRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDeps): void {
   app.openapi(waitingRoute, async (c) => {
     const principal = requirePrincipal(c);
@@ -151,6 +187,27 @@ export function registerQuestionRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDeps
     const { id } = c.req.valid("param");
     const state = await deps.domain.questions.get(principal, id as Id<"question">);
     return c.json(toQuestionStateResponse(state), 200);
+  });
+
+  app.openapi(artifactEditUploadRoute, async (c) => {
+    const principal = requirePrincipal(c);
+    const { id } = c.req.valid("param");
+    const { sizeBytes } = c.req.valid("json");
+    const grant = await deps.domain.questions.mintArtifactEditUpload(
+      principal,
+      id as Id<"question">,
+      sizeBytes,
+    );
+    return c.json(
+      {
+        key: grant.key,
+        contentType: grant.contentType,
+        uploadUrl: grant.uploadUrl,
+        blobKey: grant.blobKey,
+        expiresAt: grant.expiresAt.toISOString(),
+      },
+      200,
+    );
   });
 
   app.openapi(answerRoute, async (c) => {

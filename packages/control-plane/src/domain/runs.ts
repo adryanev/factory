@@ -32,7 +32,7 @@
  *
  * See the written report for this as an open question for review.
  */
-import { and, asc, desc, eq, isNotNull, isNull, lt } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt } from "drizzle-orm";
 import {
   generateId,
   validatePipelineDefinition,
@@ -40,14 +40,23 @@ import {
   type Pipeline,
   type ValidationIssue,
 } from "@factory/shared";
-import { projects, repositories, runs, secrets, serviceAccounts, stepRuns } from "../db/schema.js";
+import {
+  artifacts,
+  projects,
+  questions,
+  repositories,
+  runs,
+  secrets,
+  serviceAccounts,
+  stepRuns,
+} from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
 import type { Principal } from "./principal.js";
 import { requireProjectMembership } from "./projects.js";
 import { recordAuditEvent } from "./audit.js";
 import { DomainValidationError, NotFoundError } from "./errors.js";
 import { RefNotFoundError, type RepoRef } from "./git-host.js";
-import { isFanOutStep, materializeFanOut } from "./graph-advance.js";
+import { finalizeRunIfDone, isFanOutStep, materializeFanOut, parsePipelineSnapshot } from "./graph-advance.js";
 
 export type Run = typeof runs.$inferSelect;
 export type StepRun = typeof stepRuns.$inferSelect;
@@ -71,6 +80,19 @@ export interface TriggerRunInput {
 export interface TriggeredRun {
   run: Run;
   stepRuns: StepRun[];
+}
+
+export interface GrillingSummary {
+  draftRevisions: number;
+  humanEdits: number;
+  decisions: number;
+  openQuestions: number;
+}
+
+export interface RewindRunInput {
+  id: Id<"run">;
+  parentRunId: Id<"run">;
+  stepRunId: Id<"steprun">;
 }
 
 /** A Step is materializable up front iff it has no unmet dependency and is not itself a fan-out source — see the file-level doc for why this is narrower than "every non-fan-out Step". */
@@ -388,6 +410,299 @@ export async function triggerRun(
   return result;
 }
 
+/**
+ * Cancels every live StepRun in a Run and records the user's intent. The
+ * acknowledgement stays on `cancel_requested_at`; the final Run verdict is
+ * still owned by the normal Graph/finalization path.
+ */
+export async function cancelRun(
+  deps: Pick<AppDeps, "db" | "clock">,
+  principal: Principal,
+  projectId: Id<"project">,
+  runId: Id<"run">,
+): Promise<Run> {
+  await requireProjectMembership(deps, principal, projectId);
+  const [run] = await deps.db
+    .select()
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.projectId, projectId)));
+  if (!run) {
+    throw new NotFoundError("run", runId);
+  }
+  const now = deps.clock.now();
+  const [updated] = await deps.db.transaction(async (tx) => {
+    await tx
+      .update(runs)
+      .set({ cancelRequestedAt: run.cancelRequestedAt ?? now })
+      .where(eq(runs.id, runId));
+    await tx
+      .update(stepRuns)
+      .set({ outcome: "cancelled", reason: "cancelled-by-operator" })
+      .where(
+        and(
+          eq(stepRuns.runId, runId),
+          inArray(stepRuns.outcome, ["ready", "running", "awaiting-human"]),
+        ),
+      );
+    const pipeline = parsePipelineSnapshot(run.definition);
+    if (pipeline) {
+      await finalizeRunIfDone({ db: tx, now: () => now }, runId, pipeline);
+    }
+    return tx.select().from(runs).where(eq(runs.id, runId));
+  });
+  return updated ?? { ...run, cancelRequestedAt: run.cancelRequestedAt ?? now };
+}
+
+/** ID-only write variants for the web contract's `/runs/:id/*` actions. */
+export async function cancelRunById(
+  deps: Pick<AppDeps, "db" | "clock">,
+  principal: Principal,
+  runId: Id<"run">,
+): Promise<Run> {
+  const [run] = await deps.db.select().from(runs).where(eq(runs.id, runId));
+  if (!run) throw new NotFoundError("run", runId);
+  return cancelRun(deps, principal, run.projectId, runId);
+}
+
+/**
+ * Rewinds by cloning the existing timeline into a new Run and resetting one
+ * selected StepRun to `ready`. The old Run, its questions, and its Artifacts
+ * remain untouched; `parent_run_id` is the only lineage marker needed.
+ */
+export async function rewindRun(
+  deps: Pick<AppDeps, "db" | "clock">,
+  principal: Principal,
+  projectId: Id<"project">,
+  input: RewindRunInput,
+): Promise<TriggeredRun> {
+  await requireProjectMembership(deps, principal, projectId);
+  const [sourceRun] = await deps.db
+    .select()
+    .from(runs)
+    .where(and(eq(runs.id, input.parentRunId), eq(runs.projectId, projectId)));
+  if (!sourceRun) {
+    throw new NotFoundError("run", input.parentRunId);
+  }
+  const [target] = await deps.db
+    .select()
+    .from(stepRuns)
+    .where(and(eq(stepRuns.id, input.stepRunId), eq(stepRuns.runId, sourceRun.id)));
+  if (!target) {
+    throw new NotFoundError("step run", input.stepRunId);
+  }
+  if (input.id === sourceRun.id) {
+    throw new DomainValidationError("run_id_conflict", "the rewound Run must have a new id");
+  }
+
+  const sourceStepRuns = await deps.db
+    .select()
+    .from(stepRuns)
+    .where(and(eq(stepRuns.runId, sourceRun.id), lt(stepRuns.turn, target.turn + 1)));
+  const sourceQuestions = await deps.db
+    .select()
+    .from(questions)
+    .where(inArray(questions.stepRunId, sourceStepRuns.map((row) => row.id)));
+  const sourceArtifacts = await deps.db
+    .select()
+    .from(artifacts)
+    .where(inArray(artifacts.stepRunId, sourceStepRuns.map((row) => row.id)));
+  const now = deps.clock.now();
+
+  try {
+    const result = await deps.db.transaction(async (tx) => {
+      const [child] = await tx
+        .insert(runs)
+        .values({
+          id: input.id,
+          projectId: sourceRun.projectId,
+          pipelineRepositoryId: sourceRun.pipelineRepositoryId,
+          pipelinePath: sourceRun.pipelinePath,
+          triggerKind: "manual",
+          triggeredByPrincipalId: principal.id,
+          credentialPrincipalId: sourceRun.credentialPrincipalId,
+          refBranch: sourceRun.refBranch,
+          refSha: sourceRun.refSha,
+          parentRunId: sourceRun.id,
+          definition: sourceRun.definition,
+          definitionFiles: sourceRun.definitionFiles,
+        })
+        .returning();
+
+      const idBySourceStepRun = new Map<Id<"steprun">, Id<"steprun">>();
+      const createdStepRuns: StepRun[] = [];
+      const previous = sourceStepRuns.find(
+        (row) =>
+          row.stepKey === target.stepKey &&
+          row.branchKey === target.branchKey &&
+          row.turn === target.turn - 1,
+      );
+      for (const row of sourceStepRuns) {
+        const isTarget = row.id === target.id;
+        const id = generateId("steprun");
+        idBySourceStepRun.set(row.id, id);
+        const [created] = await tx
+          .insert(stepRuns)
+          .values({
+            id,
+            runId: child!.id,
+            repositoryId: row.repositoryId,
+            stepKey: row.stepKey,
+            branchKey: row.branchKey,
+            turn: row.turn,
+            attempt: isTarget ? 1 : row.attempt,
+            outcome: isTarget ? "ready" : row.outcome,
+            reason: isTarget ? null : row.reason,
+            kind: row.kind,
+            requiredTags: row.requiredTags,
+            readyAt: isTarget ? now : row.readyAt,
+            startedAt: isTarget ? null : row.startedAt,
+            leasedBy: null,
+            leaseToken: null,
+            leaseExpiresAt: null,
+            outputRefBranch: isTarget ? previous?.outputRefBranch ?? null : row.outputRefBranch,
+            outputRefSha: isTarget ? previous?.outputRefSha ?? null : row.outputRefSha,
+            outputData: isTarget ? null : row.outputData,
+            prNumber: isTarget ? null : row.prNumber,
+            prUrl: isTarget ? null : row.prUrl,
+            finalPrompt: isTarget ? null : row.finalPrompt,
+            sessionBlobKey: row.sessionBlobKey,
+            sessionId: row.sessionId,
+            resumePrompt: row.resumePrompt,
+            sessionPurgedAt: row.sessionPurgedAt,
+          })
+          .returning();
+        if (created) createdStepRuns.push(created);
+      }
+
+      for (const question of sourceQuestions) {
+        const newStepRunId = idBySourceStepRun.get(question.stepRunId);
+        if (!newStepRunId || question.stepRunId === target.id) continue;
+        await tx.insert(questions).values({
+          id: generateId("question"),
+          stepRunId: newStepRunId,
+          kind: question.kind,
+          body: question.body,
+          options: question.options,
+          multi: question.multi,
+          allowOther: question.allowOther,
+          artifactKey: question.artifactKey,
+          groupId: question.groupId,
+          createdAt: question.createdAt,
+          answeredAt: question.answeredAt,
+          answeredByPrincipalId: question.answeredByPrincipalId,
+          answer: question.answer,
+        });
+      }
+      for (const artifact of sourceArtifacts) {
+        const newStepRunId = idBySourceStepRun.get(artifact.stepRunId);
+        if (!newStepRunId || artifact.stepRunId === target.id) continue;
+        await tx.insert(artifacts).values({
+          id: generateId("artifact"),
+          stepRunId: newStepRunId,
+          key: artifact.key,
+          kind: artifact.kind,
+          contentType: artifact.contentType,
+          blobKey: artifact.blobKey,
+          sizeBytes: artifact.sizeBytes,
+          authoredByPrincipalId: artifact.authoredByPrincipalId,
+          createdAt: artifact.createdAt,
+        });
+      }
+      return { run: child!, stepRuns: createdStepRuns };
+    });
+    await recordAuditEvent(deps, {
+      actor: principal,
+      projectId,
+      action: "run.triggered",
+      targetType: "run",
+      targetId: result.run.id,
+      metadata: { parentRunId: sourceRun.id, rewindStepRunId: target.id },
+    });
+    return result;
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new DomainValidationError("run_id_conflict", `a Run with id ${input.id} already exists`);
+    }
+    throw error;
+  }
+}
+
+export async function rewindRunById(
+  deps: Pick<AppDeps, "db" | "clock">,
+  principal: Principal,
+  input: RewindRunInput,
+): Promise<TriggeredRun> {
+  const [run] = await deps.db.select().from(runs).where(eq(runs.id, input.parentRunId));
+  if (!run) throw new NotFoundError("run", input.parentRunId);
+  return rewindRun(deps, principal, run.projectId, input);
+}
+
+function decisionsIn(outputData: unknown): number {
+  if (typeof outputData !== "object" || outputData === null) return 0;
+  const topLevel = (outputData as { decisions?: unknown }).decisions;
+  if (Array.isArray(topLevel)) return topLevel.length;
+  const outputs = (outputData as { outputs?: unknown }).outputs;
+  if (typeof outputs !== "object" || outputs === null) return 0;
+  const nested = (outputs as { decisions?: unknown }).decisions;
+  return Array.isArray(nested) ? nested.length : 0;
+}
+
+/** Four reopen numbers, all derived from immutable state at read time. */
+export async function getGrillingSummary(
+  deps: Pick<AppDeps, "db">,
+  principal: Principal,
+  projectId: Id<"project">,
+  runId: Id<"run">,
+): Promise<GrillingSummary> {
+  await requireProjectMembership(deps, principal, projectId);
+  const [run] = await deps.db
+    .select({ id: runs.id })
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.projectId, projectId)));
+  if (!run) {
+    throw new NotFoundError("run", runId);
+  }
+
+  const [revisionCount] = await deps.db
+    .select({ value: count() })
+    .from(artifacts)
+    .innerJoin(stepRuns, eq(stepRuns.id, artifacts.stepRunId))
+    .where(and(eq(stepRuns.runId, runId), eq(artifacts.key, "prd")));
+  const [humanEditCount] = await deps.db
+    .select({ value: count() })
+    .from(artifacts)
+    .innerJoin(stepRuns, eq(stepRuns.id, artifacts.stepRunId))
+    .where(
+      and(
+        eq(stepRuns.runId, runId),
+        eq(artifacts.key, "prd"),
+        isNotNull(artifacts.authoredByPrincipalId),
+      ),
+    );
+  const [openQuestionCount] = await deps.db
+    .select({ value: count() })
+    .from(questions)
+    .innerJoin(stepRuns, eq(stepRuns.id, questions.stepRunId))
+    .where(
+      and(
+        eq(stepRuns.runId, runId),
+        isNull(questions.answeredAt),
+        eq(stepRuns.outcome, "awaiting-human"),
+      ),
+    );
+  const outputRows = await deps.db
+    .select({ outputData: stepRuns.outputData })
+    .from(stepRuns)
+    .where(eq(stepRuns.runId, runId));
+
+  return {
+    draftRevisions: Number(revisionCount?.value ?? 0),
+    humanEdits: Number(humanEditCount?.value ?? 0),
+    decisions: outputRows.reduce((total, row) => total + decisionsIn(row.outputData), 0),
+    openQuestions: Number(openQuestionCount?.value ?? 0),
+  };
+}
+
 export interface RunListFilters {
   /** `ended_at IS NULL` — distinct from `outcome`, never combined with it (spec: "filter ... terpisah tegas"). */
   inFlight?: boolean;
@@ -435,63 +750,6 @@ export async function listRuns(
   const nextCursor = hasMore ? (page[page.length - 1]!.id as Id<"run">) : null;
 
   return { runs: page, nextCursor };
-}
-
-/**
- * Records the operator's intent to cancel a Run. This is deliberately not the
- * same write as cancelling each StepRun: Runners observe the intent through
- * their existing heartbeat channel and the mechanical cancellation follows in
- * the background. Repeating the request is safe and returns the first intent.
- */
-export async function cancelRun(
-  deps: Pick<AppDeps, "db" | "clock">,
-  principal: Principal,
-  projectId: Id<"project">,
-  runId: Id<"run">,
-): Promise<Run> {
-  await requireProjectMembership(deps, principal, projectId);
-
-  const [existing] = await deps.db
-    .select()
-    .from(runs)
-    .where(and(eq(runs.id, runId), eq(runs.projectId, projectId)));
-  if (!existing) {
-    throw new NotFoundError("run", runId);
-  }
-
-  // A finished Run has no work left to cancel. Returning it keeps the endpoint
-  // idempotent without manufacturing a late cancellation intent.
-  if (existing.cancelRequestedAt !== null || existing.endedAt !== null) {
-    return existing;
-  }
-
-  const [updated] = await deps.db
-    .update(runs)
-    .set({ cancelRequestedAt: deps.clock.now() })
-    .where(and(eq(runs.id, runId), isNull(runs.cancelRequestedAt), isNull(runs.endedAt)))
-    .returning();
-
-  if (updated) {
-    await recordAuditEvent(deps, {
-      actor: principal,
-      projectId,
-      action: "run.cancel_requested",
-      targetType: "run",
-      targetId: runId,
-    });
-    return updated;
-  }
-
-  // Another request won the compare-and-set. Read the winner's timestamp so
-  // both callers acknowledge the same intent.
-  const [winner] = await deps.db
-    .select()
-    .from(runs)
-    .where(and(eq(runs.id, runId), eq(runs.projectId, projectId)));
-  if (!winner) {
-    throw new NotFoundError("run", runId);
-  }
-  return winner;
 }
 
 export interface RunWithGraph {

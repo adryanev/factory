@@ -24,7 +24,13 @@ export interface ArtifactMeta {
   kind: ArtifactKind;
   contentType: string;
   sizeBytes: number;
+  authoredByPrincipalId: Id<"user"> | Id<"serviceaccount"> | null;
   createdAt: Date;
+}
+
+export interface ArtifactHistoryMeta extends ArtifactMeta {
+  stepRunId: Id<"steprun">;
+  turn: number;
 }
 
 export interface ArtifactRead extends ArtifactMeta {
@@ -41,6 +47,7 @@ function toMeta(row: typeof artifacts.$inferSelect): ArtifactMeta {
     kind: row.kind,
     contentType: row.contentType,
     sizeBytes: row.sizeBytes,
+    authoredByPrincipalId: row.authoredByPrincipalId,
     createdAt: row.createdAt,
   };
 }
@@ -82,6 +89,46 @@ export async function listStepRunArtifacts(
     .where(and(eq(artifacts.stepRunId, stepRunId), key === undefined ? undefined : eq(artifacts.key, key)))
     .orderBy(desc(artifacts.createdAt));
   return rows.map(toMeta);
+}
+
+/**
+ * The draft history query used by the grilling screen. Revisions are already
+ * immutable rows on separate StepRuns, so this is deliberately a read-only
+ * join rather than a version table or a maintained counter.
+ */
+export async function listRunArtifacts(
+  deps: Pick<AppDeps, "db">,
+  principal: Principal,
+  projectId: Id<"project">,
+  runId: Id<"run">,
+  key?: string,
+): Promise<ArtifactHistoryMeta[]> {
+  await requireProjectMembership(deps, principal, projectId);
+  const [run] = await deps.db
+    .select({ id: runs.id })
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.projectId, projectId)));
+  if (!run) {
+    throw new NotFoundError("run", runId);
+  }
+  const rows = await deps.db
+    .select({ artifact: artifacts, stepRun: stepRuns })
+    .from(artifacts)
+    .innerJoin(stepRuns, eq(stepRuns.id, artifacts.stepRunId))
+    .innerJoin(runs, eq(runs.id, stepRuns.runId))
+    .where(
+      and(
+        eq(runs.id, runId),
+        eq(runs.projectId, projectId),
+        key === undefined ? undefined : eq(artifacts.key, key),
+      ),
+    )
+    .orderBy(desc(stepRuns.turn), desc(artifacts.createdAt));
+  return rows.map(({ artifact, stepRun }) => ({
+    ...toMeta(artifact),
+    stepRunId: stepRun.id,
+    turn: stepRun.turn,
+  }));
 }
 
 /**

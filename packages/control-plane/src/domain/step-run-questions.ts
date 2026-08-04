@@ -31,6 +31,7 @@
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   generateId,
+  normalizeArtifactKey,
   renderAnswerForAgent,
   type Answer,
   type Id,
@@ -38,11 +39,21 @@ import {
   type QuestionKind,
   type QuestionOption,
 } from "@factory/shared";
-import { groups, groupMembers, projects, questions, runs, stepRuns } from "../db/schema.js";
+import {
+  artifacts,
+  groups,
+  groupMembers,
+  projects,
+  questions,
+  runs,
+  stepRuns,
+  stepRunUploadGrants,
+} from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
 import type { Principal } from "./principal.js";
 import { advanceGraph, finalizeRunIfDone, parsePipelineSnapshot, type RunRow } from "./graph-advance.js";
-import { ForbiddenError, NotFoundError } from "./errors.js";
+import { DomainValidationError, ForbiddenError, NotFoundError } from "./errors.js";
+import { MAX_ARTIFACT_BYTES } from "./step-run-turn.js";
 
 /** The latest readable state of a Question — what the web renders, and what a race loser is handed back (AC8). */
 export interface QuestionState {
@@ -67,6 +78,14 @@ export interface QuestionState {
   runId: Id<"run">;
   projectId: Id<"project">;
   projectName: string;
+}
+
+export interface ArtifactEditUpload {
+  key: string;
+  contentType: "text/markdown";
+  uploadUrl: string;
+  blobKey: string;
+  expiresAt: Date;
 }
 
 function toQuestionState(
@@ -198,6 +217,70 @@ async function requireGroupMember(
   return principal.id;
 }
 
+/**
+ * Mints the browser's PUT for an inline draft edit. The existing Question
+ * audience is the turn permission; there is no second editor lock. The grant
+ * is held on the awaiting StepRun until its Question CAS commits.
+ */
+export async function mintArtifactEditUpload(
+  deps: Pick<AppDeps, "db" | "objectStore" | "clock">,
+  principal: Principal,
+  questionId: Id<"question">,
+  sizeBytes: number,
+): Promise<ArtifactEditUpload> {
+  const context = await loadQuestionWithContext(deps.db, questionId);
+  if (!context) {
+    throw new NotFoundError("question", questionId);
+  }
+  await requireGroupMember(deps.db, principal, context.question.groupId);
+  if (context.question.kind !== "edit-artifact" || !context.question.artifactKey) {
+    throw new DomainValidationError(
+      "question_not_edit_artifact",
+      "only an edit-artifact Question can receive a draft upload",
+    );
+  }
+  if (context.stepRun.outcome !== "awaiting-human" || context.question.answeredAt !== null) {
+    throw new DomainValidationError(
+      "question_not_open",
+      "the edit-artifact Question is no longer open",
+    );
+  }
+  if (!Number.isInteger(sizeBytes) || sizeBytes < 0 || sizeBytes > MAX_ARTIFACT_BYTES) {
+    throw new DomainValidationError(
+      "artifact_too_large",
+      `the draft is ${sizeBytes} bytes, over the ${MAX_ARTIFACT_BYTES}-byte per-artifact quota`,
+    );
+  }
+
+  const key = normalizeArtifactKey(context.question.artifactKey);
+  // The question's StepRun is the only stable id available before the answer
+  // births the next turn. The resulting Artifact still belongs to that new
+  // StepRun; this key is only the immutable blob location minted for the PUT.
+  const blobKey = `artifact/${context.stepRun.id}/${key}`;
+  const { url, expiresAt } = await deps.objectStore.mintPutUrl(blobKey);
+  await deps.db.transaction(async (tx) => {
+    await tx
+      .delete(stepRunUploadGrants)
+      .where(
+        and(
+          eq(stepRunUploadGrants.stepRunId, context.stepRun.id),
+          eq(stepRunUploadGrants.attempt, context.stepRun.attempt),
+          eq(stepRunUploadGrants.kind, "artifact"),
+        ),
+      );
+    await tx.insert(stepRunUploadGrants).values({
+      stepRunId: context.stepRun.id,
+      attempt: context.stepRun.attempt,
+      key,
+      kind: "artifact",
+      sizeBytes,
+      blobKey,
+      grantedAt: deps.clock.now(),
+    });
+  });
+  return { key, contentType: "text/markdown", uploadUrl: url, blobKey, expiresAt };
+}
+
 /** Rebuilds the closed Question from its stored columns — the `renderAnswerForAgent` input. */
 function questionFromRow(question: typeof questions.$inferSelect): Question {
   switch (question.kind) {
@@ -243,6 +326,13 @@ export async function answerQuestion(
     throw new NotFoundError("question", questionId);
   }
   const answeringUser = await requireGroupMember(deps.db, principal, context.question.groupId);
+
+  if (answer.kind !== context.question.kind) {
+    throw new DomainValidationError(
+      "question_answer_kind_mismatch",
+      `Question kind '${context.question.kind}' cannot be answered with '${answer.kind}'`,
+    );
+  }
 
   const now = deps.clock.now();
   const won = await deps.db.transaction(async (tx) => {
@@ -302,8 +392,9 @@ export async function answerQuestion(
 
     const resumePrompt = renderAnswerForAgent(questionFromRow(context.question), answer);
 
+    const nextStepRunId = generateId("steprun");
     await tx.insert(stepRuns).values({
-      id: generateId("steprun"),
+      id: nextStepRunId,
       runId: context.stepRun.runId,
       repositoryId: context.stepRun.repositoryId,
       stepKey: context.stepRun.stepKey,
@@ -322,6 +413,52 @@ export async function answerQuestion(
       outputRefBranch: context.stepRun.outputRefBranch,
       outputRefSha: context.stepRun.outputRefSha,
     });
+
+    if (answer.kind === "edit-artifact") {
+      const [grant] = await tx
+        .select()
+        .from(stepRunUploadGrants)
+        .where(
+          and(
+            eq(stepRunUploadGrants.stepRunId, context.stepRun.id),
+            eq(stepRunUploadGrants.attempt, context.stepRun.attempt),
+            eq(stepRunUploadGrants.kind, "artifact"),
+            eq(stepRunUploadGrants.key, normalizeArtifactKey(context.question.artifactKey ?? "artifact")),
+          ),
+        );
+      const sizeBytes = Buffer.byteLength(answer.content, "utf8");
+      if (!grant) {
+        throw new DomainValidationError(
+          "artifact_edit_upload_required",
+          "upload the edited artifact before answering the Question",
+        );
+      }
+      if (sizeBytes > grant.sizeBytes) {
+        throw new DomainValidationError(
+          "artifact_size_exceeds_grant",
+          `the edited artifact is ${sizeBytes} bytes but only ${grant.sizeBytes} was granted`,
+        );
+      }
+      await tx.insert(artifacts).values({
+        id: generateId("artifact"),
+        stepRunId: nextStepRunId,
+        key: grant.key,
+        kind: "document",
+        contentType: "text/markdown",
+        blobKey: grant.blobKey,
+        sizeBytes,
+        authoredByPrincipalId: answeringUser,
+        createdAt: now,
+      });
+    }
+    await tx
+      .delete(stepRunUploadGrants)
+      .where(
+        and(
+          eq(stepRunUploadGrants.stepRunId, context.stepRun.id),
+          eq(stepRunUploadGrants.attempt, context.stepRun.attempt),
+        ),
+      );
     return true;
   });
 

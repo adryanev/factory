@@ -3,6 +3,7 @@ import {
   FACTORY_OUTPUT_TAG,
   compileOutputsSchema,
   compileStepOutputContract,
+  decisionSchema,
   generateFormatInstructions,
   outputsMapSchema,
   renderFinalPrompt,
@@ -111,6 +112,26 @@ describe("compileStepOutputContract — optional usage (issue 12)", () => {
   it("usageReportSchema is the closed shape the control plane prices", () => {
     expect(usageReportSchema.safeParse({ input_tokens: 10, output_tokens: 20 }).success).toBe(true);
     expect(usageReportSchema.safeParse({ input_tokens: 10, output_tokens: 20, extra: 1 }).success).toBe(false);
+  });
+});
+
+describe("agent-generated decisions", () => {
+  it("keeps decisions in the shared done Output contract", () => {
+    const schema = compileStepOutputContract({ outputs: {} });
+    const parsed = schema.safeParse({
+      kind: "done",
+      outputs: {},
+      decisions: [{ question: "Who uses this?", answer: "Ops", rationale: "Observed workflow" }],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("rejects a decision that is not the closed question/answer shape", () => {
+    expect(decisionSchema.safeParse({ question: "x", answer: "y", extra: true }).success).toBe(false);
+  });
+
+  it("documents the decisions field for the Runner and agent", () => {
+    expect(generateFormatInstructions({ outputs: {} })).toContain('"decisions"');
   });
 });
 

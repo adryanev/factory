@@ -19,7 +19,8 @@ const projectSchema = z
     allowSharedAgentCredential: z.boolean(),
     hostExecAllowed: z.boolean(),
     egressAllowlist: z.array(z.string()),
-    notificationWebhookUrl: z.string().nullable(),
+    /** A configured flag is safe to expose; the incoming-webhook URL is a bearer secret. */
+    notificationWebhookConfigured: z.boolean(),
   })
   .openapi("Project");
 
@@ -105,13 +106,16 @@ const updateProjectSettingsRoute = createRoute({
   method: "patch",
   path: "/projects/{id}",
   summary:
-    "Admin settings write. Today one knob: `allowSharedAgentCredential` — the User→ServiceAccount credential fallback, **default off** (AC: \"Fallback User→ServiceAccount lewat allowSharedAgentCredential, bawaan mati\"). Audited.",
+    "Admin settings write. Configures the User→ServiceAccount fallback or the one Project notification channel webhook. The webhook URL is never returned.",
   request: {
     params: idParamSchema,
     body: {
       content: {
         "application/json": {
-          schema: z.object({ allowSharedAgentCredential: z.boolean().optional() }),
+          schema: z.object({
+            allowSharedAgentCredential: z.boolean().optional(),
+            notificationWebhookUrl: z.string().url().max(2048).nullable().optional(),
+          }),
         },
       },
     },
@@ -133,7 +137,15 @@ function toProjectResponse(project: {
   egressAllowlist: string[];
   notificationWebhookUrl: string | null;
 }) {
-  return project;
+  return {
+    id: project.id,
+    name: project.name,
+    automationEnabled: project.automationEnabled,
+    allowSharedAgentCredential: project.allowSharedAgentCredential,
+    hostExecAllowed: project.hostExecAllowed,
+    egressAllowlist: project.egressAllowlist,
+    notificationWebhookConfigured: project.notificationWebhookUrl !== null,
+  };
 }
 
 export function registerProjectRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDeps): void {
@@ -179,6 +191,9 @@ export function registerProjectRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDeps)
     const project = await deps.domain.projects.updateSettings(principal, id as Id<"project">, {
       ...(body.allowSharedAgentCredential !== undefined
         ? { allowSharedAgentCredential: body.allowSharedAgentCredential }
+        : {}),
+      ...(body.notificationWebhookUrl !== undefined
+        ? { notificationWebhookUrl: body.notificationWebhookUrl }
         : {}),
     });
     return c.json(toProjectResponse(project), 200);

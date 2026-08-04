@@ -410,11 +410,7 @@ export async function triggerRun(
   return result;
 }
 
-/**
- * Cancels every live StepRun in a Run and records the user's intent. The
- * acknowledgement stays on `cancel_requested_at`; the final Run verdict is
- * still owned by the normal Graph/finalization path.
- */
+/** Records cancellation intent; live StepRuns are cancelled by the normal background/heartbeat path. */
 export async function cancelRun(
   deps: Pick<AppDeps, "db" | "clock">,
   principal: Principal,
@@ -422,35 +418,43 @@ export async function cancelRun(
   runId: Id<"run">,
 ): Promise<Run> {
   await requireProjectMembership(deps, principal, projectId);
-  const [run] = await deps.db
+  const [existing] = await deps.db
     .select()
     .from(runs)
     .where(and(eq(runs.id, runId), eq(runs.projectId, projectId)));
-  if (!run) {
+  if (!existing) {
     throw new NotFoundError("run", runId);
   }
-  const now = deps.clock.now();
-  const [updated] = await deps.db.transaction(async (tx) => {
-    await tx
-      .update(runs)
-      .set({ cancelRequestedAt: run.cancelRequestedAt ?? now })
-      .where(eq(runs.id, runId));
-    await tx
-      .update(stepRuns)
-      .set({ outcome: "cancelled", reason: "cancelled-by-operator" })
-      .where(
-        and(
-          eq(stepRuns.runId, runId),
-          inArray(stepRuns.outcome, ["ready", "running", "awaiting-human"]),
-        ),
-      );
-    const pipeline = parsePipelineSnapshot(run.definition);
-    if (pipeline) {
-      await finalizeRunIfDone({ db: tx, now: () => now }, runId, pipeline);
-    }
-    return tx.select().from(runs).where(eq(runs.id, runId));
-  });
-  return updated ?? { ...run, cancelRequestedAt: run.cancelRequestedAt ?? now };
+
+  if (existing.cancelRequestedAt !== null || existing.endedAt !== null) {
+    return existing;
+  }
+
+  const [updated] = await deps.db
+    .update(runs)
+    .set({ cancelRequestedAt: deps.clock.now() })
+    .where(and(eq(runs.id, runId), isNull(runs.cancelRequestedAt), isNull(runs.endedAt)))
+    .returning();
+
+  if (updated) {
+    await recordAuditEvent(deps, {
+      actor: principal,
+      projectId,
+      action: "run.cancel_requested",
+      targetType: "run",
+      targetId: runId,
+    });
+    return updated;
+  }
+
+  const [winner] = await deps.db
+    .select()
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.projectId, projectId)));
+  if (!winner) {
+    throw new NotFoundError("run", runId);
+  }
+  return winner;
 }
 
 /** ID-only write variants for the web contract's `/runs/:id/*` actions. */

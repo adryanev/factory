@@ -171,7 +171,11 @@ const listRunsRoute = createRoute({
       description: "Ok.",
       content: {
         "application/json": {
-          schema: z.object({ runs: z.array(runSchema), nextCursor: z.string().nullable() }),
+          schema: z.object({
+            runs: z.array(runSchema),
+            nextCursor: z.string().nullable(),
+            waitingQuestionCount: z.number().int().nonnegative(),
+          }),
         },
       },
     },
@@ -194,7 +198,11 @@ const getRunRoute = createRoute({
       },
       content: {
         "application/json": {
-          schema: z.object({ run: runDetailSchema, stepRuns: z.array(stepRunSchema) }),
+          schema: z.object({
+            run: runDetailSchema,
+            stepRuns: z.array(stepRunSchema),
+            waitingQuestionCount: z.number().int().nonnegative(),
+          }),
         },
       },
     },
@@ -227,10 +235,14 @@ const cancelRunRoute = createRoute({
   },
 });
 
-function graphEtag(run: ReturnType<typeof toRunResponse>, stepRuns: ReturnType<typeof toStepRunResponse>[]): string {
+function graphEtag(
+  run: ReturnType<typeof toRunResponse>,
+  stepRuns: ReturnType<typeof toStepRunResponse>[],
+  waitingQuestionCount: number,
+): string {
   const stableStepRuns = [...stepRuns].sort((a, b) => a.id.localeCompare(b.id));
   const digest = createHash("sha256")
-    .update(JSON.stringify({ run, stepRuns: stableStepRuns }))
+    .update(JSON.stringify({ run, stepRuns: stableStepRuns, waitingQuestionCount }))
     .digest("hex");
   return `"${digest}"`;
 }
@@ -359,7 +371,8 @@ export function registerRunRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDeps): vo
       (query.cursor as Id<"run"> | undefined) ?? null,
       limit,
     );
-    return c.json({ runs: runs.map(toRunResponse), nextCursor }, 200);
+    const waitingQuestionCount = await deps.domain.questions.countWaiting(principal);
+    return c.json({ runs: runs.map(toRunResponse), nextCursor, waitingQuestionCount }, 200);
   });
 
   app.openapi(getRunRoute, async (c) => {
@@ -370,12 +383,13 @@ export function registerRunRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDeps): vo
     const definitionFiles = run.definitionFiles as Record<string, string>;
     const runResponse = toRunDetailResponse(run, definitionText, definitionFiles);
     const stepRunResponses = stepRuns.map(toStepRunResponse);
-    const etag = graphEtag(runResponse, stepRunResponses);
+    const waitingQuestionCount = await deps.domain.questions.countWaiting(principal);
+    const etag = graphEtag(runResponse, stepRunResponses, waitingQuestionCount);
     c.header("ETag", etag);
     if (c.req.header("if-none-match") === etag) {
       return c.body(null, 304);
     }
-    return c.json({ run: runResponse, stepRuns: stepRunResponses }, 200);
+    return c.json({ run: runResponse, stepRuns: stepRunResponses, waitingQuestionCount }, 200);
   });
 
   app.openapi(cancelRunRoute, async (c) => {

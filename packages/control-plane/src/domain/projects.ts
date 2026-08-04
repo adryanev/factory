@@ -10,7 +10,7 @@ import { orgMembers, projectMembers, projects } from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
 import type { Principal } from "./principal.js";
 import { recordAuditEvent } from "./audit.js";
-import { ForbiddenError, NotFoundError } from "./errors.js";
+import { DomainValidationError, ForbiddenError, NotFoundError } from "./errors.js";
 
 export type ProjectRole = "admin" | "member";
 export type Project = typeof projects.$inferSelect;
@@ -180,14 +180,30 @@ export async function updateProjectSettings(
   deps: Pick<AppDeps, "db">,
   principal: Principal,
   projectId: Id<"project">,
-  patch: { allowSharedAgentCredential?: boolean },
+  patch: { allowSharedAgentCredential?: boolean; notificationWebhookUrl?: string | null },
 ): Promise<Project> {
   await requireProjectAdmin(deps, principal, projectId);
+  if (patch.notificationWebhookUrl !== undefined && patch.notificationWebhookUrl !== null) {
+    try {
+      const url = new URL(patch.notificationWebhookUrl);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error("unsupported protocol");
+      }
+    } catch {
+      throw new DomainValidationError(
+        "notification_webhook_url_invalid",
+        "notification webhook URL must be an HTTP or HTTPS URL",
+      );
+    }
+  }
   const [updated] = await deps.db
     .update(projects)
     .set({
       ...(patch.allowSharedAgentCredential !== undefined
         ? { allowSharedAgentCredential: patch.allowSharedAgentCredential }
+        : {}),
+      ...(patch.notificationWebhookUrl !== undefined
+        ? { notificationWebhookUrl: patch.notificationWebhookUrl }
         : {}),
     })
     .where(eq(projects.id, projectId))
@@ -201,6 +217,9 @@ export async function updateProjectSettings(
     metadata: {
       ...(patch.allowSharedAgentCredential !== undefined
         ? { allowSharedAgentCredential: patch.allowSharedAgentCredential }
+        : {}),
+      ...(patch.notificationWebhookUrl !== undefined
+        ? { notificationWebhookConfigured: patch.notificationWebhookUrl !== null }
         : {}),
     },
   });

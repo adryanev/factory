@@ -44,6 +44,7 @@ const logTailResponseSchema = z
     nextOffset: z.number().int().nonnegative(),
     attempt: z.number().int().positive(),
     ended: z.boolean(),
+    waitingQuestionCount: z.number().int().nonnegative(),
   })
   .openapi("LogTailResponse");
 
@@ -89,6 +90,7 @@ export function registerStepRunLogRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDe
           nextOffset: result.nextOffset,
           attempt: result.attempt,
           ended: result.ended,
+          waitingQuestionCount: result.waitingQuestionCount,
         },
         200,
       );

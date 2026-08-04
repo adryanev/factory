@@ -213,6 +213,27 @@ describe("Project creation and membership management", () => {
     const body = (await response.json()) as Record<string, unknown>;
     expect(body.code).toBe("forbidden_not_project_admin");
   });
+
+  it("lets an admin configure one channel webhook without returning its bearer URL", async () => {
+    const project = await createProjectAsOwner(rig, ownerCookie, "notification-channel");
+    await selfAddOwner(rig, ownerCookie, project.id);
+    const secretUrl = "https://hooks.example.test/project-secret";
+
+    const updated = await rig.fetchWithCsrf(`${rig.baseUrl}/projects/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: ownerCookie },
+      body: JSON.stringify({ notificationWebhookUrl: secretUrl }),
+    });
+    expect(updated.status).toBe(200);
+    const updatedBody = (await updated.json()) as Record<string, unknown>;
+    expect(updatedBody.notificationWebhookConfigured).toBe(true);
+    expect(JSON.stringify(updatedBody)).not.toContain(secretUrl);
+
+    const fetched = await fetch(`${rig.baseUrl}/projects/${project.id}`, { headers: { cookie: ownerCookie } });
+    const fetchedBody = (await fetched.json()) as Record<string, unknown>;
+    expect(fetchedBody.notificationWebhookConfigured).toBe(true);
+    expect(JSON.stringify(fetchedBody)).not.toContain(secretUrl);
+  });
 });
 
 describe("CSRF header on mutating Project routes", () => {

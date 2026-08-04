@@ -123,7 +123,7 @@ export interface Domain {
     updateSettings: (
       principal: Principal,
       projectId: Id<"project">,
-      patch: { allowSharedAgentCredential?: boolean },
+      patch: { allowSharedAgentCredential?: boolean; notificationWebhookUrl?: string | null },
     ) => Promise<Project>;
   };
   groups: {
@@ -224,6 +224,8 @@ export interface Domain {
   questions: {
     /** Web surface, group member: the "Menunggu saya" list — every open Question whose audience Group contains the caller. */
     listWaiting: (principal: Principal) => Promise<QuestionState[]>;
+    /** Web surface badge count. This is a query over open Questions, never a maintained counter. */
+    countWaiting: (principal: Principal) => Promise<number>;
     /** Web surface, group member: one Question's latest state. */
     get: (principal: Principal, questionId: Id<"question">) => Promise<QuestionState>;
     /** Web surface, group member: record an answer, compare-and-set. `race-lost` is the ordinary outcome of losing the race (AC8), not an exception. */
@@ -342,6 +344,7 @@ export function createDomain(deps: AppDeps): Domain {
     },
     questions: {
       listWaiting: (principal) => stepRunQuestionsDomain.listWaitingQuestions(deps, principal),
+      countWaiting: (principal) => stepRunQuestionsDomain.countWaitingQuestions(deps, principal),
       get: (principal, questionId) => stepRunQuestionsDomain.getQuestion(deps, principal, questionId),
       answer: (principal, questionId, answer) =>
         stepRunQuestionsDomain.answerQuestion(deps, principal, questionId, answer),

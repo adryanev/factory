@@ -28,6 +28,11 @@ export interface RandomSource {
   bytes(length: number): Uint8Array;
 }
 
+/** The only outbound notification seam. Implementations must not log the URL. */
+export interface NotificationSender {
+  send(url: string, payload: { text: string }): Promise<void>;
+}
+
 /** One hanging `/claim` long-poll connection slot. `createApp` builds exactly one of these per process (see `app.ts`) so the 2000-connection cap (spec: "Batas 2000 koneksi menggantung per instance") is real per-instance state, not a per-request illusion. */
 export interface ClaimConnectionLimiter {
   tryAcquire(): boolean;
@@ -65,6 +70,7 @@ export interface AppDeps {
   random: RandomSource;
   githubOAuth: GithubOAuthClient;
   gitHost: GitHost;
+  notificationSender: NotificationSender;
   /**
    * The master key, loaded from a FILE at boot (spec: "Master key dari file,
    * bukan environment variable") — see `domain/master-key.ts` for why the
@@ -185,6 +191,7 @@ export function createDeps(
     random: createSystemRandom(),
     githubOAuth: createGithubOAuthClient(githubConfig),
     gitHost: createGithubHost(gitHostConfig),
+    notificationSender: createNotificationSender(),
     keyring,
     claimHoldRangeMs: PRODUCTION_CLAIM_HOLD_RANGE_MS,
     claimLimiter: createClaimConnectionLimiter(MAX_HANGING_CLAIM_CONNECTIONS),
@@ -193,6 +200,22 @@ export function createDeps(
     liveTailLimiter: createClaimConnectionLimiter(MAX_HANGING_LIVE_TAIL_CONNECTIONS),
     controlPlaneInstanceId: runtimeConfig.controlPlaneInstanceId,
     runPageBaseUrl: runtimeConfig.runPageBaseUrl,
+  };
+}
+
+function createNotificationSender(): NotificationSender {
+  return {
+    async send(url, payload) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) {
+        throw new Error(`notification webhook returned HTTP ${response.status}`);
+      }
+    },
   };
 }
 

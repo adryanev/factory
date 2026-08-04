@@ -437,6 +437,63 @@ export async function listRuns(
   return { runs: page, nextCursor };
 }
 
+/**
+ * Records the operator's intent to cancel a Run. This is deliberately not the
+ * same write as cancelling each StepRun: Runners observe the intent through
+ * their existing heartbeat channel and the mechanical cancellation follows in
+ * the background. Repeating the request is safe and returns the first intent.
+ */
+export async function cancelRun(
+  deps: Pick<AppDeps, "db" | "clock">,
+  principal: Principal,
+  projectId: Id<"project">,
+  runId: Id<"run">,
+): Promise<Run> {
+  await requireProjectMembership(deps, principal, projectId);
+
+  const [existing] = await deps.db
+    .select()
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.projectId, projectId)));
+  if (!existing) {
+    throw new NotFoundError("run", runId);
+  }
+
+  // A finished Run has no work left to cancel. Returning it keeps the endpoint
+  // idempotent without manufacturing a late cancellation intent.
+  if (existing.cancelRequestedAt !== null || existing.endedAt !== null) {
+    return existing;
+  }
+
+  const [updated] = await deps.db
+    .update(runs)
+    .set({ cancelRequestedAt: deps.clock.now() })
+    .where(and(eq(runs.id, runId), isNull(runs.cancelRequestedAt), isNull(runs.endedAt)))
+    .returning();
+
+  if (updated) {
+    await recordAuditEvent(deps, {
+      actor: principal,
+      projectId,
+      action: "run.cancel_requested",
+      targetType: "run",
+      targetId: runId,
+    });
+    return updated;
+  }
+
+  // Another request won the compare-and-set. Read the winner's timestamp so
+  // both callers acknowledge the same intent.
+  const [winner] = await deps.db
+    .select()
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.projectId, projectId)));
+  if (!winner) {
+    throw new NotFoundError("run", runId);
+  }
+  return winner;
+}
+
 export interface RunWithGraph {
   run: Run;
   stepRuns: StepRun[];

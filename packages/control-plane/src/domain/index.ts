@@ -112,6 +112,7 @@ export interface Domain {
   };
   runs: {
     trigger: (principal: Principal, projectId: Id<"project">, input: TriggerRunInput) => Promise<TriggeredRun>;
+    cancel: (principal: Principal, projectId: Id<"project">, runId: Id<"run">) => Promise<runsDomain.Run>;
     list: (
       principal: Principal,
       projectId: Id<"project">,
@@ -256,6 +257,7 @@ export function createDomain(deps: AppDeps): Domain {
     },
     runs: {
       trigger: (principal, projectId, input) => runsDomain.triggerRun(deps, principal, projectId, input),
+      cancel: (principal, projectId, runId) => runsDomain.cancelRun(deps, principal, projectId, runId),
       list: (principal, projectId, filters, cursor, limit) =>
         runsDomain.listRuns(deps, principal, projectId, filters, cursor, limit),
       get: (principal, projectId, runId) => runsDomain.getRun(deps, principal, projectId, runId),

@@ -379,6 +379,65 @@ steps:
     expect(body.run.definitionFiles[".factory/prompts/plan.md"]).toBe("plan the work, verbatim");
   });
 
+  it("returns an ETag for the Graph and a body-less 304 when the Run has not moved", async () => {
+    const project = await createProject(rig, ownerCookie, "etag-project");
+    const repo = await createRepository(rig, project.id, "backend");
+    const yaml = "version: 1\nname: etag\nrepo: backend\nsteps:\n  solo:\n    run: echo solo\n";
+    rig.gitHost.registerRef(repo, "main", "sha-etag-1");
+    rig.gitHost.registerFile(repo, "sha-etag-1", ".factory/pipeline.yaml", yaml);
+    const runId = generateId("run");
+    await trigger(rig, ownerCookie, project.id, {
+      id: runId,
+      repositoryId: repo.id,
+      pipelinePath: ".factory/pipeline.yaml",
+      refBranch: "main",
+    });
+
+    const first = await rig.fetchWithCsrf(`${rig.baseUrl}/projects/${project.id}/runs/${runId}`, {
+      headers: { cookie: ownerCookie },
+    });
+    const etag = first.headers.get("etag");
+    expect(first.status).toBe(200);
+    expect(etag).not.toBeNull();
+
+    const unchanged = await rig.fetchWithCsrf(`${rig.baseUrl}/projects/${project.id}/runs/${runId}`, {
+      headers: { cookie: ownerCookie, "if-none-match": etag! },
+    });
+    expect(unchanged.status).toBe(304);
+    expect(await unchanged.text()).toBe("");
+  });
+
+  it("records Run cancel_requested_at as intent immediately and keeps it idempotent", async () => {
+    const project = await createProject(rig, ownerCookie, "cancel-run-project");
+    const repo = await createRepository(rig, project.id, "backend");
+    const yaml = "version: 1\nname: cancel\nrepo: backend\nsteps:\n  solo:\n    run: echo solo\n";
+    rig.gitHost.registerRef(repo, "main", "sha-cancel-1");
+    rig.gitHost.registerFile(repo, "sha-cancel-1", ".factory/pipeline.yaml", yaml);
+    const runId = generateId("run");
+    await trigger(rig, ownerCookie, project.id, {
+      id: runId,
+      repositoryId: repo.id,
+      pipelinePath: ".factory/pipeline.yaml",
+      refBranch: "main",
+    });
+
+    const first = await rig.fetchWithCsrf(`${rig.baseUrl}/projects/${project.id}/runs/${runId}/cancel`, {
+      method: "POST",
+      headers: { cookie: ownerCookie },
+    });
+    const firstBody = (await first.json()) as { run: { cancelRequestedAt: string | null; outcome: string | null } };
+    expect(first.status).toBe(200);
+    expect(firstBody.run.cancelRequestedAt).not.toBeNull();
+    expect(firstBody.run.outcome).toBeNull();
+
+    const second = await rig.fetchWithCsrf(`${rig.baseUrl}/projects/${project.id}/runs/${runId}/cancel`, {
+      method: "POST",
+      headers: { cookie: ownerCookie },
+    });
+    const secondBody = (await second.json()) as { run: { cancelRequestedAt: string | null } };
+    expect(secondBody.run.cancelRequestedAt).toBe(firstBody.run.cancelRequestedAt);
+  });
+
   it("lists Runs newest-first with keyset pagination and distinguishes in-flight from a final-verdict filter", async () => {
     const project = await createProject(rig, ownerCookie, "list-project");
     const repo = await createRepository(rig, project.id, "backend");

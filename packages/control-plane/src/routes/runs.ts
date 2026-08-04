@@ -4,6 +4,7 @@
  * it to `deps.domain.runs` as the first argument, and never touch `runs` /
  * `step_runs` directly — `RouteDeps` carries no `db` (see `domain/index.ts`).
  */
+import { createHash } from "node:crypto";
 import { createRoute, z, type OpenAPIHono } from "@hono/zod-openapi";
 import { errorResponseSchema, type Id } from "@factory/shared";
 import type { AppEnv } from "../http-env.js";
@@ -187,10 +188,19 @@ const getRunRoute = createRoute({
   responses: {
     200: {
       description: "Ok.",
+      headers: {
+        ETag: { description: "Opaque version for conditional Graph polling.", schema: { type: "string" } },
+      },
       content: {
         "application/json": {
           schema: z.object({ run: runDetailSchema, stepRuns: z.array(stepRunSchema) }),
         },
+      },
+    },
+    304: {
+      description: "Not modified. The response has no body.",
+      headers: {
+        ETag: { description: "The unchanged Graph version.", schema: { type: "string" } },
       },
     },
     401: { description: "Not logged in.", content: { "application/json": { schema: errorResponseSchema } } },
@@ -198,6 +208,31 @@ const getRunRoute = createRoute({
     404: { description: "No such Project or Run.", content: { "application/json": { schema: errorResponseSchema } } },
   },
 });
+
+const cancelRunRoute = createRoute({
+  method: "post",
+  path: "/projects/{id}/runs/{runId}/cancel",
+  summary:
+    "Records cancel_requested_at immediately as operator intent. StepRun cancellation follows through the Runner heartbeat channel; repeating the request is idempotent. Project member.",
+  request: { params: runIdParamSchema },
+  responses: {
+    200: {
+      description: "Cancellation intent recorded (or already present).",
+      content: { "application/json": { schema: z.object({ run: runSchema }) } },
+    },
+    401: { description: "Not logged in.", content: { "application/json": { schema: errorResponseSchema } } },
+    403: { description: "Not a Project member.", content: { "application/json": { schema: errorResponseSchema } } },
+    404: { description: "No such Project or Run.", content: { "application/json": { schema: errorResponseSchema } } },
+  },
+});
+
+function graphEtag(run: ReturnType<typeof toRunResponse>, stepRuns: ReturnType<typeof toStepRunResponse>[]): string {
+  const stableStepRuns = [...stepRuns].sort((a, b) => a.id.localeCompare(b.id));
+  const digest = createHash("sha256")
+    .update(JSON.stringify({ run, stepRuns: stableStepRuns }))
+    .digest("hex");
+  return `"${digest}"`;
+}
 
 export function registerRunRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDeps): void {
   app.openapi(triggerRunRoute, async (c) => {
@@ -238,9 +273,20 @@ export function registerRunRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDeps): vo
     const { run, stepRuns } = await deps.domain.runs.get(principal, projectId as Id<"project">, runId as Id<"run">);
     const definitionText = run.definition as string;
     const definitionFiles = run.definitionFiles as Record<string, string>;
-    return c.json(
-      { run: toRunDetailResponse(run, definitionText, definitionFiles), stepRuns: stepRuns.map(toStepRunResponse) },
-      200,
-    );
+    const runResponse = toRunDetailResponse(run, definitionText, definitionFiles);
+    const stepRunResponses = stepRuns.map(toStepRunResponse);
+    const etag = graphEtag(runResponse, stepRunResponses);
+    c.header("ETag", etag);
+    if (c.req.header("if-none-match") === etag) {
+      return c.body(null, 304);
+    }
+    return c.json({ run: runResponse, stepRuns: stepRunResponses }, 200);
+  });
+
+  app.openapi(cancelRunRoute, async (c) => {
+    const principal = requirePrincipal(c);
+    const { id: projectId, runId } = c.req.valid("param");
+    const run = await deps.domain.runs.cancel(principal, projectId as Id<"project">, runId as Id<"run">);
+    return c.json({ run: toRunResponse(run) }, 200);
   });
 }

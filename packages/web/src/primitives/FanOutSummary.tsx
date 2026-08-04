@@ -41,7 +41,11 @@ export function FanOutSummary({
               className="fan-out-summary__branch"
               onClick={() => onSelectBranch?.(branch.key)}
             >
-              <StatusMark status={branch.status} />
+              {branch.unscheduledOverThreshold ? (
+                <StatusMark status={branch.status} label="Unscheduled (stale)" />
+              ) : (
+                <StatusMark status={branch.status} />
+              )}
               <span className="fan-out-summary__key">{branch.key}</span>
             </button>
           </li>

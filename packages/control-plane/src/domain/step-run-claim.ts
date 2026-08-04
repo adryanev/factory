@@ -127,13 +127,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Runs `claim_step_run.sql` once. `wantedKind: null` — this issue only claims ordinary Runner-facing StepRuns; `kind: 'pull-request'` claiming (lessee = a control-plane instance) belongs to issue 24, out of this issue's scope. */
+/** Runs `claim_step_run.sql` once. `wantedKind: null` — this is the Runner side of the shared query; the control-plane side (lessee = a control-plane instance, `wantedKind: 'pull-request'`) lives in `domain/control-plane-steps.ts` (issue #17). */
 async function tryClaimOnce(deps: Pick<AppDeps, "pool">, runner: RunnerIdentity, input: ClaimInput): Promise<ClaimedRow | undefined> {
   const result = await deps.pool.query<ClaimedRow>(CLAIM_QUERY, [
     runner.id,
     input.tags,
     input.slots,
-    30, // spec: "Lease 30 detik" for ordinary StepRuns (60s is `kind: pull-request` only, out of scope here).
+    30, // spec: "Lease 30 detik" for ordinary StepRuns (60s is `kind: pull-request` only — `domain/control-plane-steps.ts`).
     null,
   ]);
   return result.rows[0];

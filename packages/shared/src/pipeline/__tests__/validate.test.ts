@@ -229,6 +229,73 @@ describe("the source Step of a branchesFrom must have outputs: of type array-of-
   });
 });
 
+describe("a kind: pull-request Step is born once per branch only when its single dep is a fan-out and join: is absent (issue #17, AC3)", () => {
+  it("accepts a kind: Step after a plain Step, with join: allowed (born once)", () => {
+    const result = validatePipelineDefinition(fixture("accept-kind-step-plain-after.yaml"));
+    expectValid(result);
+  });
+
+  it("rejects join: on a kind: Step that follows a fan-out", () => {
+    const result = validatePipelineDefinition(fixture("reject-kind-step-with-fanout-and-join.yaml"));
+    expectInvalid(result);
+    expect(messages(result).some((m) => m.includes("the head branch would be ambiguous on a Join"))).toBe(true);
+  });
+});
+
+describe("the kind: surface is closed (issue #17, ticket 24)", () => {
+  it("rejects repo: on a Step with kind:", () => {
+    const result = validatePipelineDefinition(fixture("reject-repo-on-kind-step.yaml"));
+    expectInvalid(result);
+    expect(messages(result).some((m) => m.includes("repo: is rejected on a Step with kind:"))).toBe(true);
+  });
+
+  it("rejects branches:/runsOn:/ask: on a Step with kind:", () => {
+    const result = validatePipelineDefinition(fixture("reject-kind-step-closed-surface.yaml"));
+    expectInvalid(result);
+    const found = messages(result);
+    expect(found.some((m) => m.includes("branches: is rejected on a Step with kind:"))).toBe(true);
+    expect(found.some((m) => m.includes("runsOn: is rejected on a Step with kind:"))).toBe(true);
+    expect(found.some((m) => m.includes("ask: is rejected on a Step with kind:"))).toBe(true);
+  });
+
+  it("rejects a kind: Step with no after: — the head branch would be undefined", () => {
+    const result = validatePipelineDefinition(fixture("reject-kind-step-empty-after.yaml"));
+    expectInvalid(result);
+    expect(messages(result).some((m) => m.includes("exactly one after:"))).toBe(true);
+  });
+
+  it("rejects a kind: Step that omits title:/body:", () => {
+    const result = validatePipelineDefinition(fixture("reject-kind-step-missing-title-body.yaml"));
+    expectInvalid(result);
+    expect(messages(result).some((m) => m.includes("must declare title: and body:"))).toBe(true);
+  });
+
+  it("rejects base:/title:/body: on a Step without kind:", () => {
+    const result = validatePipelineDefinition(fixture("reject-kind-fields-on-plain-step.yaml"));
+    expectInvalid(result);
+    expect(messages(result).some((m) => m.includes("only valid on a Step with kind:"))).toBe(true);
+  });
+});
+
+describe("a kind: pull-request Step's title:/body: references resolve (issue #17, AC5)", () => {
+  it("accepts references to a Step that declares the named string Output", () => {
+    const result = validatePipelineDefinition(fixture("d-verdict-03-cross-repo.yaml"));
+    expectValid(result);
+  });
+
+  it("rejects a title: reference to an Output the Step does not declare", () => {
+    const result = validatePipelineDefinition(fixture("reject-title-output-missing.yaml"));
+    expectInvalid(result);
+    expect(messages(result).some((m) => m.includes("has no output named"))).toBe(true);
+  });
+
+  it("rejects a title: reference to a non-string Output", () => {
+    const result = validatePipelineDefinition(fixture("reject-title-output-not-string.yaml"));
+    expectInvalid(result);
+    expect(messages(result).some((m) => m.includes("must be type: string"))).toBe(true);
+  });
+});
+
 describe("a Pipeline containing ask: must write concurrency: explicitly", () => {
   it("accepts an ask: Step when the Pipeline declares concurrency:", () => {
     const result = validatePipelineDefinition(fixture("d-verdict-01-fanout-review.yaml"));

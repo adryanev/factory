@@ -1,0 +1,11 @@
+# Rule: a kind: Step must declare exactly one after: — the after: is what names
+# the head branch the pull-request follows.
+version: 1
+name: Kind Step without after
+repo: backend
+steps:
+  open-pr:
+    kind: pull-request
+    base: main
+    title: { step: review, output: prTitle }
+    body: { step: review, output: prBody }

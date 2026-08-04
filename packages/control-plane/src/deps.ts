@@ -91,6 +91,21 @@ export interface AppDeps {
    * test.
    */
   liveTailHoldMs: number;
+  /**
+   * The lessee identity this control-plane instance claims `kind:
+   * pull-request` StepRuns with (issue #17, AC1). Polymorphic with runner ids
+   * in `step_runs.leased_by` — the shared `claim_step_run.sql` takes it as
+   * `$1` — so two control-plane instances never execute the same
+   * control-plane StepRun, exactly like two Runners never claim the same
+   * row. Regenerated at boot; no two live instances share it.
+   */
+  controlPlaneInstanceId: string;
+  /**
+   * The web surface's base URL — the Commit Status `target_url`, so a PR's
+   * checks area links back to this Run's page (issue #17, AC7: "Status ke
+   * commit lewat Commit Status API dengan details_url ke halaman Run").
+   */
+  runPageBaseUrl: string;
   /** Mints presigned URLs — the control plane's half of "byte tidak pernah lewat control plane" (spec: "Artifact dan blob", "Log"). PUTs go to the Runner (uploads, log chunks), GETs go to the browser (live-tail, archive, artifacts). The control plane never proxies a byte. */
   objectStore: ObjectStore;
   /**
@@ -120,6 +135,18 @@ export interface GithubOAuthConfig {
   clientSecret: string;
 }
 
+/**
+ * Process-scoped runtime configuration the control plane needs beyond
+ * infrastructure credentials — the lessee identity it executes control-plane
+ * Steps under, and the base URL it links a Run's page back to. Both are
+ * per-deployment facts, so they ride the composition root like everything
+ * else rather than being read ambiently by a handler.
+ */
+export interface ControlPlaneRuntimeConfig {
+  controlPlaneInstanceId: string;
+  runPageBaseUrl: string;
+}
+
 const PRODUCTION_CLAIM_HOLD_RANGE_MS = { min: 20_000, max: 30_000 };
 const MAX_HANGING_CLAIM_CONNECTIONS = 2000;
 const MAX_HANGING_LIVE_TAIL_CONNECTIONS = 2000;
@@ -135,6 +162,9 @@ const MAX_HANGING_LIVE_TAIL_CONNECTIONS = 2000;
  * clear "not configured". `objectStoreConfig` carries the Garage credentials
  * that let the control plane mint presigned URLs — every byte uploaded or read
  * moves peer-to-peer, so these are the only secrets the store half needs.
+ * `runtimeConfig` carries the lessee identity and Run-page URL (issue #17);
+ * its defaults are good enough for a process that never executes
+ * control-plane Steps (the OpenAPI generator), and real ones in production.
  */
 export function createDeps(
   pool: Pool,
@@ -142,6 +172,10 @@ export function createDeps(
   gitHostConfig: GithubAppConfig | undefined,
   keyring: KeyRing,
   objectStoreConfig?: S3ObjectStoreConfig,
+  runtimeConfig: ControlPlaneRuntimeConfig = {
+    controlPlaneInstanceId: "control-plane-unconfigured",
+    runPageBaseUrl: "http://localhost:3000",
+  },
 ): AppDeps {
   const clock = createSystemClock();
   return {
@@ -157,6 +191,8 @@ export function createDeps(
     liveTailHoldMs: LIVE_TAIL_HOLD_MS,
     objectStore: objectStoreConfig ? createS3ObjectStore(objectStoreConfig) : createNoopObjectStore(clock),
     liveTailLimiter: createClaimConnectionLimiter(MAX_HANGING_LIVE_TAIL_CONNECTIONS),
+    controlPlaneInstanceId: runtimeConfig.controlPlaneInstanceId,
+    runPageBaseUrl: runtimeConfig.runPageBaseUrl,
   };
 }
 

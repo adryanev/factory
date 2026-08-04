@@ -449,7 +449,25 @@ describe("step-run executor: the commit point", () => {
 
   it("resolveStep throws for a step that is neither run: nor agent", () => {
     const badClaimed = claimFixture({
-      definition: "version: 1\nname: p\nrepo: backend\nsteps:\n  pr:\n    kind: pull-request\n",
+      // A valid pipeline — a kind: pull-request Step is a control-plane Step
+      // the Runner must never execute, so resolveStep's guard is what throws.
+      definition: [
+        "version: 1",
+        "name: p",
+        "repo: backend",
+        "steps:",
+        "  review:",
+        "    prompt: r",
+        "    outputs:",
+        "      prTitle: { type: string }",
+        "      prBody: { type: string }",
+        "  pr:",
+        "    after: [review]",
+        "    kind: pull-request",
+        "    base: main",
+        "    title: { step: review, output: prTitle }",
+        "    body: { step: review, output: prBody }",
+      ].join("\n"),
       stepKey: "pr",
     });
     expect(() => resolveStep(badClaimed)).toThrow(/neither a run: step nor an agent step/);

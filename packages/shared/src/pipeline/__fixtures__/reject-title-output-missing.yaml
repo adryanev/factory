@@ -1,0 +1,17 @@
+# Rule: the { step, output } reference a kind: Step's title:/body: must resolve
+# — here the referenced output does not exist on the Step.
+version: 1
+name: Title references a missing output
+repo: backend
+steps:
+  review:
+    promptFile: .factory/prompts/review.md
+    outputs:
+      summary: { type: string }
+
+  open-pr:
+    after: [review]
+    kind: pull-request
+    base: main
+    title: { step: review, output: prTitle }
+    body: { step: review, output: prBody }

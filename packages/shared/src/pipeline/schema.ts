@@ -22,9 +22,11 @@ export const outputRefSchema = z.object({
   output: z.string().min(1),
 });
 
-export const joinPolicySchema = z
-  .union([z.literal("all"), z.literal("any"), z.object({ min: z.number().int().positive() })])
-  .default("all");
+export const joinPolicySchema = z.union([
+  z.literal("all"),
+  z.literal("any"),
+  z.object({ min: z.number().int().positive() }),
+]);
 
 export const askSchema = z.object({
   group: z.string().min(1),
@@ -90,8 +92,13 @@ export const stepSchema = z.object({
   // writes (ticket 06). `.nonnegative()`, not `.positive()`, on purpose.
   minBranches: z.number().int().nonnegative().default(1),
 
-  // Join
-  join: joinPolicySchema,
+  // Join. Optional — no default on purpose: the *presence* of an explicit
+  // `join:` is a fact the validator and the Graph advance both read. A Step
+  // that writes `join:` is a Join; a Step that omits it follows its `after:`
+  // one-for-one — and for a `kind:` Step the difference decides "born once
+  // per branch" vs "born once" (issue #17). The "all" default for a plain
+  // Join is applied at the runtime call site (`join ?? "all"`), never here.
+  join: joinPolicySchema.optional(),
 
   // Human-in-the-loop
   ask: askSchema.optional(),
@@ -243,6 +250,11 @@ function checkExecutionMode(
         "'outputs:' is only valid on a Step with an agent (prompt: or promptFile:); it is rejected here because this Step uses run: or kind:.",
     });
   }
+}
+
+/** A Step is a fan-out source iff it fans out at all — constants or a dynamic list. */
+function isFanOutNode(step: RawStep): boolean {
+  return step.branches !== undefined || step.branchesFrom !== undefined;
 }
 
 /** DFS cycle detection over `after:` edges. Returns the first cycle found. */
@@ -449,6 +461,178 @@ export const pipelineSchema = pipelineShapeSchema.superRefine((pipeline, ctx) =>
         path: ["steps", id, "attempts"],
         message: "attempts: is rejected on a Step with kind: — control-plane Steps use a fixed system retry count.",
       });
+    }
+  }
+
+  // Rule: a Step with kind: is a closed kind with a fixed shape. The whole
+  // author-written execution surface is rejected — its numbers, its repo, its
+  // fan-out, its scheduling, its human-in-the-loop fields, and its Outputs are
+  // all owned by the kind, not the author (issue #17, ticket 24).
+  for (const [id, step] of Object.entries(steps)) {
+    if (step.kind === undefined) continue;
+    const kindPath = ["steps", id];
+    if (step.repo !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...kindPath, "repo"],
+        message:
+          "repo: is rejected on a Step with kind: — it inherits the repo of the branch it follows (issue #17).",
+      });
+    }
+    if (step.branches !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...kindPath, "branches"],
+        message: "branches: is rejected on a Step with kind: — a control-plane Step cannot fan out.",
+      });
+    }
+    if (step.branchesFrom !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...kindPath, "branchesFrom"],
+        message: "branchesFrom: is rejected on a Step with kind: — a control-plane Step cannot fan out.",
+      });
+    }
+    if (step.runsOn !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...kindPath, "runsOn"],
+        message: "runsOn: is rejected on a Step with kind: — it never runs on a Runner.",
+      });
+    }
+    if (step.ask !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...kindPath, "ask"],
+        message: "ask: is rejected on a Step with kind: — control-plane Steps are not interactive.",
+      });
+    }
+    // onReject:/humanTimeout: carry schema defaults ("continue" / "none"), so
+    // their *presence* is not observable — only a non-default write is. The
+    // defaults are no-ops for a non-interactive Step, which is exactly why a
+    // kind: Step may keep them.
+    if (step.onReject !== undefined && step.onReject !== "continue") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...kindPath, "onReject"],
+        message: "onReject: is rejected on a Step with kind: — control-plane Steps are not interactive.",
+      });
+    }
+    if (step.humanTimeout !== undefined && step.humanTimeout !== "none") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...kindPath, "humanTimeout"],
+        message: "humanTimeout: is rejected on a Step with kind: — control-plane Steps are not interactive.",
+      });
+    }
+    if (step.onHumanTimeout !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...kindPath, "onHumanTimeout"],
+        message: "onHumanTimeout: is rejected on a Step with kind: — control-plane Steps are not interactive.",
+      });
+    }
+    // after: is what names the head branch the PR opens from ("ia yang memberi
+    // Ref — branch mana yang jadi kepala PR", ticket 24) — exactly one, so the
+    // head branch is never ambiguous. For a fan-out dep, the PR is born once
+    // per branch; for a plain dep, once.
+    if (step.after.length !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...kindPath, "after"],
+        message:
+          "a Step with kind: must declare exactly one after: entry — it is the branch the pull-request follows; more than one would make the head branch ambiguous.",
+      });
+    }
+    // title:/body: are required and explicit — the PR's title and body come
+    // from an upstream Step's Output, never inferred from after: (ticket 23/24:
+    // an implicit form would be ambiguous on a Join).
+    if (step.title === undefined || step.body === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...kindPath, "title"],
+        message:
+          "a Step with kind: must declare title: and body: as explicit { step, output } references — they are never inferred from after:.",
+      });
+    }
+    // A fan-out dep with an explicit join: would make the head branch
+    // ambiguous (which branch's PR?) — per-branch birth is the only supported
+    // shape. The schema-level join: absence vs presence is exactly the flag
+    // the advance reads ("Lahir sekali per cabang bila tanpa join:", AC3).
+    const dep = steps[step.after[0]!];
+    if (dep !== undefined && isFanOutNode(dep) && step.join !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...kindPath, "join"],
+        message:
+          "join: is rejected on a Step with kind: that follows a fan-out — it is born once per branch, and the head branch would be ambiguous on a Join.",
+      });
+    }
+  }
+
+  // Rule: kind-only fields (base:/title:/body:) are rejected on a Step that
+  // is not kind: — the schema would otherwise strip them silently.
+  for (const [id, step] of Object.entries(steps)) {
+    if (step.kind !== undefined) continue;
+    const kindPath = ["steps", id];
+    if (step.base !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...kindPath, "base"],
+        message: "base: is only valid on a Step with kind: pull-request.",
+      });
+    }
+    if (step.title !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...kindPath, "title"],
+        message: "title: is only valid on a Step with kind: pull-request.",
+      });
+    }
+    if (step.body !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...kindPath, "body"],
+        message: "body: is only valid on a Step with kind: pull-request.",
+      });
+    }
+  }
+
+  // Rule: the { step, output } references a kind: Step's title:/body: name must
+  // resolve — the Step exists and declares that Output as a string (the PR's
+  // title/body are text; ticket 23 locked the consumption side of this).
+  for (const [id, step] of Object.entries(steps)) {
+    if (step.kind === undefined) continue;
+    for (const [field, ref] of [
+      ["title", step.title],
+      ["body", step.body],
+    ] as const) {
+      if (ref === undefined) continue;
+      const source = steps[ref.step];
+      if (!source) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["steps", id, field, "step"],
+          message: `${field}.step '${ref.step}' does not refer to a Step in this Pipeline.`,
+        });
+        continue;
+      }
+      const descriptor = source.outputs?.[ref.output];
+      if (!descriptor) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["steps", id, field, "output"],
+          message: `Step '${ref.step}' has no output named '${ref.output}'. The ${field} of a pull-request Step must reference a declared Output.`,
+        });
+        continue;
+      }
+      if (descriptor.type !== "string") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["steps", id, field],
+          message: `Step '${ref.step}' declares output '${ref.output}' as ${descriptor.type}; the ${field} of a pull-request Step must be type: string.`,
+        });
+      }
     }
   }
 

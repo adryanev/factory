@@ -18,12 +18,25 @@
  *    teardown, jangan tunggu expiry") is the Runner's own job: it holds the
  *    tokens and `DELETE /installation/token` authenticates with the token
  *    itself, so the Runner's host-side teardown revokes them without ever
- *    needing the App credential (see `packages/runner`).
+ *    needing the App credential (see `packages/runner`). The optional
+ *    `permissions` parameter lets a caller mint a different write surface —
+ *    exactly the one `kind: pull-request` execution uses (issue #17).
  *  - `push` — API-based push (Git Data API), consumed by seam-3 (issue 11's
  *    PR opening and the Pipeline editor), not by the Runner's own git CLI
  *    transport. Present here so the interface and its fake cover the whole
  *    seam now; 422 ("ref already exists") is treated as success, exactly the
  *    seam-3 acceptance criterion.
+ *  - `findOpenPullRequest` / `createPullRequest` / `postCommitStatus` — the
+ *    three calls `kind: pull-request` execution makes (issue #17), each with
+ *    the idempotency semantics the spec locks: find-then-adopt, and a 422
+ *    create treated as success (re-find and adopt). The whole write surface
+ *    of this seam is exactly those two verbs, plus the status POST — there is
+ *    deliberately no method to merge, comment, label, or write an issue, and
+ *    the token minted for the pull-request Step carries only
+ *    `{ pull_requests: write, statuses: write }` (no `contents`, so no merge;
+ *    no `issues`, so no comments/labels/issue writes). That pairing is the
+ *    structural half of AC8 ("nol komentar, nol label, nol tulisan ke issue,
+ *    nol merge") — the other half is that no other method exists to call.
  *
  * The real implementation below mints the app JWT itself (RS256 over the
  * GitHub App private key, `node:crypto` — no dependency). `resolveRef` /
@@ -46,6 +59,56 @@ export class RefNotFoundError extends Error {
   }
 }
 
+/**
+ * A GitHub API call that returned a non-ok status. The `kind: pull-request`
+ * executor reads `status` and `retryAfterSeconds` to drive its retry policy
+ * (issue #17, AC2: "patuhi `Retry-After`"; backoff 5s fixed otherwise).
+ */
+export class GithubRequestError extends Error {
+  readonly status: number;
+  /** GitHub's `Retry-After` seconds when the response carried one, else null. */
+  readonly retryAfterSeconds: number | null;
+
+  constructor(message: string, status: number, retryAfterSeconds: number | null = null) {
+    super(message);
+    this.name = "GithubRequestError";
+    this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+/** The retry-after hint of a `Response`'s `Retry-After` header, or null. Exported for the unit test that proves GitHub's verbatim honor is parsed. */
+export function retryAfterFrom(response: Response): number | null {
+  const header = response.headers.get("retry-after");
+  if (header === null) return null;
+  const seconds = Number(header);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+}
+
+/**
+ * Thrown by `createPullRequest` on GitHub's 422 — "a pull request already
+ * exists for this head/base pair" (or another validation failure). The
+ * control-plane executor treats it as success-by-adoption (issue #17, AC6):
+ * it re-runs `findOpenPullRequest` and adopts whatever is open. The 422 is
+ * a signal, not an error, which is why it has its own type.
+ */
+export class PullRequestConflictError extends Error {
+  constructor(repo: RepoRef, head: string, base: string, detail: string) {
+    super(`pull request already exists for ${repo.owner}/${repo.name} ${head} -> ${base}: ${detail}`);
+    this.name = "PullRequestConflictError";
+  }
+}
+
+/** The minimal shape of a GitHub pull request the control plane records. */
+export interface PullRequest {
+  number: number;
+  /** The HTML URL — what the Run page links to. */
+  htmlUrl: string;
+  /** The head commit SHA the PR opens from — what the Commit Status is posted to. */
+  headSha: string;
+  state: "open";
+}
+
 /** A GitHub App installation access token, minted for exactly one turn. */
 export interface InstallationToken {
   /** The raw bearer credential the Runner passes to `git fetch` / `git push`. */
@@ -58,15 +121,48 @@ export interface InstallationToken {
   permissions: Record<string, string>;
 }
 
+/**
+ * The write surface of a `kind: pull-request` StepRun: open a PR and post a
+ * Commit Status, and nothing else (issue #17, AC7/AC8). No `contents` (so no
+ * merge — GitHub gates `PUT /pulls/{n}/merge` on the Contents permission), no
+ * `issues` (so no labels/comments/issue writes). Creating a PR requires
+ * `pull_requests`; the Commit Status API requires `statuses` — those are the
+ * two permissions the spec means by "dua izin".
+ */
+export const PULL_REQUEST_WRITE_PERMISSIONS = { pull_requests: "write", statuses: "write" } as const;
+
+/** The Commit Status a control-plane StepRun posts to its PR's head commit. */
+export interface CommitStatusInput {
+  state: "success";
+  context: string;
+  description: string;
+  /** The field GitHub links in the PR checks area — the Run page URL (AC7). */
+  targetUrl: string;
+}
+
 export interface GitHost {
   /** Resolves a branch (or other ref) to the commit SHA it currently points at. Throws {@link RefNotFoundError} if the ref does not exist. */
   resolveRef(repo: RepoRef, ref: string): Promise<string>;
   /** Reads a file's raw content at an exact commit SHA. Returns `null` if no file exists at that path — a missing file is an expected outcome, not an error. */
   readFile(repo: RepoRef, sha: string, path: string): Promise<string | null>;
-  /** Mints a 1-hour installation access token scoped to `repo` (`repository_ids` = this repo alone, `permissions` = `contents: write`). `installationId` is the GitHub App's numeric installation id for the repository. */
-  mintInstallationToken(repo: RepoRef, installationId: number): Promise<InstallationToken>;
+  /** Mints a 1-hour installation access token scoped to `repo` (`repository_ids` = this repo alone). `installationId` is the GitHub App's numeric installation id for the repository. Defaults to `contents: write` (the Runner's fetch/push surface); `permissions` may narrow it further — `kind: pull-request` execution mints `{ pull_requests, statuses }`. */
+  mintInstallationToken(
+    repo: RepoRef,
+    installationId: number,
+    permissions?: Record<string, string>,
+  ): Promise<InstallationToken>;
   /** Points the remote `branch` at `sha` through the Git Data API, authenticated with `token`. 422 (ref already exists) is treated as success — idempotent by shape. */
   push(repo: RepoRef, branch: string, sha: string, token: string): Promise<void>;
+  /** The open PR for one head/base pair, or null. The idempotency search half of issue #17 (AC6): "cari PR yang cocok lalu adopsi". `head` is the branch name in this repo. */
+  findOpenPullRequest(repo: RepoRef, head: string, base: string, token: string): Promise<PullRequest | null>;
+  /** Opens a PR. Throws {@link PullRequestConflictError} on GitHub's 422 — the caller treats that as success and adopts. The only other write a `kind: pull-request` StepRun makes, besides the status. */
+  createPullRequest(
+    repo: RepoRef,
+    input: { title: string; body: string; head: string; base: string },
+    token: string,
+  ): Promise<PullRequest>;
+  /** Posts a Commit Status to a commit SHA — the checks-area link back to the Run page (issue #17, AC7). Checks API rejected by design. */
+  postCommitStatus(repo: RepoRef, sha: string, status: CommitStatusInput, token: string): Promise<void>;
 }
 
 /** Credentials that let the control plane act as the GitHub App itself (minting installation tokens). `privateKey` is the app's PEM; never logged, never leaves the process. */
@@ -92,6 +188,13 @@ interface GithubRepoResponse {
 interface GithubTokenResponse {
   token: string;
   expires_at: string;
+}
+
+interface GithubPullRequestResponse {
+  number: number;
+  html_url: string;
+  state: string;
+  head: { sha: string };
 }
 
 const GITHUB_ACCEPT = { accept: "application/vnd.github+json" } as const;
@@ -160,7 +263,7 @@ export function createGithubHost(config?: GithubAppConfig): GitHost {
       return Buffer.from(body.content, "base64").toString("utf-8");
     },
 
-    async mintInstallationToken(repo, installationId) {
+    async mintInstallationToken(repo, installationId, permissions = { contents: "write" }) {
       if (!config) {
         throw new Error("github app credentials not configured; cannot mint an installation token");
       }
@@ -171,7 +274,7 @@ export function createGithubHost(config?: GithubAppConfig): GitHost {
         {
           method: "POST",
           headers: { ...GITHUB_ACCEPT, authorization: `Bearer ${jwt}`, "content-type": "application/json" },
-          body: JSON.stringify({ repository_ids: repositoryIds, permissions: { contents: "write" } }),
+          body: JSON.stringify({ repository_ids: repositoryIds, permissions }),
         },
       );
       if (!response.ok) {
@@ -182,7 +285,7 @@ export function createGithubHost(config?: GithubAppConfig): GitHost {
         token: body.token,
         expiresAt: new Date(body.expires_at),
         repositoryIds,
-        permissions: { contents: "write" },
+        permissions,
       };
     },
 
@@ -211,5 +314,90 @@ export function createGithubHost(config?: GithubAppConfig): GitHost {
       }
       throw new Error(`github push failed: ${update.status}`);
     },
+
+    async findOpenPullRequest(repo, head, base, token) {
+      const query = new URLSearchParams({
+        state: "open",
+        // GitHub's head filter is `user:ref-name` — for a PR inside one repo
+        // the user is the repo owner, exactly what makes the filter unique.
+        head: `${repo.owner}:${head}`,
+        base,
+      });
+      const response = await fetch(
+        `https://api.github.com/repos/${repo.owner}/${repo.name}/pulls?${query}`,
+        { headers: { ...GITHUB_ACCEPT, authorization: `Bearer ${token}` } },
+      );
+      if (!response.ok) {
+        throw new GithubRequestError(
+          `github pull request lookup failed: ${response.status}`,
+          response.status,
+          retryAfterFrom(response),
+        );
+      }
+      const pulls = (await response.json()) as GithubPullRequestResponse[];
+      const match = pulls.find((pull) => pull.state === "open");
+      return match ? toPullRequest(match) : null;
+    },
+
+    async createPullRequest(repo, input, token) {
+      const response = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/pulls`, {
+        method: "POST",
+        headers: { ...GITHUB_ACCEPT, authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          title: input.title,
+          head: input.head,
+          base: input.base,
+          body: input.body,
+        }),
+      });
+      if (response.status === 422) {
+        // 422 = "a pull request already exists for this head/base pair" (or a
+        // validation failure). Issue #17 treats it as success-by-adoption — the
+        // caller re-runs findOpenPullRequest — so it throws this typed signal
+        // rather than an error the retry policy would burn attempts on.
+        const detail = await response.text();
+        throw new PullRequestConflictError(repo, input.head, input.base, detail);
+      }
+      if (!response.ok) {
+        throw new GithubRequestError(
+          `github pull request create failed: ${response.status}`,
+          response.status,
+          retryAfterFrom(response),
+        );
+      }
+      return toPullRequest((await response.json()) as GithubPullRequestResponse);
+    },
+
+    async postCommitStatus(repo, sha, status, token) {
+      const response = await fetch(
+        `https://api.github.com/repos/${repo.owner}/${repo.name}/statuses/${sha}`,
+        {
+          method: "POST",
+          headers: { ...GITHUB_ACCEPT, authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({
+            state: status.state,
+            context: status.context,
+            description: status.description,
+            target_url: status.targetUrl,
+          }),
+        },
+      );
+      if (!response.ok) {
+        throw new GithubRequestError(
+          `github commit status post failed: ${response.status}`,
+          response.status,
+          retryAfterFrom(response),
+        );
+      }
+    },
+  };
+}
+
+function toPullRequest(pull: GithubPullRequestResponse): PullRequest {
+  return {
+    number: pull.number,
+    htmlUrl: pull.html_url,
+    headSha: pull.head.sha,
+    state: "open",
   };
 }

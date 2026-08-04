@@ -5,7 +5,7 @@
  * fake in seam-1 instead — never tested here.
  */
 import { describe, expect, it } from "vitest";
-import { createGithubHost, signGithubAppJwt } from "../../src/domain/git-host.js";
+import { createGithubHost, retryAfterFrom, signGithubAppJwt } from "../../src/domain/git-host.js";
 
 const PRIVATE_KEY = `-----BEGIN RSA PRIVATE KEY-----
 MIIBOQIBAAJBAJtdPR5Kg9ShHyMrqSLcDUvxtADqsSJ6zh2SPfoKKGkPeYhQw/z0
@@ -49,5 +49,22 @@ describe("createGithubHost", () => {
     await expect(host.mintInstallationToken({ owner: "acme", name: "backend" }, 42)).rejects.toThrow(
       "github app credentials not configured",
     );
+  });
+});
+
+describe("retryAfterFrom", () => {
+  it("returns the Retry-After seconds GitHub sent, verbatim", () => {
+    const response = new Response(null, { headers: { "retry-after": "120" } });
+    expect(retryAfterFrom(response)).toBe(120);
+  });
+
+  it("returns null when GitHub sent no Retry-After header", () => {
+    const response = new Response(null, { status: 500 });
+    expect(retryAfterFrom(response)).toBeNull();
+  });
+
+  it("returns null for a header that is not a positive number", () => {
+    expect(retryAfterFrom(new Response(null, { headers: { "retry-after": "later" } }))).toBeNull();
+    expect(retryAfterFrom(new Response(null, { headers: { "retry-after": "-3" } }))).toBeNull();
   });
 });

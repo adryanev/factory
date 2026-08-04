@@ -1,0 +1,10 @@
+# Rule: base:/title:/body: are kind-only fields — a Step without kind: must not
+# write them (the schema would otherwise strip them silently).
+version: 1
+name: Kind-only fields on a plain Step
+repo: backend
+steps:
+  review:
+    promptFile: .factory/prompts/review.md
+    base: main
+    title: { step: review, output: prTitle }

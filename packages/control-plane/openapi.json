@@ -303,6 +303,14 @@
           "outputData": {
             "nullable": true
           },
+          "prNumber": {
+            "type": "integer",
+            "nullable": true
+          },
+          "prUrl": {
+            "type": "string",
+            "nullable": true
+          },
           "finalPrompt": {
             "type": "string",
             "nullable": true
@@ -324,6 +332,8 @@
           "startedAt",
           "outputRefBranch",
           "outputRefSha",
+          "prNumber",
+          "prUrl",
           "finalPrompt"
         ]
       },

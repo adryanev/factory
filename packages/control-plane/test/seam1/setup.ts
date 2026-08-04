@@ -34,6 +34,12 @@ export interface TestRig {
   gitHost: FakeGitHost;
   objectStore: FakeObjectStore;
   /**
+   * The composition-root deps object, exposed so tests can drive the
+   * control-plane executor directly (`runControlPlaneStepCycle`) instead of
+   * racing a background loop against the rig's shared database.
+   */
+  deps: AppDeps;
+  /**
    * Absolute path of this rig's master key file — the key material comes
    * from a FILE, never an env var (spec), and the rig exercises exactly that
    * path. Rotation tests rewrite this file (adding a key version) and call
@@ -121,6 +127,11 @@ export async function startTestRig(options: TestRigOptions = {}): Promise<TestRi
     claimLimiter: createClaimConnectionLimiter(options.maxHangingClaims ?? 2000),
     liveTailHoldMs: options.liveTailHoldMs ?? 400,
     liveTailLimiter: createClaimConnectionLimiter(options.maxHangingLiveTails ?? 2000),
+    // The control-plane lessee and the Run-page URL a Commit Status links to
+    // (issue #17) — a stable identity per rig, and a base URL the assertions
+    // can compare `target_url` against.
+    controlPlaneInstanceId: "control-plane-test",
+    runPageBaseUrl: "https://factory.test",
   };
 
   await bootstrapBreakGlassAccount(deps, BREAK_GLASS_TEST_PASSWORD);
@@ -142,6 +153,7 @@ export async function startTestRig(options: TestRigOptions = {}): Promise<TestRi
     githubOAuth,
     gitHost,
     objectStore,
+    deps,
     masterKeyFile,
     setClock: (date: Date) => {
       currentTime = date;

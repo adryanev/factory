@@ -184,6 +184,8 @@ describe("Runner protocol: heartbeat, lease renewal, and the lease sweep", () =>
       claimLimiter: createClaimConnectionLimiter(2000),
       liveTailHoldMs: 400,
       liveTailLimiter: createClaimConnectionLimiter(2000),
+      controlPlaneInstanceId: "control-plane-test",
+      runPageBaseUrl: "https://factory.test",
     };
     await bootstrapBreakGlassAccount(deps, "boot-sweep-test-password");
 

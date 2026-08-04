@@ -6,12 +6,14 @@
  * explicitly.
  */
 import { Pool } from "pg";
+import { randomUUID } from "node:crypto";
 import { createDeps } from "./deps.js";
 import { assertMigrationsApplied, MigrationGateError } from "./db/migration-gate.js";
 import { MIGRATIONS_FOLDER } from "./db/migrations-path.js";
 import { bootstrapBreakGlassAccount } from "./domain/auth.js";
 import { createFileKeyRing } from "./domain/master-key.js";
 import { bootControlPlane } from "./boot.js";
+import { startControlPlaneStepExecutor } from "./domain/control-plane-steps.js";
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
@@ -58,6 +60,15 @@ async function main(): Promise<void> {
       accessKey: requiredEnv("GARAGE_ACCESS_KEY"),
       secretKey: requiredEnv("GARAGE_SECRET_KEY"),
     },
+    {
+      // Issue #17: the lessee identity this instance claims kind: StepRuns
+      // with — regenerated per boot, so two instances never share one (the
+      // claim query's `leased_by` is what fences them).
+      controlPlaneInstanceId: `control-plane-${randomUUID()}`,
+      // The web surface's base URL — the Commit Status target_url links the
+      // PR's checks area back to this Run's page (issue #17, AC7).
+      runPageBaseUrl: process.env["FACTORY_WEB_URL"] ?? `http://localhost:${port}`,
+    },
   );
 
   // Idempotent — safe to run on every boot, including a config'd password
@@ -66,6 +77,15 @@ async function main(): Promise<void> {
 
   // Sweep runs before the listener opens — see `boot.ts`.
   const { port: boundPort } = await bootControlPlane(deps, port);
+
+  // The control-plane Step executor (issue #17) — a background lessee that
+  // claims and runs `kind: pull-request` StepRuns. It does not gate the
+  // listener the way the lease sweep does; it is a worker, not a barrier.
+  const executor = startControlPlaneStepExecutor(deps);
+  const stop = (): void => executor.stop();
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
+
   console.log(`control plane listening on http://localhost:${boundPort}`);
 }
 

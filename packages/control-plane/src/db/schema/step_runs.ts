@@ -99,6 +99,11 @@ export const stepRuns = pgTable(
     outputRefBranch: text("output_ref_branch"),
     outputRefSha: text("output_ref_sha"),
     outputData: jsonb("output_data"),
+    // PR yang dibuka Step `kind: pull-request`, dicatat di baris StepRun,
+    // bukan sebagai Output (ia daun, dan ia tampil di halaman Run; issue 17,
+    // ticket 24: "Nomor dan URL PR tetap dicatat — di baris StepRun").
+    prNumber: integer("pr_number"),
+    prUrl: text("pr_url"),
     // Prompt final yang benar-benar dikirim ke agent (issue 9, AC5): isi
     // promptFile/prompt + blok instruksi format yang dibangkitkan dari
     // outputs:. Ditulis saat giliran diklaim — momen prompt itu "dikirim" —

@@ -167,8 +167,15 @@ describe("claim_step_run.sql", () => {
     const runnerClaim = await claim("runner-1", [], 10, 30, null);
     expect(runnerClaim.map((r) => r.id)).toEqual([ordinary]);
 
+    // The control-plane lessee asks for kind: pull-request with a 60-second
+    // lease (issue #17, AC1) — the same query, a different caller.
     const controlPlaneClaim = await claim("control-plane-1", [], 10, 60, "pull-request");
     expect(controlPlaneClaim.map((r) => r.id)).toEqual([prStep]);
+    const leaseDelta = await rig.pool.query<{ seconds: number }>(
+      `select extract(epoch from (lease_expires_at - now()))::int as seconds from step_runs where id = $1`,
+      [prStep],
+    );
+    expect(leaseDelta.rows[0]?.seconds).toBe(60);
   });
 
   it("under concurrent callers, claims every ready row exactly once (FOR UPDATE SKIP LOCKED)", async () => {

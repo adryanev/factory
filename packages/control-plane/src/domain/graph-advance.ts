@@ -39,6 +39,12 @@
  *    once**, by the transaction that ends the Run (`finalizeRunIfDone`),
  *    when no StepRun is left in a non-terminal state. Nothing on the
  *    scheduling path reads them.
+ *  - A Step with `kind: pull-request` (issue #17) is born here too, but it is
+ *    never part of the Runner-facing advance: it materializes once per branch
+ *    of its single `after:` dep when that dep is a fan-out source, or once
+ *    when the dep is plain — each row `ready` for the control-plane executor
+ *    (`domain/control-plane-steps.ts`) to claim as a lessee. The `join:`
+ *    absence/presence is the flag that decides per-branch vs once.
  *
  * The whole thing runs inside the caller's `db.transaction` (the same one
  * that commits the terminal StepRun), so an advance that fails rolls the
@@ -201,6 +207,10 @@ export async function joinVerdict(
   fanOutStepKey: string,
   policy: Step["join"],
 ): Promise<JoinVerdict> {
+  // `join:` is optional in the schema (issue #17): an omitted one means "all"
+  // for a plain Join, and "born once per branch" for a kind: Step. The "all"
+  // default lives here, at the single runtime call site.
+  if (policy === undefined) policy = "all";
   const { decision, branches } = await fanOutRows(deps.db, runId, fanOutStepKey);
   if (decision) {
     if (TERMINAL_NON_SUCCESS.includes(decision.outcome)) return "unsatisfiable";
@@ -285,8 +295,8 @@ interface ResolvedBranch {
   requiredTags: string[];
 }
 
-/** The structured Output map a branch/Step produced — unwraps the `{ kind: 'done', outputs }` envelope the /result gate stores. */
-function structuredOutputs(outputData: unknown): unknown {
+/** The structured Output map a branch/Step produced — unwraps the `{ kind: 'done', outputs }` envelope the /result gate stores. Shared with the control-plane Step executor (issue #17) to resolve `title:`/`body:` references. */
+export function structuredOutputs(outputData: unknown): unknown {
   if (typeof outputData === "object" && outputData !== null && "outputs" in outputData) {
     return (outputData as { outputs: unknown }).outputs;
   }
@@ -477,6 +487,99 @@ async function insertPlainDecision(
 }
 
 /**
+ * The `kind: pull-request` StepRun row — a control-plane Step never declares
+ * `repo:` (it inherits the branch it follows), so the repository comes from
+ * the upstream row, not the definition (issue #17, AC3). turn is always 1
+ * (kind Steps are executed in seconds; there are no resumed turns, ticket 24).
+ */
+async function insertKindDecision(
+  deps: GraphDeps,
+  run: RunRow,
+  stepId: string,
+  outcome: "ready" | "skipped",
+  reason: string | null,
+  branchKey: string | null,
+  repositoryId: Id<"repository">,
+): Promise<void> {
+  await deps.db
+    .insert(stepRuns)
+    .values({
+      id: generateId("steprun"),
+      runId: run.id,
+      repositoryId,
+      stepKey: stepId,
+      branchKey,
+      turn: 1,
+      attempt: 1,
+      outcome,
+      reason,
+      kind: "pull-request",
+      requiredTags: [],
+      readyAt: deps.now(),
+    })
+    .onConflictDoNothing();
+}
+
+/**
+ * Materializes a `kind: pull-request` StepRun after its single `after:` dep
+ * reached a terminal state (issue #17). The kind Step is born **once per
+ * branch** when the dep is a fan-out source (each branch gets its own PR, in
+ * that branch's repo — "PR-per-repo jatuh gratis", ticket 21/24), and **once**
+ * when the dep is a plain Step (the PR follows that one branch). A terminal
+ * non-success upstream makes the kind Step `skipped` — there is nothing to
+ * open a PR for. Idempotent on the natural key, so re-advancing after a later
+ * branch finishes is a no-op for the rows already born.
+ */
+async function materializeKindStep(
+  deps: GraphDeps,
+  run: RunRow,
+  pipeline: Pipeline,
+  stepId: string,
+): Promise<void> {
+  const step = pipeline.steps[stepId]!;
+  const depKey = step.after[0]!;
+  const depStep = pipeline.steps[depKey]!;
+
+  if (isFanOutStep(depStep)) {
+    // Per-branch birth. A fan-out that failed or was skipped has no branches —
+    // record a single `skipped` decision so the leaf exists and the Graph is
+    // complete ("Run yang tidak menghasilkan apa pun tidak boleh mengaku
+    // sukses").
+    const { decision, branches } = await fanOutRows(deps.db, run.id, depKey);
+    if (branches.length === 0 && decision && TERMINAL_NON_SUCCESS.includes(decision.outcome)) {
+      await insertKindDecision(
+        deps,
+        run,
+        stepId,
+        "skipped",
+        "upstream-not-runnable",
+        null,
+        decision.repositoryId,
+      );
+      return;
+    }
+    for (const branch of branches) {
+      if (branch.outcome === "succeeded") {
+        await insertKindDecision(deps, run, stepId, "ready", null, branch.branchKey, branch.repositoryId);
+      } else if (TERMINAL_NON_SUCCESS.includes(branch.outcome)) {
+        await insertKindDecision(deps, run, stepId, "skipped", "upstream-not-runnable", branch.branchKey, branch.repositoryId);
+      }
+      // A branch still in flight has no PR row yet — it is born when it succeeds.
+    }
+    return;
+  }
+
+  // Plain dep: born once, inheriting the dep's repo.
+  const depRow = await latestPlainRow(deps.db, run.id, depKey);
+  if (!depRow) return; // not materialized yet — wait.
+  if (depRow.outcome === "succeeded") {
+    await insertKindDecision(deps, run, stepId, "ready", null, null, depRow.repositoryId);
+  } else if (TERMINAL_NON_SUCCESS.includes(depRow.outcome)) {
+    await insertKindDecision(deps, run, stepId, "skipped", "upstream-not-runnable", null, depRow.repositoryId);
+  }
+}
+
+/**
  * Advances the Graph after one StepRun reached a terminal state: the fan-out
  * decision, the Join verdicts, and skip propagation all live here. Idempotent
  * — re-advancing from an already-decided Step is a no-op (`onConflictDoNothing`
@@ -501,15 +604,19 @@ export async function advanceGraph(
     queued.delete(completedKey);
 
     for (const [stepId, step] of Object.entries(pipeline.steps)) {
-      // Control-plane Steps (`kind:`) are leaves materialized once per
-      // successful branch by issue #17 — not this issue's concern. Leaving
-      // them out of the runner-facing advance keeps a Run from hanging on a
-      // row no Runner may claim.
-      if (step.kind !== undefined) continue;
       const dependsOn =
         step.after.includes(completedKey) ||
         step.branchesFrom?.step === completedKey;
       if (!dependsOn) continue;
+
+      // Control-plane Steps (`kind:`) are born by issue #17 — once per branch
+      // when their single dep is a fan-out source, once when it is plain —
+      // and executed by the control plane itself as a lessee. The ordinary
+      // Runner-facing advance never touches them.
+      if (step.kind !== undefined) {
+        await materializeKindStep(deps, run, pipeline, stepId);
+        continue;
+      }
 
       const decision = await evaluateStep(deps, run, pipeline, stepId);
       if (decision === "pending") continue;
@@ -575,7 +682,6 @@ export async function finalizeRunIfDone(
   const outcomes: string[] = [];
   for (const leafId of leafStepIds) {
     const leaf = pipeline.steps[leafId]!;
-    if (leaf.kind !== undefined) continue; // #17 materializes kind: leaves; nothing to read today.
     if (isFanOutStep(leaf)) {
       const { decision, branches } = await fanOutRows(deps.db, runId, leafId);
       if (branches.length > 0) {
@@ -583,6 +689,15 @@ export async function finalizeRunIfDone(
       } else if (decision) {
         outcomes.push(decision.outcome);
       }
+      continue;
+    }
+    // A `kind:` leaf is born per branch (fan-out dep) or once (plain dep) —
+    // either way its rows are the per-branch/per-decision picture, read the
+    // same way a fan-out leaf's are.
+    if (leaf.kind !== undefined) {
+      const { decision, branches } = await fanOutRows(deps.db, runId, leafId);
+      if (decision) outcomes.push(decision.outcome);
+      if (branches.length > 0) outcomes.push(...branches.map((b) => b.outcome));
       continue;
     }
     const row = await latestPlainRow(deps.db, runId, leafId);

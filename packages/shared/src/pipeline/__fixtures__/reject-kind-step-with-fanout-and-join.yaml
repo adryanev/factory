@@ -1,0 +1,24 @@
+# Rule: a kind: Step that follows a fan-out must not write join: — it is born
+# once per branch; the head branch would be ambiguous on a Join.
+version: 1
+name: Kind Step with join over a fan-out
+repo: infra
+steps:
+  implement:
+    branches:
+      - key: frontend
+        repo: frontend
+      - key: backend
+        repo: backend
+    promptFile: .factory/prompts/implement.md
+    outputs:
+      prTitle: { type: string }
+      prBody: { type: string }
+
+  open-pr:
+    after: [implement]
+    kind: pull-request
+    join: all
+    base: main
+    title: { step: implement, output: prTitle }
+    body: { step: implement, output: prBody }

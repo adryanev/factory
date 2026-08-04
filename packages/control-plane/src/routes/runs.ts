@@ -63,6 +63,9 @@ const stepRunSchema = z
     outputRefBranch: z.string().nullable(),
     outputRefSha: z.string().nullable(),
     outputData: z.unknown().nullable(),
+    // The PR a kind: pull-request StepRun opened, recorded on its row (issue 17).
+    prNumber: z.number().int().nullable(),
+    prUrl: z.string().nullable(),
     // Prompt final yang benar-benar dikirim ke agent (issue 9, AC5) — isi
     // file + blok instruksi format. NULL sebelum giliran diklaim.
     finalPrompt: z.string().nullable(),
@@ -116,6 +119,8 @@ function toStepRunResponse(stepRun: StepRun) {
     outputRefBranch: stepRun.outputRefBranch,
     outputRefSha: stepRun.outputRefSha,
     outputData: stepRun.outputData,
+    prNumber: stepRun.prNumber,
+    prUrl: stepRun.prUrl,
     finalPrompt: stepRun.finalPrompt,
   };
 }

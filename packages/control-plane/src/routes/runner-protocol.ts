@@ -150,7 +150,7 @@ const stepRunIdParamSchema = z.object({ id: z.string().openapi({ param: { name: 
 const uploadsRequestSchema = z
   .object({
     lease_token: z.string(),
-    requests: z.array(z.object({ key: z.string().min(1), kind: z.enum(["artifact", "session"]) })).max(64),
+    requests: z.array(z.object({ key: z.string().min(1), kind: z.enum(["artifact", "session", "log"]) })).max(64),
   })
   .openapi("UploadGrantRequest");
 const uploadsResponseSchema = z

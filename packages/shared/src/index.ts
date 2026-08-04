@@ -14,6 +14,7 @@ export {
   type IdGeneratorOptions,
   type Id,
 } from "./id.js";
+export { createLiteralRedactor, REDACTION_PLACEHOLDER } from "./redaction.js";
 
 export {
   validatePipelineDefinition,

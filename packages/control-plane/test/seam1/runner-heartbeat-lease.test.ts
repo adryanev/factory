@@ -19,6 +19,7 @@ import { bootstrapBreakGlassAccount } from "../../src/domain/auth.js";
 import { bootControlPlane } from "../../src/boot.js";
 import { createFakeGithubOAuthClient } from "./fake-github-oauth.js";
 import { createFakeGitHost } from "./fake-git-host.js";
+import { createFakeObjectStore } from "./fake-object-store.js";
 import { startTestRig, type TestRig } from "./setup.js";
 import { joinRunner, realIdGenerator, seedReadyStepRun } from "./runner-test-helpers.js";
 import { testIdGenerator } from "../sql/db-rig.js";
@@ -177,8 +178,11 @@ describe("Runner protocol: heartbeat, lease renewal, and the lease sweep", () =>
       random: { bytes: (n: number) => new Uint8Array(n) },
       githubOAuth: createFakeGithubOAuthClient(),
       gitHost: createFakeGitHost(),
+      objectStore: createFakeObjectStore(),
       claimHoldRangeMs: { min: 50, max: 100 },
       claimLimiter: createClaimConnectionLimiter(2000),
+      liveTailHoldMs: 400,
+      liveTailLimiter: createClaimConnectionLimiter(2000),
     };
     await bootstrapBreakGlassAccount(deps, "boot-sweep-test-password");
 

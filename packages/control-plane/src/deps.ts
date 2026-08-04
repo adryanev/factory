@@ -16,6 +16,8 @@ import type { Pool } from "pg";
 import { createDatabase, type Database } from "./db/client.js";
 import { createGithubOAuthClient, type GithubOAuthClient } from "./domain/github-identity.js";
 import { createGithubHost, type GithubAppConfig, type GitHost } from "./domain/git-host.js";
+import { createS3ObjectStore, type ObjectStore, type S3ObjectStoreConfig } from "./object-store.js";
+import { LIVE_TAIL_HOLD_MS } from "./domain/step-run-logs.js";
 
 export interface Clock {
   now(): Date;
@@ -73,6 +75,21 @@ export interface AppDeps {
    */
   claimHoldRangeMs: { min: number; max: number };
   claimLimiter: ClaimConnectionLimiter;
+  /**
+   * Live-tail's long-poll hold (spec: "Log → long-poll ≤30s dari offset").
+   * Production always gets 30000; tests inject a tiny value so the
+   * empty-hold and connection-cap behaviors are provable without a 30-second
+   * test.
+   */
+  liveTailHoldMs: number;
+  /** Mints presigned URLs — the control plane's half of "byte tidak pernah lewat control plane" (spec: "Artifact dan blob", "Log"). PUTs go to the Runner (uploads, log chunks), GETs go to the browser (live-tail, archive, artifacts). The control plane never proxies a byte. */
+  objectStore: ObjectStore;
+  /**
+   * The browser-side analogue of `claimLimiter`: one live-tail tab is one
+   * hanging connection (spec: "Satu tab browser = satu koneksi menggantung"),
+   * and this caps how many can hang per instance.
+   */
+  liveTailLimiter: ClaimConnectionLimiter;
 }
 
 export function createSystemClock(): Clock {
@@ -96,29 +113,53 @@ export interface GithubOAuthConfig {
 
 const PRODUCTION_CLAIM_HOLD_RANGE_MS = { min: 20_000, max: 30_000 };
 const MAX_HANGING_CLAIM_CONNECTIONS = 2000;
+const MAX_HANGING_LIVE_TAIL_CONNECTIONS = 2000;
 
 /**
- * Builds real (non-test) deps around an already-connected pool. `githubConfig`
- * and `gitHostConfig` come from the environment in `main.ts` — infra config,
- * not the clock/random/network seams this file otherwise documents as injected.
- * `gitHostConfig` carries the GitHub App credentials (`GITHUB_APP_ID` +
- * `GITHUB_APP_PRIVATE_KEY`) that let the control plane mint installation
- * tokens at `/claim` (see `domain/git-host.ts`); without them the host is
- * read-only for public repos and minting throws a clear "not configured".
+ * Builds real (non-test) deps around an already-connected pool. `githubConfig`,
+ * `gitHostConfig`, and `objectStoreConfig` come from the environment in
+ * `main.ts` — infra config, not the clock/random/network seams this file
+ * otherwise documents as injected. `gitHostConfig` carries the GitHub App
+ * credentials (`GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY`) that let the control
+ * plane mint installation tokens at `/claim` (see `domain/git-host.ts`);
+ * without them the host is read-only for public repos and minting throws a
+ * clear "not configured". `objectStoreConfig` carries the Garage credentials
+ * that let the control plane mint presigned URLs — every byte uploaded or read
+ * moves peer-to-peer, so these are the only secrets the store half needs.
  */
 export function createDeps(
   pool: Pool,
   githubConfig: GithubOAuthConfig,
   gitHostConfig?: GithubAppConfig,
+  objectStoreConfig?: S3ObjectStoreConfig,
 ): AppDeps {
+  const clock = createSystemClock();
   return {
     db: createDatabase(pool),
     pool,
-    clock: createSystemClock(),
+    clock,
     random: createSystemRandom(),
     githubOAuth: createGithubOAuthClient(githubConfig),
     gitHost: createGithubHost(gitHostConfig),
     claimHoldRangeMs: PRODUCTION_CLAIM_HOLD_RANGE_MS,
     claimLimiter: createClaimConnectionLimiter(MAX_HANGING_CLAIM_CONNECTIONS),
+    liveTailHoldMs: LIVE_TAIL_HOLD_MS,
+    objectStore: objectStoreConfig ? createS3ObjectStore(objectStoreConfig) : createNoopObjectStore(clock),
+    liveTailLimiter: createClaimConnectionLimiter(MAX_HANGING_LIVE_TAIL_CONNECTIONS),
+  };
+}
+
+/**
+ * Fallback object store for a process without Garage credentials configured
+ * (the OpenAPI generator, local dev before env is set). Produces obviously-
+ * fake URLs so the surface still boots; a real deployment always passes
+ * `objectStoreConfig` from `main.ts`.
+ */
+function createNoopObjectStore(clock: Clock): ObjectStore {
+  return {
+    mintPutUrl: (key) =>
+      Promise.resolve({ url: `https://blob.invalid/${key}?mock-presigned-put=1`, expiresAt: clock.now() }),
+    mintGetUrl: (key) =>
+      Promise.resolve({ url: `https://blob.invalid/${key}?mock-presigned-get=1`, expiresAt: clock.now() }),
   };
 }

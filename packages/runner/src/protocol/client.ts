@@ -43,6 +43,20 @@ export interface ResultReply {
   outputData: unknown;
 }
 
+export interface UploadGrant {
+  key: string;
+  uploadUrl: string;
+  expiresAt: string;
+}
+
+export interface LogChunkWire {
+  attempt: number;
+  seq: number;
+  blobKey: string;
+  byteOffset: number;
+  size: number;
+}
+
 export interface ProtocolClient {
   claim(input: { tags: string[]; slots: number; protocolVersion: number }): Promise<ClaimedStepRun | null>;
   heartbeat(input: { leases: { stepRunId: string; leaseToken: string }[]; capsHash: string | null }): Promise<HeartbeatReply>;
@@ -54,6 +68,14 @@ export interface ProtocolClient {
     outputData?: unknown;
     reason?: string;
   }): Promise<ResultReply>;
+  /** Mints presigned PUT grants for this turn's artifact/session/log objects — the Runner never asks for more than a URL (spec: "Presigned dua arah"). */
+  mintUploadGrants(input: {
+    stepRunId: string;
+    leaseToken: string;
+    requests: { key: string; kind: "artifact" | "session" | "log" }[];
+  }): Promise<UploadGrant[]>;
+  /** Records log-chunk metadata after the bytes are already in the object store — dedup at the primary key, never a 409 (spec: "Log"). */
+  recordLogChunks(input: { stepRunId: string; leaseToken: string; chunks: LogChunkWire[] }): Promise<void>;
 }
 
 export function createProtocolClient(baseUrl: string, secret: string): ProtocolClient {
@@ -116,6 +138,39 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
         throw new Error(`result failed: HTTP ${status}`);
       }
       return body;
+    },
+
+    async mintUploadGrants({ stepRunId, leaseToken, requests }) {
+      const { status, body } = await post<{ grants: { key: string; upload_url: string; expires_at: string }[] }>(
+        `/step-runs/${stepRunId}/uploads`,
+        { lease_token: leaseToken, requests },
+      );
+      if (status === 409) {
+        throw new Error("uploads refused: lease no longer valid");
+      }
+      if (!(status >= 200 && status < 300)) {
+        throw new Error(`uploads failed: HTTP ${status}`);
+      }
+      return body.grants.map((grant) => ({ key: grant.key, uploadUrl: grant.upload_url, expiresAt: grant.expires_at }));
+    },
+
+    async recordLogChunks({ stepRunId, leaseToken, chunks }) {
+      const { status } = await post<{ ok: true }>(`/step-runs/${stepRunId}/log-chunks`, {
+        lease_token: leaseToken,
+        chunks: chunks.map((chunk) => ({
+          attempt: chunk.attempt,
+          seq: chunk.seq,
+          blob_key: chunk.blobKey,
+          byte_offset: chunk.byteOffset,
+          size: chunk.size,
+        })),
+      });
+      if (status === 409) {
+        throw new Error("log-chunks refused: lease no longer valid");
+      }
+      if (!(status >= 200 && status < 300)) {
+        throw new Error(`log-chunks failed: HTTP ${status}`);
+      }
     },
   };
 }

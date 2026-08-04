@@ -65,7 +65,7 @@ export function createRunnerClient(baseUrl: string) {
     uploads: (
       secret: string,
       stepRunId: string,
-      input: { lease_token: string; requests: { key: string; kind: "artifact" | "session" }[] },
+      input: { lease_token: string; requests: { key: string; kind: "artifact" | "session" | "log" }[] },
     ) => postRunner<{ grants: { key: string; upload_url: string; expires_at: string }[] }>(
       baseUrl,
       `/step-runs/${stepRunId}/uploads`,

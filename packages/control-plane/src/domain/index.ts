@@ -28,6 +28,7 @@ import type { Group } from "./groups.js";
 import type { RunListFilters, RunPage, RunWithGraph, TriggerRunInput, TriggeredRun } from "./runs.js";
 import type { DesiredState, HeartbeatLease, HeartbeatReply, RunnerIdentity } from "./runners.js";
 import type { ClaimedStepRun, ClaimInput } from "./step-run-claim.js";
+import * as stepRunLogsDomain from "./step-run-logs.js";
 import type { LogChunkInput, QuestionInput, ResultInput, ResultRecord, UploadGrant, UploadRequest } from "./step-run-turn.js";
 
 export type { Principal } from "./principal.js";
@@ -140,6 +141,12 @@ export interface Domain {
     ) => Promise<ResultRecord>;
     /** Operator surface, Project `member`. */
     cancel: (principal: Principal, stepRunId: Id<"steprun">) => Promise<void>;
+    /** Web surface, Project `member`: live-tail from any offset — archive is the same call with offset 0. Returns presigned GETs, never bytes. */
+    readLogChunks: (
+      principal: Principal,
+      stepRunId: Id<"steprun">,
+      input: { attempt?: number; offset: number },
+    ) => Promise<stepRunLogsDomain.LogTailResult>;
   };
 }
 
@@ -197,6 +204,8 @@ export function createDomain(deps: AppDeps): Domain {
       submitResult: (runner, stepRunId, leaseToken, input) =>
         turnDomain.submitResult(deps, runner, stepRunId, leaseToken, input),
       cancel: (principal, stepRunId) => stepRunOpsDomain.cancelStepRun(deps, principal, stepRunId),
+      readLogChunks: (principal, stepRunId, input) =>
+        stepRunLogsDomain.readLogChunks(deps, principal, stepRunId, input),
     },
   };
 }

@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { GitOps } from "../git/ops.js";
-import type { ClaimedStepRun, HeartbeatReply, ProtocolClient, ResultReply } from "../protocol/client.js";
+import type { ClaimedStepRun, HeartbeatReply, LogChunkWire, ProtocolClient, ResultReply } from "../protocol/client.js";
 import { executeClaimedTurn, execModeFor, resolveStep, runOneCycle, startCancelWatch } from "../step-run-executor.js";
 import { TurnCancelledError, type Turn, type TurnResult, type TurnSpec } from "../agent-runtime/index.js";
 
@@ -62,12 +62,21 @@ function fakeProtocol(overrides: {
   claimResult?: ClaimedStepRun | null;
   heartbeatCancel?: string[];
   resultError?: boolean;
-} = {}): ProtocolClient & { results: ResultReply[]; heartbeats: number } {
+} = {}): ProtocolClient & {
+  results: ResultReply[];
+  heartbeats: number;
+  logChunks: LogChunkWire[];
+  uploadGrants: number;
+} {
   const results: ResultReply[] = [];
+  const logChunks: LogChunkWire[] = [];
   let heartbeats = 0;
+  let uploadGrants = 0;
   return {
     results,
+    logChunks,
     heartbeats,
+    uploadGrants,
     async claim() {
       return overrides.claimResult ?? null;
     },
@@ -86,6 +95,13 @@ function fakeProtocol(overrides: {
       results.push({ outcome: input.outcome, ref: input.ref ?? null, outputData: input.outputData });
       if (overrides.resultError) throw new Error("result refused: lease no longer valid");
       return { outcome: input.outcome, ref: input.ref ?? null, outputData: input.outputData };
+    },
+    async mintUploadGrants({ requests }) {
+      uploadGrants += 1;
+      return requests.map((request) => ({ key: request.key, uploadUrl: `https://blob.invalid/put/${request.key}`, expiresAt: "2026-01-01T00:05:00.000Z" }));
+    },
+    async recordLogChunks({ chunks }) {
+      logChunks.push(...chunks);
     },
   };
 }
@@ -274,5 +290,43 @@ describe("step-run executor: the commit point", () => {
       definition: "version: 1\nname: p\nrepo: backend\nsteps:\n  build:\n    prompt: do it\n",
     });
     expect(() => resolveStep(agentClaimed)).toThrow(/not a run: step/);
+  });
+
+  it("captures onLine output into chunks, redacts the turn's git tokens, and flushes before /result", async () => {
+    const protocol = fakeProtocol();
+    const git = fakeGit();
+    const uploaded: { text: string; seq: number; byteOffset: number }[] = [];
+    const claimed = claimFixture();
+
+    const deps = {
+      protocol,
+      git,
+      repoDirFor: () => "/repos/acme-backend",
+      sandboxImage: "factory-sandbox",
+      heartbeatIntervalMs: 100,
+      logFlushIntervalMs: 100_000, // no timer tick — the explicit pre-/result flush is what's under test.
+      logUploaderFor: () => ({
+        async upload(chunk: { text: string; seq: number; byteOffset: number }) {
+          uploaded.push(chunk);
+        },
+      }),
+      startTurn(input: TurnSpec) {
+        // The command streams lines; the first one leaks the push token.
+        input.onLine?.("building the module");
+        input.onLine?.("push token is fetch-token and again fetch-token");
+        return fakeTurn({ exitCode: 0, preservedWorktreePath: null });
+      },
+    };
+
+    await executeClaimedTurn(deps as never, claimed);
+
+    // The final flush ran before /result — the archive is complete while the
+    // lease is still valid, and the token was redacted before upload.
+    expect(uploaded.length).toBeGreaterThanOrEqual(1);
+    const text = uploaded.map((chunk) => chunk.text).join("");
+    expect(text).toContain("building the module\n");
+    expect(text).toContain("push token is [redacted] and again [redacted]\n");
+    expect(text).not.toContain("fetch-token");
+    expect(protocol.results).toHaveLength(1); // /result still committed.
   });
 });

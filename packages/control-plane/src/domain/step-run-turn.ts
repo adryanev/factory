@@ -7,13 +7,13 @@
  * lease sweep to someone else (spec: "Cancel otoritatif di control plane";
  * "/result dijaga lease_token itu sendiri").
  *
- * `/uploads` and `/log-chunks` are protocol-shape stubs: this issue proves
- * the Runner protocol, not the blob store (no Garage client exists yet in
- * this repo — that's a separate, unbuilt concern). `/uploads` synthesizes a
- * deterministic fake presigned URL instead of minting a real one;
- * `/log-chunks` genuinely persists to the real `log_chunks` table, since
- * that part costs nothing extra and its dedup-by-primary-key behavior is
- * worth having real.
+ * `/uploads` and `/log-chunks` are this issue's byte-free surface: they mint
+ * presigned PUTs (uploads) and record metadata (log chunks) and never touch
+ * a blob themselves — byte traffic is peer-to-peer with Garage (spec: "Byte
+ * tidak pernah lewat control plane"). `mintUploadGrants` covers three kinds:
+ * `artifact`, `session`, and this issue's `log` (the Runner mints one PUT per
+ * chunk it is about to upload). `/log-chunks` genuinely persists to the real
+ * `log_chunks` table, and its dedup-by-primary-key behavior is real.
  */
 import { and, eq } from "drizzle-orm";
 import type { Id } from "@factory/shared";
@@ -55,7 +55,7 @@ async function requireLeaseHolder(
 
 export interface UploadRequest {
   key: string;
-  kind: "artifact" | "session";
+  kind: "artifact" | "session" | "log";
 }
 
 export interface UploadGrant {
@@ -64,11 +64,27 @@ export interface UploadGrant {
   expiresAt: Date;
 }
 
-const PRESIGNED_UPLOAD_LIFETIME_MS = 5 * 60 * 1000; // spec: "Presigned 5 menit dinyatakan, tidak diperpendek" — same lifetime, stub URL.
+/**
+ * The blob key a grant's PUT writes to. One bucket, three prefixes (spec:
+ * "Artifact dan blob": "Satu bucket, tiga prefix: artifact, log, session").
+ * The Runner passes the tail (`key`) and this maps kind → prefix + StepRun,
+ * so the Runner never has to know or trust the bucket layout. For `log`,
+ * the Runner passes `key = "{attempt}/{seq}"`, making the object
+ * `log/{stepRunId}/{attempt}/{seq}` — unique per primary key row, which is
+ * what makes "baris log_chunks ada ⇒ blob pasti ada" hold row for row.
+ */
+export function blobKeyFor(stepRunId: Id<"steprun">, request: UploadRequest): string {
+  return `${request.kind}/${stepRunId}/${request.key}`;
+}
 
-/** Stub: synthesizes a deterministic, obviously-fake presigned URL. Real Garage/S3 presigning is a separate, unbuilt concern (see module doc). */
+/**
+ * Mints presigned PUT grants — the control plane records *nothing* about the
+ * bytes, it just mints URLs (spec: "Control plane tidak memegang byte").
+ * `expiresAt` is the stated 5-minute presigned lifetime (spec: "Presigned 5
+ * menit dinyatakan, tidak diperpendek").
+ */
 export async function mintUploadGrants(
-  deps: Pick<AppDeps, "db" | "clock">,
+  deps: Pick<AppDeps, "db" | "objectStore">,
   runner: RunnerIdentity,
   stepRunId: Id<"steprun">,
   leaseToken: string,
@@ -78,12 +94,12 @@ export async function mintUploadGrants(
   if (row.outcome !== "running" || row.leasedBy !== runner.id) {
     throw new LeaseConflictError("step run is not currently leased to this runner");
   }
-  const expiresAt = new Date(deps.clock.now().getTime() + PRESIGNED_UPLOAD_LIFETIME_MS);
-  return requests.map((request) => ({
-    key: request.key,
-    uploadUrl: `https://blob.invalid/${request.kind}/${stepRunId}/${encodeURIComponent(request.key)}?mock-presigned=1`,
-    expiresAt,
-  }));
+  const grants: UploadGrant[] = [];
+  for (const request of requests) {
+    const { url, expiresAt } = await deps.objectStore.mintPutUrl(blobKeyFor(stepRunId, request));
+    grants.push({ key: request.key, uploadUrl: url, expiresAt });
+  }
+  return grants;
 }
 
 // --- /step-runs/:id/log-chunks ---------------------------------------------

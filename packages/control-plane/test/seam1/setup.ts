@@ -19,6 +19,7 @@ import { CSRF_HEADER_NAME, CSRF_HEADER_VALUE } from "../../src/csrf.js";
 import { createFakeGithubOAuthClient, type FakeGithubOAuthClient } from "./fake-github-oauth.js";
 import type { GithubIdentity } from "../../src/domain/github-identity.js";
 import { createFakeGitHost, type FakeGitHost } from "./fake-git-host.js";
+import { createFakeObjectStore, type FakeObjectStore } from "./fake-object-store.js";
 
 export const BREAK_GLASS_TEST_PASSWORD = "correct horse battery staple";
 
@@ -27,6 +28,7 @@ export interface TestRig {
   pool: Pool;
   githubOAuth: FakeGithubOAuthClient;
   gitHost: FakeGitHost;
+  objectStore: FakeObjectStore;
   /** Moves the injected clock. No test in this rig ever reads the wall clock. */
   setClock(date: Date): void;
   /** `fetch` with the CSRF header every mutating request needs already set — tests only add it explicitly when they mean to test its absence. */
@@ -68,6 +70,10 @@ export interface TestRigOptions {
   claimHoldRangeMs?: { min: number; max: number };
   /** Defaults to 2000 (spec: "Batas 2000 koneksi menggantung per instance"); the connection-cap test injects a tiny one so it doesn't need 2000 real hanging sockets. */
   maxHangingClaims?: number;
+  /** Defaults to 2000 (spec: "Satu tab browser = satu koneksi menggantung"); the live-tail cap test injects a tiny one. */
+  maxHangingLiveTails?: number;
+  /** Defaults to 30000 (spec: "long-poll ≤30s dari offset"); live-tail tests inject a tiny hold so the empty-hold behavior is provable without a 30s test. */
+  liveTailHoldMs?: number;
 }
 
 export async function startTestRig(options: TestRigOptions = {}): Promise<TestRig> {
@@ -82,6 +88,7 @@ export async function startTestRig(options: TestRigOptions = {}): Promise<TestRi
   const clock: Clock = { now: () => currentTime };
   const githubOAuth = createFakeGithubOAuthClient();
   const gitHost = createFakeGitHost();
+  const objectStore = createFakeObjectStore(() => currentTime);
 
   const deps: AppDeps = {
     db: createDatabase(pool),
@@ -90,8 +97,11 @@ export async function startTestRig(options: TestRigOptions = {}): Promise<TestRi
     random: seededRandom(42),
     githubOAuth,
     gitHost,
+    objectStore,
     claimHoldRangeMs: options.claimHoldRangeMs ?? { min: 150, max: 350 },
     claimLimiter: createClaimConnectionLimiter(options.maxHangingClaims ?? 2000),
+    liveTailHoldMs: options.liveTailHoldMs ?? 400,
+    liveTailLimiter: createClaimConnectionLimiter(options.maxHangingLiveTails ?? 2000),
   };
 
   await bootstrapBreakGlassAccount(deps, BREAK_GLASS_TEST_PASSWORD);
@@ -112,6 +122,7 @@ export async function startTestRig(options: TestRigOptions = {}): Promise<TestRi
     pool,
     githubOAuth,
     gitHost,
+    objectStore,
     setClock: (date: Date) => {
       currentTime = date;
     },

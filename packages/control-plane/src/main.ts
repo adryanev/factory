@@ -46,6 +46,13 @@ async function main(): Promise<void> {
       appId: Number(requiredEnv("GITHUB_APP_ID")),
       privateKey: requiredEnv("GITHUB_APP_PRIVATE_KEY"),
     },
+    {
+      endpoint: requiredEnv("GARAGE_S3_ENDPOINT"),
+      region: process.env["GARAGE_REGION"] ?? "garage",
+      bucket: requiredEnv("GARAGE_BUCKET"),
+      accessKey: requiredEnv("GARAGE_ACCESS_KEY"),
+      secretKey: requiredEnv("GARAGE_SECRET_KEY"),
+    },
   );
 
   // Idempotent — safe to run on every boot, including a config'd password

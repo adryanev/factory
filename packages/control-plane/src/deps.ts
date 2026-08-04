@@ -15,6 +15,7 @@
 import type { Pool } from "pg";
 import { createDatabase, type Database } from "./db/client.js";
 import { createGithubOAuthClient, type GithubOAuthClient } from "./domain/github-identity.js";
+import { createGithubHost, type GitHost } from "./domain/git-host.js";
 
 export interface Clock {
   now(): Date;
@@ -29,6 +30,7 @@ export interface AppDeps {
   clock: Clock;
   random: RandomSource;
   githubOAuth: GithubOAuthClient;
+  gitHost: GitHost;
 }
 
 export function createSystemClock(): Clock {
@@ -57,5 +59,6 @@ export function createDeps(pool: Pool, githubConfig: GithubOAuthConfig): AppDeps
     clock: createSystemClock(),
     random: createSystemRandom(),
     githubOAuth: createGithubOAuthClient(githubConfig),
+    gitHost: createGithubHost(),
   };
 }

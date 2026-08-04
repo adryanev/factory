@@ -19,6 +19,7 @@ import { bootstrapBreakGlassAccount } from "../../src/domain/auth.js";
 import { CSRF_HEADER_NAME, CSRF_HEADER_VALUE } from "../../src/csrf.js";
 import { createFakeGithubOAuthClient, type FakeGithubOAuthClient } from "./fake-github-oauth.js";
 import type { GithubIdentity } from "../../src/domain/github-identity.js";
+import { createFakeGitHost, type FakeGitHost } from "./fake-git-host.js";
 
 export const BREAK_GLASS_TEST_PASSWORD = "correct horse battery staple";
 
@@ -26,6 +27,7 @@ export interface TestRig {
   baseUrl: string;
   pool: Pool;
   githubOAuth: FakeGithubOAuthClient;
+  gitHost: FakeGitHost;
   /** Moves the injected clock. No test in this rig ever reads the wall clock. */
   setClock(date: Date): void;
   /** `fetch` with the CSRF header every mutating request needs already set — tests only add it explicitly when they mean to test its absence. */
@@ -73,12 +75,14 @@ export async function startTestRig(): Promise<TestRig> {
   let currentTime = new Date("2026-01-01T00:00:00.000Z");
   const clock: Clock = { now: () => currentTime };
   const githubOAuth = createFakeGithubOAuthClient();
+  const gitHost = createFakeGitHost();
 
   const deps: AppDeps = {
     db: createDatabase(pool),
     clock,
     random: seededRandom(42),
     githubOAuth,
+    gitHost,
   };
 
   await bootstrapBreakGlassAccount(deps, BREAK_GLASS_TEST_PASSWORD);
@@ -103,6 +107,7 @@ export async function startTestRig(): Promise<TestRig> {
     baseUrl,
     pool,
     githubOAuth,
+    gitHost,
     setClock: (date: Date) => {
       currentTime = date;
     },

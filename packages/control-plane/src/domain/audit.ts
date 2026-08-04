@@ -4,10 +4,10 @@ import type { AppDeps } from "../deps.js";
 import type { Principal } from "./principal.js";
 
 /**
- * Closed-ish vocabulary of audit event kinds this issue writes. The spec
- * says "sepuluh jenis kejadian" (ten kinds) for the whole system; this
- * issue's slice of the system needs the seven below (login x2, logout,
- * project create/add-member, group create/add-member). `action` is `text`
+ * Closed-ish vocabulary of audit event kinds written so far. The spec says
+ * "sepuluh jenis kejadian" (ten kinds) for the whole system; issue #3 added
+ * seven (login x2, logout, project create/add-member, group
+ * create/add-member) and issue #4 added `run.triggered`. `action` is `text`
  * without a CHECK in the schema on purpose (see `db/schema/audit_log.ts`) —
  * later issues add their own kinds here without a migration. This union is
  * the closed set *this file* is willing to write; it is not a DB-level
@@ -20,7 +20,8 @@ export type AuditAction =
   | "project.created"
   | "project.member_added"
   | "group.created"
-  | "group.member_added";
+  | "group.member_added"
+  | "run.triggered";
 
 export interface AuditEvent {
   actor: Principal;

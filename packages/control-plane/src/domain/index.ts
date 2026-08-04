@@ -16,14 +16,17 @@ import type { AppDeps, Clock } from "../deps.js";
 import * as authDomain from "./auth.js";
 import * as projectsDomain from "./projects.js";
 import * as groupsDomain from "./groups.js";
+import * as runsDomain from "./runs.js";
 import type { Principal } from "./principal.js";
 import type { LoginResult } from "./auth.js";
 import type { Project, ProjectRole } from "./projects.js";
 import type { Group } from "./groups.js";
+import type { RunListFilters, RunPage, RunWithGraph, TriggerRunInput, TriggeredRun } from "./runs.js";
 
 export type { Principal } from "./principal.js";
 export type { Project, ProjectRole } from "./projects.js";
 export type { Group } from "./groups.js";
+export type { Run, StepRun, RunListFilters, RunPage, RunWithGraph, TriggerRunInput, TriggeredRun } from "./runs.js";
 export { UnauthorizedError, ForbiddenError, NotFoundError, DomainValidationError } from "./errors.js";
 export type { LoginResult } from "./auth.js";
 
@@ -52,6 +55,17 @@ export interface Domain {
     create: (principal: Principal, projectId: Id<"project">, name: string) => Promise<Group>;
     addMember: (principal: Principal, groupId: Id<"group">, targetPrincipalId: Id<"user">) => Promise<void>;
   };
+  runs: {
+    trigger: (principal: Principal, projectId: Id<"project">, input: TriggerRunInput) => Promise<TriggeredRun>;
+    list: (
+      principal: Principal,
+      projectId: Id<"project">,
+      filters: RunListFilters,
+      cursor: Id<"run"> | null,
+      limit: number,
+    ) => Promise<RunPage>;
+    get: (principal: Principal, projectId: Id<"project">, runId: Id<"run">) => Promise<RunWithGraph>;
+  };
 }
 
 export function createDomain(deps: AppDeps): Domain {
@@ -77,6 +91,12 @@ export function createDomain(deps: AppDeps): Domain {
       create: (principal, projectId, name) => groupsDomain.createGroup(deps, principal, projectId, name),
       addMember: (principal, groupId, targetPrincipalId) =>
         groupsDomain.addGroupMember(deps, principal, groupId, targetPrincipalId),
+    },
+    runs: {
+      trigger: (principal, projectId, input) => runsDomain.triggerRun(deps, principal, projectId, input),
+      list: (principal, projectId, filters, cursor, limit) =>
+        runsDomain.listRuns(deps, principal, projectId, filters, cursor, limit),
+      get: (principal, projectId, runId) => runsDomain.getRun(deps, principal, projectId, runId),
     },
   };
 }

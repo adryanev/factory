@@ -10,6 +10,7 @@ import { registerScaffoldProbeRoutes } from "./routes/scaffold-probes.js";
 import { registerAuthRoutes, SESSION_COOKIE_NAME } from "./routes/auth.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerGroupRoutes } from "./routes/groups.js";
+import { registerRunRoutes } from "./routes/runs.js";
 
 /**
  * Composition root for the HTTP surface. Takes the dependency object built
@@ -85,6 +86,7 @@ export function createApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerAuthRoutes(app, { domain, clock: deps.clock });
   registerProjectRoutes(app, { domain, clock: deps.clock });
   registerGroupRoutes(app, { domain, clock: deps.clock });
+  registerRunRoutes(app, { domain, clock: deps.clock });
 
   return app;
 }

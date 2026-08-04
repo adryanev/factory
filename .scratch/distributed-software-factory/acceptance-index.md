@@ -89,6 +89,30 @@ dua hal menyimpang dari bunyi kriteria dan tidak boleh hilang diam-diam:
    `.scratch/.../prototypes/pipeline-format/`. Disengaja: README prototype menyatakan
    dirinya "sekali pakai, jangan dipelihara", jadi suite test tidak digantungkan padanya.
    Konsekuensinya salinan bisa hanyut dari aslinya tanpa ada yang merah.
+   **Sudah tidak berlaku sejak #4 diimplementasi**: test seam-1 membaca ketiga file
+   `d-verdict-*.yaml` langsung dari disk, jadi salinan tidak lagi bisa hanyut diam-diam.
+
+3. **Materialisasi Graph baru sebatas Step akar, bukan "semua Step non-fan-out di muka".**
+   Spec ("Semantik eksekusi") menulis materialisasi **hibrida**: Step non-fan-out di muka,
+   cabang saat hulu sukses. Yang dibangun hanya Step ber-`after: []`.
+
+   Sebabnya struktural, bukan kemalasan: himpunan `outcome` sudah dikunci tujuh nilai
+   (`ready` … `cancelled`) lewat CHECK yang sudah punya contract test, `ready_at` adalah
+   `NOT NULL`, dan `claim_step_run.sql` menyaring murni `outcome = 'ready'` tanpa join ke
+   dependensi. Jadi Step `build` yang dimaterialisasi di muka akan **bisa diklaim sebelum
+   `lint` jalan**. Tidak ada nilai "sudah lahir tapi tertahan" yang tersedia.
+
+   Tiga jalan keluar, dan spec mendukung yang kedua paling kuat:
+   - (a) tetap akar saja — yang berlaku sekarang;
+   - (b) materialisasi semua non-fan-out, lalu kueri klaim mendapat predikat
+     "dependensi sudah tuntas" yang **dihitung**. Ini paling setia: spec menulis
+     "'Hilir dijadwalkan' … **dihitung**", dan himpunan tujuh status tetap utuh;
+   - (c) tambah status kedelapan — bertabrakan dengan enumerasi tujuh nilai yang
+     ditulis eksplisit.
+
+   Ditunda sadar ke #5, bukan diputuskan diam-diam: mekanisme "majukan Graph" belum punya
+   pemanggil sampai `/result` ada, dan (b) mengubah kueri terpanas di sistem. Selama belum
+   ada data produksi, keputusan ini masih murah dibalik.
 
 ---
 

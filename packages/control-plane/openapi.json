@@ -150,6 +150,195 @@
           "projectId",
           "name"
         ]
+      },
+      "Run": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "pipelineRepositoryId": {
+            "type": "string"
+          },
+          "pipelinePath": {
+            "type": "string"
+          },
+          "triggerKind": {
+            "type": "string",
+            "enum": [
+              "automation",
+              "manual"
+            ]
+          },
+          "triggeredByPrincipalId": {
+            "type": "string"
+          },
+          "credentialPrincipalId": {
+            "type": "string"
+          },
+          "refBranch": {
+            "type": "string"
+          },
+          "refSha": {
+            "type": "string"
+          },
+          "parentRunId": {
+            "type": "string",
+            "nullable": true
+          },
+          "cancelRequestedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "outcome": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "succeeded",
+              "failed",
+              "cancelled",
+              null
+            ]
+          },
+          "endedAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "pipelineRepositoryId",
+          "pipelinePath",
+          "triggerKind",
+          "triggeredByPrincipalId",
+          "credentialPrincipalId",
+          "refBranch",
+          "refSha",
+          "parentRunId",
+          "cancelRequestedAt",
+          "outcome",
+          "endedAt"
+        ]
+      },
+      "StepRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "repositoryId": {
+            "type": "string"
+          },
+          "stepKey": {
+            "type": "string"
+          },
+          "branchKey": {
+            "type": "string",
+            "nullable": true
+          },
+          "turn": {
+            "type": "number"
+          },
+          "attempt": {
+            "type": "number"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "running",
+              "awaiting-human",
+              "succeeded",
+              "failed",
+              "skipped",
+              "cancelled"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "kind": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "pull-request"
+            ]
+          },
+          "requiredTags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "readyAt": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "outputRefBranch": {
+            "type": "string",
+            "nullable": true
+          },
+          "outputRefSha": {
+            "type": "string",
+            "nullable": true
+          },
+          "outputData": {
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "runId",
+          "repositoryId",
+          "stepKey",
+          "branchKey",
+          "turn",
+          "attempt",
+          "outcome",
+          "reason",
+          "kind",
+          "requiredTags",
+          "readyAt",
+          "startedAt",
+          "outputRefBranch",
+          "outputRefSha"
+        ]
+      },
+      "RunDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Run"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "definition": {
+                "type": "string"
+              },
+              "definitionFiles": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "definition",
+              "definitionFiles"
+            ]
+          }
+        ]
       }
     },
     "parameters": {}
@@ -1130,6 +1319,433 @@
           },
           "404": {
             "description": "No such Group.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{id}/runs": {
+      "post": {
+        "summary": "Triggers a Pipeline over a ref. Reads the definition (and every prompt file it references) from that ref, validates, and — if valid — materializes the Run and its initial Graph in one transaction. Project `member`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Client-generated Run id; a repeat of the same id is rejected by the primary key."
+                  },
+                  "repositoryId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pipelinePath": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "refBranch": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id",
+                  "repositoryId",
+                  "pipelinePath",
+                  "refBranch"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created. `stepRuns` holds the Steps materialized up front — see the Run's `definition` for the rest of the Graph's shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "$ref": "#/components/schemas/Run"
+                    },
+                    "stepRuns": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StepRun"
+                      }
+                    }
+                  },
+                  "required": [
+                    "run",
+                    "stepRuns"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected before any row was written: an unknown ref, a missing definition or prompt file, a definition that fails validation, the combined size over the inline-storage limit, an unknown Step repo:, or a repeated Run id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a Project member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Project or Repository.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Runs for a Project, newest first. Keyset pagination on id — no total count. `inFlight=true` filters ended_at IS NULL; `outcome=` filters a final verdict; the two are never combined.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true"
+              ]
+            },
+            "required": false,
+            "name": "inFlight",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "succeeded",
+                "failed",
+                "cancelled"
+              ]
+            },
+            "required": false,
+            "name": "outcome",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ok.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Run"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "runs",
+                    "nextCursor"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a Project member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Project.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{id}/runs/{runId}": {
+      "get": {
+        "summary": "One Run: its own copy of the definition and prompt files, plus its Graph so far.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ok.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "$ref": "#/components/schemas/RunDetail"
+                    },
+                    "stepRuns": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StepRun"
+                      }
+                    }
+                  },
+                  "required": [
+                    "run",
+                    "stepRuns"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a Project member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Project or Run.",
             "content": {
               "application/json": {
                 "schema": {

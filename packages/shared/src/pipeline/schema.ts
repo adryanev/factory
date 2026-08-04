@@ -85,7 +85,10 @@ export const stepSchema = z.object({
   // Fan-out
   branches: z.array(branchSchema).min(1).optional(),
   branchesFrom: outputRefSchema.optional(),
-  minBranches: z.number().int().positive().default(1),
+  // Default 1 closes the "all over an empty set is true" trap; 0 is the
+  // explicit opt-out a Pipeline whose fan-out may legally produce nothing
+  // writes (ticket 06). `.nonnegative()`, not `.positive()`, on purpose.
+  minBranches: z.number().int().nonnegative().default(1),
 
   // Join
   join: joinPolicySchema,
@@ -152,6 +155,35 @@ function effectiveBranch(step: RawStep, branch: RawBranch): Partial<RawStep> {
       branchValue !== undefined ? branchValue : step[field];
   }
   return effective;
+}
+
+/**
+ * The Step a StepRun actually executes. A non-fan-out StepRun (`branch_key`
+ * NULL) resolves to its Step as written. A fan-out branch StepRun
+ * (`branch_key` set) resolves to the fan-out Step's own fields merged with
+ * the Branch's overrides — "cabang adalah daftar Step utuh" (spec.md,
+ * "Definisi Pipeline"): prompt/agent/repo/runsOn/... fall back to the
+ * parent, and the branch-only fields (`after`, `branches`, `join`, `ask`,
+ * `kind`) always come from the parent. For a `branchesFrom:` fan-out the
+ * Branch entries carry runtime data, not definition fields, so every branch
+ * resolves to the parent Step unchanged.
+ *
+ * Shared by the Runner (to execute the branch) and the control plane (to
+ * pin the final prompt and resolve `ask.group` at claim) so the effective
+ * Step cannot differ between the two sides.
+ */
+export function resolveEffectiveStep(
+  pipeline: Pick<Pipeline, "steps">,
+  stepKey: string,
+  branchKey: string | null | undefined,
+): RawStep | undefined {
+  const step = pipeline.steps[stepKey];
+  if (!step) return undefined;
+  if (branchKey === null || branchKey === undefined) return step;
+  const branch = step.branches?.find((b) => b.key === branchKey);
+  if (!branch) return step; // a branchesFrom branch: no definition entry — the parent Step is the whole story.
+  const effective: Partial<RawStep> = effectiveBranch(step, branch);
+  return { ...step, ...effective };
 }
 
 interface ExecutionModeSource {

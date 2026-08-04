@@ -13,7 +13,7 @@
  * the reply. No handler reaches `db` — see `domain/index.ts`.
  */
 import { createRoute, z, type OpenAPIHono } from "@hono/zod-openapi";
-import { errorResponseSchema, isValidId } from "@factory/shared";
+import { errorResponseSchema, isValidId, joinManifestEntrySchema } from "@factory/shared";
 import type { AppEnv } from "../http-env.js";
 import type { RouteDeps } from "../domain/index.js";
 import { ClaimCapacityError } from "../domain/index.js";
@@ -76,6 +76,11 @@ const claimedStepRunSchema = z.object({
   // "semua yang ia butuh ikut di muatan /claim"). Null for non-interactive
   // Steps.
   ask_group_id: z.string().nullable(),
+  // The Join manifest (issue #11, AC7): the upstream branches this Join Step
+  // gathers, as data — empty for a Step that joins nothing. The Runner
+  // fetches only the entries whose `repo` is its own; the rest are reads,
+  // never checkouts (ticket 21).
+  join_manifest: z.array(joinManifestEntrySchema),
 });
 const claimResponseSchema = z.object({ step_run: claimedStepRunSchema.nullable() }).openapi("ClaimResponse");
 
@@ -325,6 +330,7 @@ export function registerRunnerProtocolRoutes(app: OpenAPIHono<AppEnv>, deps: Rou
           secrets: claimed.secrets,
           egress_allowlist: claimed.egressAllowlist,
           ask_group_id: claimed.askGroupId,
+          join_manifest: claimed.joinManifest,
         },
       },
       200,

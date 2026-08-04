@@ -11,6 +11,7 @@ import type { AppDeps } from "../deps.js";
 import type { Principal } from "./principal.js";
 import { requireProjectMembership } from "./projects.js";
 import { DomainValidationError, NotFoundError } from "./errors.js";
+import { advanceGraph, finalizeRunIfDone, parsePipelineSnapshot } from "./graph-advance.js";
 
 const TERMINAL_OUTCOMES = new Set(["succeeded", "failed", "cancelled", "skipped"]);
 
@@ -21,9 +22,15 @@ const TERMINAL_OUTCOMES = new Set(["succeeded", "failed", "cancelled", "skipped"
  * <-> control-plane contract gives "Cancel Run") — resolved via
  * `step_runs.run_id -> runs.project_id`, a read join, not a write into
  * issue #4's `runs`/Graph domain.
+ *
+ * A cancelled StepRun is terminal, so the Graph advances from it in the same
+ * transaction — dependents whose policy is now unsatisfiable become
+ * `skipped` (and propagate), and a Run with nothing left in flight ends with
+ * its final verdict. Cancel stays a single-row write for the UI's sake; the
+ * advance just rides the same commit.
  */
 export async function cancelStepRun(
-  deps: Pick<AppDeps, "db">,
+  deps: Pick<AppDeps, "db" | "clock">,
   principal: Principal,
   stepRunId: Id<"steprun">,
 ): Promise<void> {
@@ -49,10 +56,19 @@ export async function cancelStepRun(
     );
   }
 
-  await deps.db
-    .update(stepRuns)
-    .set({ outcome: "cancelled", reason: "cancelled-by-operator" })
-    .where(eq(stepRuns.id, stepRunId));
+  await deps.db.transaction(async (tx) => {
+    await tx
+      .update(stepRuns)
+      .set({ outcome: "cancelled", reason: "cancelled-by-operator" })
+      .where(eq(stepRuns.id, stepRunId));
+
+    const [run] = await tx.select().from(runs).where(eq(runs.id, row.stepRun.runId));
+    if (!run) return;
+    const pipeline = parsePipelineSnapshot(run.definition);
+    if (!pipeline) return;
+    await advanceGraph({ db: tx, now: deps.clock.now }, run, pipeline, row.stepRun.stepKey);
+    await finalizeRunIfDone({ db: tx, now: deps.clock.now }, run.id, pipeline);
+  });
 }
 
 /**

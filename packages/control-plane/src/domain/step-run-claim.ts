@@ -41,6 +41,15 @@ interface ClaimedRow {
   attempt: number;
   lease_token: string;
   lease_expires_at: Date;
+  // The conversation carries across turns via the blob store (issue 13): the
+  // ref the previous turn pushed becomes this turn's base, and the session
+  // (blob + id) is handed to the Runner so the agent resumes from the same
+  // context on any free machine.
+  output_ref_branch: string | null;
+  output_ref_sha: string | null;
+  session_blob_key: string | null;
+  session_id: string | null;
+  resume_prompt: string | null;
 }
 
 export interface ClaimedStepRun {
@@ -92,6 +101,13 @@ export interface ClaimedStepRun {
    */
   askGroupId: Id<"group"> | null;
   /**
+   * The previous turn's session, when this is a resumed turn (issue 13, AC2):
+   * the blob the Runner must download and hand to the agent's `resumeSession`.
+   * Null for a fresh turn. The `getUrl` is a 5-minute presigned GET minted at
+   * claim — the Runner fetches the bytes straight from the object store.
+   */
+  session: { id: string; blobKey: string; getUrl: string; expiresAt: Date } | null;
+  /**
    * The Join manifest (issue #11, AC7): one entry per branch of every
    * fan-out Step this StepRun joins (`[{ key, repo, branch, sha, outcome,
    * outputs }]`), so a Join Step reads its upstream branches as data and
@@ -124,7 +140,7 @@ async function tryClaimOnce(deps: Pick<AppDeps, "pool">, runner: RunnerIdentity,
 }
 
 async function hydrateClaimedRow(
-  deps: Pick<AppDeps, "db" | "gitHost" | "keyring">,
+  deps: Pick<AppDeps, "db" | "gitHost" | "keyring" | "objectStore">,
   row: ClaimedRow,
 ): Promise<ClaimedStepRun> {
   const [run] = await deps.db.select().from(runs).where(eq(runs.id, row.run_id));
@@ -155,15 +171,18 @@ async function hydrateClaimedRow(
   // so a branch with its own agent/prompt runs and is displayed as itself.
   const step = parseSnapshotStep(run.definition, row.step_key, row.branch_key);
   const finalPrompt = step ? finalPromptForStep(run.definitionFiles, step) : null;
-  if (finalPrompt !== null) {
+  // Issue 13, AC5: the human's answer rides the final prompt of the resumed
+  // turn. `resume_prompt` is rendered onto the new turn's row by the answer
+  // handler, so the agent that resumes sees the answer in front of it.
+  const effectiveFinalPrompt =
+    finalPrompt !== null && row.resume_prompt !== null ? `${finalPrompt}\n\n${row.resume_prompt}` : finalPrompt;
+  if (effectiveFinalPrompt !== null) {
     await deps.db
       .update(stepRuns)
-      .set({ finalPrompt })
+      .set({ finalPrompt: effectiveFinalPrompt })
       .where(eq(stepRuns.id, row.id));
   }
 
-  // The Group an interactive Step's `ask:` names, resolved here — the Runner
-  // never asks the world anything.
   let askGroupId: Id<"group"> | null = null;
   if (step?.ask) {
     const [group] = await deps.db
@@ -185,6 +204,25 @@ async function hydrateClaimedRow(
     }
   }
 
+  // The ref this turn forks from. A fresh turn forks from the Run's own ref;
+  // a resumed turn (turn > 1, or one that carries a previous turn's pushed
+  // branch) forks from where the conversation is — the branch the previous
+  // turn pushed at its commit point (issue 13).
+  const baseRef =
+    row.output_ref_branch !== null && row.output_ref_sha !== null
+      ? { branch: row.output_ref_branch, sha: row.output_ref_sha }
+      : { branch: run.refBranch, sha: run.refSha };
+
+  // The session the agent resumes from, when this is a resumed turn — a
+  // freshly-minted 5-minute presigned GET (spec: "Presigned 5 menit"). The
+  // Runner downloads the bytes straight from the object store; the control
+  // plane never holds them (spec: "Byte tidak pernah lewat control plane").
+  let session: ClaimedStepRun["session"] = null;
+  if (row.session_blob_key !== null && row.session_id !== null) {
+    const { url, expiresAt } = await deps.objectStore.mintGetUrl(row.session_blob_key);
+    session = { id: row.session_id, blobKey: row.session_blob_key, getUrl: url, expiresAt };
+  }
+
   return {
     id: row.id,
     runId: row.run_id,
@@ -198,7 +236,7 @@ async function hydrateClaimedRow(
       name: repository.name,
       defaultBranch: repository.defaultBranch,
     },
-    ref: { branch: run.refBranch, sha: run.refSha },
+    ref: baseRef,
     definition: run.definition,
     definitionFiles: run.definitionFiles,
     leaseToken: row.lease_token,
@@ -207,6 +245,7 @@ async function hydrateClaimedRow(
     secrets: await resolveSecretsForPrincipal(deps, run.projectId, run.credentialPrincipalId),
     egressAllowlist: project.egressAllowlist,
     askGroupId,
+    session,
     joinManifest,
   };
 }
@@ -283,7 +322,7 @@ async function unleaseStepRun(deps: Pick<AppDeps, "db">, stepRunId: Id<"steprun"
  * distinctly from `/heartbeat`, which never does this).
  */
 export async function claimStepRun(
-  deps: Pick<AppDeps, "pool" | "db" | "random" | "claimHoldRangeMs" | "claimLimiter" | "gitHost" | "keyring">,
+  deps: Pick<AppDeps, "pool" | "db" | "random" | "claimHoldRangeMs" | "claimLimiter" | "gitHost" | "keyring" | "objectStore">,
   runner: RunnerIdentity,
   input: ClaimInput,
 ): Promise<ClaimedStepRun | null> {

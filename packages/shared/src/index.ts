@@ -65,4 +65,9 @@ export {
   type FlatObjectDescriptor,
   type Question,
   type QuestionKind,
+  type QuestionOption,
+  type Answer,
+  answerSchema,
+  renderAnswerForAgent,
+  renderQuestionForHuman,
 } from "./pipeline/index.js";

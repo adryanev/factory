@@ -92,6 +92,14 @@ export interface AgentTurnSpec {
   maxRetries: number;
   /** Resume a prior agent session by id (a follow-up turn after the agent asked a human). */
   resumeSession?: string;
+  /**
+   * The resumed session's JSONL content, downloaded from the blob store by the
+   * executor (issue 13, AC2). The seam materializes it at the provider's host
+   * session path before the turn starts, so sandcastle's resume precheck and
+   * `resumeIntoSandbox` find the session — the Runner is interchangeable, so
+   * a turn may resume on a machine that never saw the original session.
+   */
+  resumeSessionContent?: string;
   /** Host-side clone dir — the `cwd` anchor sandcastle creates its worktree under. */
   workingDirectory: string;
   /** The named branch this turn works on (see `@factory/shared`'s `stepRunBranchName`). */

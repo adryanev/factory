@@ -4,7 +4,7 @@
  * the token teardown are provable deterministically.
  */
 import { describe, expect, it } from "vitest";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -50,6 +50,7 @@ function claimFixture(overrides: Partial<ClaimedStepRun> = {}): ClaimedStepRun {
     secrets: { DEPLOY_KEY: "super-secret-value" },
     egressAllowlist: ["github.com", "registry.npmjs.org"],
     askGroupId: null,
+    session: null,
     joinManifest: [],
     ...overrides,
   };
@@ -96,16 +97,19 @@ function fakeProtocol(overrides: {
   logChunks: LogChunkWire[];
   uploadGrants: number;
   questions: { id: string; groupId: string; kind: string; body: string; ref: { branch: string; sha: string } }[];
+  questionSessions: { blobKey?: string; sessionId?: string }[];
 } {
   const results: { outcome: string; ref: { branch: string; sha: string } | null; outputData: unknown; artifacts?: unknown }[] = [];
   const logChunks: LogChunkWire[] = [];
   const questions: { id: string; groupId: string; kind: string; body: string; ref: { branch: string; sha: string } }[] = [];
+  const questionSessions: { blobKey?: string; sessionId?: string }[] = [];
   let heartbeats = 0;
   let uploadGrants = 0;
   return {
     results,
     logChunks,
     questions,
+    questionSessions,
     heartbeats,
     uploadGrants,
     async claim() {
@@ -146,6 +150,10 @@ function fakeProtocol(overrides: {
     },
     async submitQuestion(input) {
       questions.push({ ...input.question, ref: input.ref });
+      questionSessions.push({
+        ...(input.sessionBlobKey !== undefined ? { blobKey: input.sessionBlobKey } : {}),
+        ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+      });
       return { questionId: `question_${questions.length}` };
     },
   };
@@ -160,6 +168,8 @@ function fakeTurn(result?: Partial<TurnResult>, error?: unknown, hold = false): 
     worktreePath: result?.worktreePath ?? "/tmp/clone/.sandcastle/worktrees/run-x",
     // `null` is meaningful (a clean turn) — the default must not override it.
     preservedWorktreePath: result && "preservedWorktreePath" in result ? result.preservedWorktreePath : "/tmp/clone/.sandcastle/worktrees/run-x",
+    ...(result && "sessionId" in result ? { sessionId: result.sessionId } : {}),
+    ...(result && "sessionFilePath" in result ? { sessionFilePath: result.sessionFilePath } : {}),
   };
   const done = new Promise<TurnResult>((resolve, reject) => {
     if (!hold) {
@@ -199,10 +209,12 @@ function makeDeps(overrides: {
   image?: string;
   heartbeatIntervalMs?: number;
   artifactUploader?: ReturnType<typeof fakeArtifactUploader>;
+  sessionStorage?: ReturnType<typeof fakeSessionStorage>;
 } = {}) {
   const git = overrides.git ?? fakeGit();
   const protocol = overrides.protocol ?? fakeProtocol();
   const artifactUploader = overrides.artifactUploader ?? fakeArtifactUploader();
+  const sessionStorage = overrides.sessionStorage ?? fakeSessionStorage();
   let startTurnCalls: TurnSpec[] = [];
   const deps = {
     protocol,
@@ -212,12 +224,48 @@ function makeDeps(overrides: {
     heartbeatIntervalMs: overrides.heartbeatIntervalMs ?? 100,
     capabilities: { agentClis: [] as string[] },
     artifactUploaderFor: () => artifactUploader,
+    sessionStorage,
     startTurn(spec: TurnSpec): Turn {
       startTurnCalls.push(spec);
       return overrides.turn ?? fakeTurn();
     },
   };
-  return { deps, git, protocol, artifactUploader, get startTurnCalls() { return startTurnCalls; } };
+  return { deps, git, protocol, artifactUploader, sessionStorage, get startTurnCalls() { return startTurnCalls; } };
+}
+
+/** Recording session-storage fake — a successful upload/download unless told to fail the next N. */
+function fakeSessionStorage() {
+  const uploaded: { sessionId: string; content: string; blobKey: string }[] = [];
+  const downloaded: { getUrl: string }[] = [];
+  let uploadFailures = 0;
+  let downloadFailures = 0;
+  return {
+    uploaded,
+    downloaded,
+    uploadFailNext(times: number) {
+      uploadFailures = times;
+    },
+    downloadFailNext(times: number) {
+      downloadFailures = times;
+    },
+    async uploadSession(input: { stepRunId: string; leaseToken: string; sessionId: string; content: string }) {
+      if (uploadFailures > 0) {
+        uploadFailures -= 1;
+        throw new Error("session upload failed");
+      }
+      const blobKey = `session/steprun_1/${input.sessionId}.jsonl`;
+      uploaded.push({ sessionId: input.sessionId, content: input.content, blobKey });
+      return blobKey;
+    },
+    async downloadSession(input: { getUrl: string }) {
+      if (downloadFailures > 0) {
+        downloadFailures -= 1;
+        throw new Error("session download failed");
+      }
+      downloaded.push(input);
+      return `{"type":"resume"}\n`;
+    },
+  };
 }
 
 /** Recording artifact-uploader fake — a PUT that "succeeds" unless told to fail the next N. */
@@ -669,31 +717,127 @@ describe("agent Steps: the executor flow", () => {
     expect(protocol.results).toEqual([{ outcome: "failed", ref: null, outputData: undefined }]);
   });
 
-  it("a question Output pushes the branch first, then POSTs the Question with the ref (spec: 'push branch → … → POST Question')", async () => {
+  it("a question Output uploads the session, then pushes the branch, then POSTs the Question with the ref and the session (spec: 'push branch → unggah session ke blob → POST Question')", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "factory-session-upload-"));
+    const sessionPath = path.join(dir, "sess-1.jsonl");
+    await writeFile(sessionPath, '{"type":"turn-1"}\n');
+    try {
+      const protocol = fakeProtocol();
+      const git = fakeGit();
+      const { deps, sessionStorage } = makeDeps({
+        protocol,
+        git,
+        turn: tagResult('{"kind":"question","question":{"kind":"approval","body":"Approve this?"}}', {
+          sessionId: "sess-1",
+          sessionFilePath: sessionPath,
+        }),
+      });
+
+      await executeClaimedTurn(deps, askClaim({ askGroupId: "group_1" }));
+
+      // The session blob was uploaded before the Question was posted.
+      expect(sessionStorage.uploaded).toEqual([
+        { sessionId: "sess-1", content: '{"type":"turn-1"}\n', blobKey: "session/steprun_1/sess-1.jsonl" },
+      ]);
+      // The branch was pushed before the Question was posted.
+      expect(git.calls.indexOf("push run/run_1/plan/t1-a1 commit-sha token=push-token")).toBeLessThan(
+        git.calls.length - 2,
+      );
+      expect(protocol.questions).toHaveLength(1);
+      expect(protocol.questions[0]).toMatchObject({
+        groupId: "group_1",
+        kind: "approval",
+        body: "Approve this?",
+        ref: { branch: "run/run_1/plan/t1-a1", sha: "commit-sha" },
+      });
+      expect(protocol.questions[0]!.id).toMatch(/^question_/);
+      // The session rides the Question — the invariant "Question ada ⇒
+      // session pasti ada" is enforced at this commit point.
+      expect(protocol.questionSessions).toEqual([{ blobKey: "session/steprun_1/sess-1.jsonl", sessionId: "sess-1" }]);
+      // A question turn posts no /result — the row moves to awaiting-human via /question.
+      expect(protocol.results).toHaveLength(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a question Output with no captured session fails the turn instead of posting a Question (the invariant)", async () => {
     const protocol = fakeProtocol();
-    const git = fakeGit();
     const deps = makeDeps({
       protocol,
-      git,
       turn: tagResult('{"kind":"question","question":{"kind":"approval","body":"Approve this?"}}'),
     });
 
     await executeClaimedTurn(deps.deps, askClaim({ askGroupId: "group_1" }));
 
-    // The branch was pushed before the Question was posted.
-    expect(git.calls.indexOf("push run/run_1/plan/t1-a1 commit-sha token=push-token")).toBeLessThan(
-      git.calls.length - 2,
-    );
-    expect(protocol.questions).toHaveLength(1);
-    expect(protocol.questions[0]).toMatchObject({
-      groupId: "group_1",
-      kind: "approval",
-      body: "Approve this?",
-      ref: { branch: "run/run_1/plan/t1-a1", sha: "commit-sha" },
+    expect(protocol.questions).toHaveLength(0);
+    expect(protocol.results[0]).toMatchObject({ outcome: "failed" });
+    expect(protocol.results[0]!.ref).toEqual({ branch: "run/run_1/plan/t1-a1", sha: "commit-sha" });
+  });
+
+  it("a failed session upload fails the turn — no Question is posted without its session (AC2)", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "factory-session-fail-"));
+    const sessionPath = path.join(dir, "sess-1.jsonl");
+    await writeFile(sessionPath, '{"type":"turn-1"}\n');
+    try {
+      const protocol = fakeProtocol();
+      const sessionStorage = fakeSessionStorage();
+      sessionStorage.uploadFailNext(1);
+      const { deps } = makeDeps({
+        protocol,
+        sessionStorage,
+        turn: tagResult('{"kind":"question","question":{"kind":"approval","body":"Approve this?"}}', {
+          sessionId: "sess-1",
+          sessionFilePath: sessionPath,
+        }),
+      });
+
+      await executeClaimedTurn(deps, askClaim({ askGroupId: "group_1" }));
+
+      expect(protocol.questions).toHaveLength(0);
+      expect(protocol.results[0]).toMatchObject({ outcome: "failed" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a resumed turn downloads the claimed session and hands it to the turn spec (AC1/AC2)", async () => {
+    const protocol = fakeProtocol();
+    const { deps, sessionStorage, startTurnCalls } = makeDeps({
+      protocol,
+      turn: tagResult('{"kind":"done","outputs":{}}'),
     });
-    expect(protocol.questions[0]!.id).toMatch(/^question_/);
-    // A question turn posts no /result — the row moves to awaiting-human via /question.
-    expect(protocol.results).toHaveLength(0);
+
+    await executeClaimedTurn(
+      deps,
+      askClaim({
+        askGroupId: "group_1",
+        turn: 2,
+        session: { id: "sess-1", blobKey: "session/steprun_1/sess-1.jsonl", getUrl: "https://blob.invalid/get/sess-1", expiresAt: "2026-01-01T00:05:00.000Z" },
+      }),
+    );
+
+    expect(sessionStorage.downloaded).toEqual([{ getUrl: "https://blob.invalid/get/sess-1" }]);
+    const spec = startTurnCalls[0] as TurnSpec & { kind: "agent" };
+    expect(spec.resumeSession).toBe("sess-1");
+    expect(spec.resumeSessionContent).toBe('{"type":"resume"}\n');
+  });
+
+  it("a failed session download fails the turn — nothing starts without the conversation (AC2)", async () => {
+    const protocol = fakeProtocol();
+    const sessionStorage = fakeSessionStorage();
+    sessionStorage.downloadFailNext(1);
+    const { deps } = makeDeps({ protocol, sessionStorage });
+
+    await executeClaimedTurn(
+      deps,
+      askClaim({
+        turn: 2,
+        session: { id: "sess-1", blobKey: "session/steprun_1/sess-1.jsonl", getUrl: "https://blob.invalid/get/sess-1", expiresAt: "2026-01-01T00:05:00.000Z" },
+      }),
+    );
+
+    expect(protocol.results[0]).toMatchObject({ outcome: "failed" });
   });
 
   it("a question Output with no resolved group reports failed rather than posting a broken Question", async () => {

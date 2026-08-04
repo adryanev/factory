@@ -126,25 +126,33 @@ afterEach(async () => {
 });
 
 describe("sandcastle contract: session-capture gate", () => {
-  it("tag 'bind-mount' participates in session capture when the provider opts in", async () => {
-    const storage = fakeSessionStorage("bind-mount");
-    const repoDir = await makeTempGitRepo();
-    repoDirs.push(repoDir);
+  it(
+    "tag 'bind-mount' participates in session capture when the provider opts in",
+    // Real session capture copies the JSONL out of the worktree; under a
+    // concurrently-loaded `pnpm -r run test` (the control-plane seam-1 suite
+    // boots Postgres containers at the same time) this can stretch past
+    // vitest's default 5s timeout. Same guard as the idle-timer test below.
+    { timeout: 20_000 },
+    async () => {
+      const storage = fakeSessionStorage("bind-mount");
+      const repoDir = await makeTempGitRepo();
+      repoDirs.push(repoDir);
 
-    const result = await run({
-      agent: shellProvider("echo SESSION:sess-bind", { captureSessions: true, sessionStorage: storage }),
-      sandbox: HOST_PROVIDER,
-      cwd: repoDir,
-      prompt: "run",
-      maxIterations: 1,
-      completionSignal: [],
-      branchStrategy: { type: "head" },
-    });
-    expect(result.stdout).toContain("SESSION:sess-bind");
-    // The gate opened: a session id was produced and the handle was a
-    // bind-mount handle, so captureToHost ran exactly once.
-    expect(storage.captures).toEqual(["sess-bind"]);
-  });
+      const result = await run({
+        agent: shellProvider("echo SESSION:sess-bind", { captureSessions: true, sessionStorage: storage }),
+        sandbox: HOST_PROVIDER,
+        cwd: repoDir,
+        prompt: "run",
+        maxIterations: 1,
+        completionSignal: [],
+        branchStrategy: { type: "head" },
+      });
+      expect(result.stdout).toContain("SESSION:sess-bind");
+      // The gate opened: a session id was produced and the handle was a
+      // bind-mount handle, so captureToHost ran exactly once.
+      expect(storage.captures).toEqual(["sess-bind"]);
+    },
+  );
 
   it("tag 'none' silently disables session capture — no capture, no error", async () => {
     const storage = fakeSessionStorage("none");

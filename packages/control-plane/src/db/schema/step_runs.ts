@@ -109,6 +109,16 @@ export const stepRuns = pgTable(
     // giliran lanjutan lewat presigned GET di muatan `/claim` (spec: "Step
     // yang menunggu manusia").
     sessionBlobKey: text("session_blob_key"),
+    // Id session agent (sandcastle) yang diangkut blob ini — Runner
+    // melanjutkan giliran dengan `resumeSession: <id>`, jadi id harus
+    // bertahan lintas giliran bersama blobnya (issue 13, AC2).
+    sessionId: text("session_id"),
+    // Prompt giliran lanjutan: jawaban manusia dirender menjadi blok prompt
+    // saat Question dijawab dan disimpan di sini; saat giliran berikutnya
+    // diklaim, prompt final = prompt Step + blok format + blok ini (issue 13,
+    // AC5 — "approved: false ... dikirim balik ke agent sebagai prompt giliran
+    // berikutnya").
+    resumePrompt: text("resume_prompt"),
     // Retensi: saat StepRun tak lagi `awaiting-human` DAN Run berakhir (spec:
     // "Artifact dan blob"). Lihat db/sql/retention_sweeps.sql.
     sessionPurgedAt: timestamp("session_purged_at", { withTimezone: true }),

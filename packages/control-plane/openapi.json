@@ -124,9 +124,8 @@
               "type": "string"
             }
           },
-          "notificationWebhookUrl": {
-            "type": "string",
-            "nullable": true
+          "notificationWebhookConfigured": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -136,7 +135,7 @@
           "allowSharedAgentCredential",
           "hostExecAllowed",
           "egressAllowlist",
-          "notificationWebhookUrl"
+          "notificationWebhookConfigured"
         ]
       },
       "Group": {
@@ -1240,13 +1239,18 @@
           },
           "ended": {
             "type": "boolean"
+          },
+          "waitingQuestionCount": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "required": [
           "chunks",
           "nextOffset",
           "attempt",
-          "ended"
+          "ended",
+          "waitingQuestionCount"
         ]
       },
       "LogChunk": {
@@ -2205,7 +2209,7 @@
         }
       },
       "patch": {
-        "summary": "Admin settings write. Today one knob: `allowSharedAgentCredential` — the User→ServiceAccount credential fallback, **default off** (AC: \"Fallback User→ServiceAccount lewat allowSharedAgentCredential, bawaan mati\"). Audited.",
+        "summary": "Admin settings write. Configures the User→ServiceAccount fallback or the one Project notification channel webhook. The webhook URL is never returned.",
         "parameters": [
           {
             "schema": {
@@ -2224,6 +2228,12 @@
                 "properties": {
                   "allowSharedAgentCredential": {
                     "type": "boolean"
+                  },
+                  "notificationWebhookUrl": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 2048,
+                    "format": "uri"
                   }
                 }
               }
@@ -3029,11 +3039,16 @@
                     "nextCursor": {
                       "type": "string",
                       "nullable": true
+                    },
+                    "waitingQuestionCount": {
+                      "type": "integer",
+                      "minimum": 0
                     }
                   },
                   "required": [
                     "runs",
-                    "nextCursor"
+                    "nextCursor",
+                    "waitingQuestionCount"
                   ]
                 }
               }
@@ -3145,11 +3160,16 @@
                       "items": {
                         "$ref": "#/components/schemas/StepRun"
                       }
+                    },
+                    "waitingQuestionCount": {
+                      "type": "integer",
+                      "minimum": 0
                     }
                   },
                   "required": [
                     "run",
-                    "stepRuns"
+                    "stepRuns",
+                    "waitingQuestionCount"
                   ]
                 }
               }

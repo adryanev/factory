@@ -15,7 +15,13 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 import { createDatabase } from "../../src/db/client.js";
 import { MIGRATIONS_FOLDER } from "../../src/db/migrations-path.js";
-import { createClaimConnectionLimiter, type AppDeps, type Clock, type RandomSource } from "../../src/deps.js";
+import {
+  createClaimConnectionLimiter,
+  type AppDeps,
+  type Clock,
+  type NotificationSender,
+  type RandomSource,
+} from "../../src/deps.js";
 import { createFileKeyRing } from "../../src/domain/master-key.js";
 import { bootstrapBreakGlassAccount } from "../../src/domain/auth.js";
 import { bootControlPlane } from "../../src/boot.js";
@@ -33,6 +39,7 @@ export interface TestRig {
   githubOAuth: FakeGithubOAuthClient;
   gitHost: FakeGitHost;
   objectStore: FakeObjectStore;
+  notifications: { sent: { url: string; text: string }[] };
   /**
    * The composition-root deps object, exposed so tests can drive the
    * control-plane executor directly (`runControlPlaneStepCycle`) instead of
@@ -106,6 +113,12 @@ export async function startTestRig(options: TestRigOptions = {}): Promise<TestRi
   const githubOAuth = createFakeGithubOAuthClient();
   const gitHost = createFakeGitHost();
   const objectStore = createFakeObjectStore(() => currentTime);
+  const notifications = { sent: [] as { url: string; text: string }[] };
+  const notificationSender: NotificationSender = {
+    async send(url, payload) {
+      notifications.sent.push({ url, text: payload.text });
+    },
+  };
 
   // Master key from a FILE — exactly the production shape (spec). One stable
   // version 1 key; rotation tests rewrite this file to add version 2.
@@ -121,6 +134,7 @@ export async function startTestRig(options: TestRigOptions = {}): Promise<TestRi
     random: seededRandom(42),
     githubOAuth,
     gitHost,
+    notificationSender,
     keyring: createFileKeyRing(masterKeyFile),
     objectStore,
     claimHoldRangeMs: options.claimHoldRangeMs ?? { min: 150, max: 350 },
@@ -153,6 +167,7 @@ export async function startTestRig(options: TestRigOptions = {}): Promise<TestRi
     githubOAuth,
     gitHost,
     objectStore,
+    notifications,
     deps,
     masterKeyFile,
     setClock: (date: Date) => {

@@ -4,7 +4,7 @@
  * control plane's real answering write is covered by the seam-1 suite.
  */
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QuestionList } from "../QuestionList";
 
@@ -67,6 +67,58 @@ describe("QuestionList", () => {
     mockFetchWaiting([]);
     render(<QuestionList />);
     await waitFor(() => expect(screen.getByText("Nothing waiting for you.")).toBeInTheDocument());
+  });
+
+  it("preserves oldest-first order and shows each Question's age", async () => {
+    mockFetchWaiting([
+      question("newer", { projectName: "newer-project", createdAt: "2026-01-01T01:00:00.000Z" }),
+      question("older", { projectName: "older-project", createdAt: "2026-01-01T00:00:00.000Z" }),
+    ]);
+    render(<QuestionList />);
+
+    await waitFor(() => expect(screen.getByText("older-project")).toBeInTheDocument());
+    const items = screen.getAllByRole("listitem");
+    expect(items[0]).toHaveTextContent("newer-project");
+    expect(items[0]).toHaveTextContent("old");
+    expect(items[1]).toHaveTextContent("older-project");
+    expect(items[1]).toHaveTextContent("old");
+  });
+
+  it("reports the fetched state to the app badge without a badge request", async () => {
+    const fetchImpl = mockFetchWaiting([question("question_1"), question("question_2")]);
+    const onWaitingCountChange = vi.fn();
+    render(<QuestionList onWaitingCountChange={onWaitingCountChange} />);
+
+    await waitFor(() => expect(screen.getAllByText("Approve this plan?")).toHaveLength(2));
+    expect(onWaitingCountChange).toHaveBeenLastCalledWith(2);
+    expect(fetchImpl.mock.calls.every(([input]) => String(input).endsWith("/questions/waiting"))).toBe(true);
+  });
+
+  it("uses one slow refresh for a non-Run tab", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = mockFetchWaiting([question("question_1")]);
+      render(<QuestionList />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(29_999);
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("an accepted answer refreshes the list", async () => {

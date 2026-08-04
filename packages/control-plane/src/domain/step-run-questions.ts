@@ -28,7 +28,7 @@
  * claimed by any free Runner; the agent resumes from the persisted session
  * (AC1/AC2).
  */
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   generateId,
   renderAnswerForAgent,
@@ -159,8 +159,36 @@ export async function listWaitingQuestions(
         eq(stepRuns.outcome, "awaiting-human"),
       ),
     )
-    .orderBy(desc(questions.createdAt));
+    .orderBy(asc(questions.createdAt));
   return rows.map((row) => toQuestionState(row.question, row.stepRun, row.run, row.project));
+}
+
+/**
+ * The in-app badge is a read of the same open-Question state as the waiting
+ * page. It deliberately counts rows instead of maintaining a counter; the
+ * unanswered partial index on `questions.created_at` is the access path.
+ */
+export async function countWaitingQuestions(
+  deps: Pick<AppDeps, "db">,
+  principal: Principal,
+): Promise<number> {
+  const groupIds = await groupIdsOfPrincipal(deps.db, principal);
+  if (groupIds.length === 0) {
+    return 0;
+  }
+
+  const [row] = await deps.db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(questions)
+    .innerJoin(stepRuns, eq(stepRuns.id, questions.stepRunId))
+    .where(
+      and(
+        isNull(questions.answeredAt),
+        inArray(questions.groupId, groupIds),
+        eq(stepRuns.outcome, "awaiting-human"),
+      ),
+    );
+  return row?.count ?? 0;
 }
 
 export type AnswerQuestionResult =

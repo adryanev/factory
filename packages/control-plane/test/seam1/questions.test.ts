@@ -299,7 +299,14 @@ describe("Step human-in-the-loop (issue 13)", () => {
   it("AC5 — onReject: fail ends the StepRun (and the Run) on a rejection, without ever failing the answer write", async () => {
     const failDefinition = APPROVAL_DEFINITION.replace("kind: approval", "kind: approval\n    onReject: fail");
     const runner = await joinRunner(rig, ownerCookie);
-    const { stepRun, questionId } = await claimAndAsk(rig, ownerCookie, ownerPrincipalId, runner, [ownerPrincipalId], failDefinition);
+    const { stepRun, questionId, runId } = await claimAndAsk(
+      rig,
+      ownerCookie,
+      ownerPrincipalId,
+      runner,
+      [ownerPrincipalId],
+      failDefinition,
+    );
 
     // The rejection is still just data flowing through the answer write (200)…
     expect((await answer(rig, ownerCookie, questionId, { kind: "approval", approved: false, reason: "nope" })).status).toBe(200);
@@ -321,6 +328,11 @@ describe("Step human-in-the-loop (issue 13)", () => {
       [stepRun.id],
     );
     expect(run.rows[0]!.outcome).toBe("failed");
+    const failedNotification = await rig.pool.query<{ kind: string; run_id: string }>(
+      "select kind, run_id from pending_notifications where run_id = $1",
+      [runId],
+    );
+    expect(failedNotification.rows).toContainEqual({ kind: "run-failed", run_id: runId });
   });
 
   it("AC6 — the Question addresses a Group; the answer records the answering principal; a non-member is refused", async () => {
@@ -438,5 +450,51 @@ describe("Step human-in-the-loop (issue 13)", () => {
     const resumed = await runner.client.claim(runner.secret);
     const next = (resumed.body as { step_run: { ref: { branch: string; sha: string } } | null }).step_run;
     expect(next!.ref).toEqual({ branch: `run/${stepRun.id}/review/t1-a1`, sha: "cafebabe" });
+  });
+
+  it("orders the waiting page oldest first", async () => {
+    const runner = await joinRunner(rig, ownerCookie);
+    const oldest = await claimAndAsk(rig, ownerCookie, ownerPrincipalId, runner, [ownerPrincipalId]);
+    const newest = await claimAndAsk(rig, ownerCookie, ownerPrincipalId, runner, [ownerPrincipalId]);
+    await rig.pool.query(
+      "update questions set created_at = case id when $1 then $3::timestamptz when $2 then $4::timestamptz end where id in ($1, $2)",
+      [oldest.questionId, newest.questionId, "2026-01-01T00:00:00.000Z", "2026-01-01T01:00:00.000Z"],
+    );
+
+    const response = await fetch(`${rig.baseUrl}/questions/waiting`, { headers: { cookie: ownerCookie } });
+    const body = (await response.json()) as { questions: { id: string; createdAt: string }[] };
+    const ids = body.questions.map((question) => question.id);
+    expect(ids.indexOf(oldest.questionId)).toBeLessThan(ids.indexOf(newest.questionId));
+    expect(body.questions.find((question) => question.id === oldest.questionId)?.createdAt).toBe(
+      "2026-01-01T00:00:00.000Z",
+    );
+  });
+
+  it("carries the state-derived badge count on Graph and log responses", async () => {
+    const runner = await joinRunner(rig, ownerCookie);
+    const empty = await seedReadyStepRun(rig.pool);
+    await rig.pool.query("update step_runs set outcome = 'succeeded' where id = $1", [empty.stepRunId]);
+    await rig.fetchWithCsrf(`${rig.baseUrl}/projects/${empty.projectId}/members/self`, {
+      method: "POST",
+      headers: { cookie: ownerCookie },
+    });
+    const beforeResponse = await fetch(`${rig.baseUrl}/projects/${empty.projectId}/runs`, {
+      headers: { cookie: ownerCookie },
+    });
+    const before = (await beforeResponse.json()) as { waitingQuestionCount: number };
+
+    const asked = await claimAndAsk(rig, ownerCookie, ownerPrincipalId, runner, [ownerPrincipalId]);
+    const project = await rig.pool.query<{ project_id: string }>("select project_id from runs where id = $1", [asked.runId]);
+    const graphResponse = await fetch(`${rig.baseUrl}/projects/${project.rows[0]!.project_id}/runs`, {
+      headers: { cookie: ownerCookie },
+    });
+    const graph = (await graphResponse.json()) as { waitingQuestionCount: number };
+    expect(graph.waitingQuestionCount).toBe(before.waitingQuestionCount + 1);
+
+    const logResponse = await fetch(`${rig.baseUrl}/step-runs/${asked.stepRun.id}/log?offset=0`, {
+      headers: { cookie: ownerCookie },
+    });
+    const log = (await logResponse.json()) as { waitingQuestionCount: number };
+    expect(log.waitingQuestionCount).toBe(graph.waitingQuestionCount);
   });
 });

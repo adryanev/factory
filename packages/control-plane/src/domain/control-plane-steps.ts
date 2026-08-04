@@ -46,6 +46,7 @@ import {
   type RepoRef,
 } from "./git-host.js";
 import { advanceGraph, finalizeRunIfDone, parsePipelineSnapshot, structuredOutputs, type RunRow } from "./graph-advance.js";
+import { sweepExpiredLeases } from "./step-run-ops.js";
 
 const CLAIM_QUERY = loadSqlStatement("claim_step_run.sql");
 
@@ -65,7 +66,7 @@ export const COMMIT_STATUS_CONTEXT = "factory";
 /** The world the executor reaches into — a strict subset of `AppDeps`. */
 export type ControlPlaneStepDeps = Pick<
   AppDeps,
-  "pool" | "db" | "gitHost" | "clock" | "controlPlaneInstanceId" | "runPageBaseUrl"
+  "pool" | "db" | "gitHost" | "clock" | "notificationSender" | "controlPlaneInstanceId" | "runPageBaseUrl"
 >;
 
 interface ClaimedControlPlaneRow {
@@ -360,6 +361,7 @@ export async function runControlPlaneStepCycle(
   deps: ControlPlaneStepDeps,
   options: ControlPlaneStepOptions = {},
 ): Promise<boolean> {
+  await sweepExpiredLeases(deps);
   const row = await claimControlPlaneStepRun(deps);
   if (!row) {
     return false;

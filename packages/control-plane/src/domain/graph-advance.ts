@@ -73,6 +73,7 @@ import {
 } from "@factory/shared";
 import { repositories, runs, stepRuns } from "../db/schema.js";
 import type { Database } from "../db/client.js";
+import { queueRunFailedNotification } from "./notifications.js";
 
 /** The world this module reaches into — the caller's transaction client (or the bare db) plus the clock. */
 export interface GraphDeps {
@@ -710,10 +711,15 @@ export async function finalizeRunIfDone(
   else if (outcomes.includes("succeeded")) verdict = "succeeded";
   else verdict = "failed"; // all skipped, or nothing was ever produced.
 
-  await deps.db
+  const endedAt = deps.now();
+  const ended = await deps.db
     .update(runs)
-    .set({ outcome: verdict, endedAt: deps.now() })
-    .where(and(eq(runs.id, runId), isNull(runs.outcome)));
+    .set({ outcome: verdict, endedAt })
+    .where(and(eq(runs.id, runId), isNull(runs.outcome)))
+    .returning({ projectId: runs.projectId });
+  if (verdict === "failed" && ended.length > 0) {
+    await queueRunFailedNotification(deps.db, ended[0]!.projectId, runId, endedAt);
+  }
 }
 
 /**

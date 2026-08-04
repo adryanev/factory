@@ -21,6 +21,7 @@ import type { AppDeps } from "../deps.js";
 import { NotFoundError } from "./errors.js";
 import { requireProjectMembership } from "./projects.js";
 import type { Principal } from "./principal.js";
+import { countWaitingQuestions } from "./step-run-questions.js";
 
 export const LIVE_TAIL_HOLD_MS = 30_000; // spec: "long-poll ≤30s dari offset".
 const POLL_INTERVAL_MS = 1000; // spec's hold implementation: "poll ... tiap 1 detik per koneksi menggantung".
@@ -50,6 +51,8 @@ export interface LogTailResult {
   attempt: number;
   /** True once the StepRun has ended: nothing more can arrive, the browser should stop polling. */
   ended: boolean;
+  /** The same state-derived badge carried by every long-poll response. */
+  waitingQuestionCount: number;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -126,6 +129,7 @@ export async function readLogChunks(
       const chunks = await queryChunks(deps, stepRunId, attempt, input.offset);
       if (chunks.length > 0) {
         const minted = await Promise.all(chunks.map((chunk) => deps.objectStore.mintGetUrl(chunk.blobKey)));
+        const waitingQuestionCount = await countWaitingQuestions(deps, principal);
         return {
           chunks: chunks.map((chunk, index) => ({
             seq: chunk.seq,
@@ -137,14 +141,27 @@ export async function readLogChunks(
           nextOffset: chunks[chunks.length - 1]!.seq + 1,
           attempt,
           ended: isTerminal(stepRun.outcome),
+          waitingQuestionCount,
         };
       }
       if (isTerminal(stepRun.outcome)) {
-        return { chunks: [], nextOffset: input.offset, attempt, ended: true };
+        return {
+          chunks: [],
+          nextOffset: input.offset,
+          attempt,
+          ended: true,
+          waitingQuestionCount: await countWaitingQuestions(deps, principal),
+        };
       }
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
-        return { chunks: [], nextOffset: input.offset, attempt, ended: false };
+        return {
+          chunks: [],
+          nextOffset: input.offset,
+          attempt,
+          ended: false,
+          waitingQuestionCount: await countWaitingQuestions(deps, principal),
+        };
       }
       await sleep(Math.min(POLL_INTERVAL_MS, remaining));
       stepRun = await loadStepRunWithProject(deps, stepRunId);

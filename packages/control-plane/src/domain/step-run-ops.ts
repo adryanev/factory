@@ -12,6 +12,7 @@ import type { Principal } from "./principal.js";
 import { requireProjectMembership } from "./projects.js";
 import { DomainValidationError, NotFoundError } from "./errors.js";
 import { advanceGraph, finalizeRunIfDone, parsePipelineSnapshot } from "./graph-advance.js";
+import { sweepPendingNotifications } from "./notifications.js";
 
 const TERMINAL_OUTCOMES = new Set(["succeeded", "failed", "cancelled", "skipped"]);
 
@@ -93,7 +94,9 @@ export async function cancelStepRun(
  * was itself stamped by `claim_step_run.sql`'s `now()`; see `runners.ts`'s
  * heartbeat renewal for the same reasoning, spelled out once there.
  */
-export async function sweepExpiredLeases(deps: Pick<AppDeps, "db">): Promise<Id<"steprun">[]> {
+export async function sweepExpiredLeases(
+  deps: Pick<AppDeps, "db"> & Partial<Pick<AppDeps, "clock" | "notificationSender">>,
+): Promise<Id<"steprun">[]> {
   const rows = await deps.db
     .update(stepRuns)
     .set({
@@ -107,5 +110,12 @@ export async function sweepExpiredLeases(deps: Pick<AppDeps, "db">): Promise<Id<
     })
     .where(and(eq(stepRuns.outcome, "running"), lt(stepRuns.leaseExpiresAt, sql`now()`)))
     .returning({ id: stepRuns.id });
+  if (deps.clock && deps.notificationSender) {
+    await sweepPendingNotifications({
+      db: deps.db,
+      clock: deps.clock,
+      notificationSender: deps.notificationSender,
+    });
+  }
   return rows.map((row) => row.id);
 }

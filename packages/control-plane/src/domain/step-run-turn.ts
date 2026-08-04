@@ -32,6 +32,7 @@ import { DomainValidationError, LeaseConflictError } from "./errors.js";
 import type { RunnerIdentity } from "./runners.js";
 import { advanceGraph, finalizeRunIfDone, parsePipelineSnapshot, type RunRow } from "./graph-advance.js";
 import { recordStepRunCost } from "./costs.js";
+import { queueQuestionNotification } from "./notifications.js";
 
 type StepRunRow = typeof stepRuns.$inferSelect;
 
@@ -277,7 +278,7 @@ export interface QuestionInput {
  * can be recognized and replayed instead of rejected.
  */
 export async function submitQuestion(
-  deps: Pick<AppDeps, "db">,
+  deps: Pick<AppDeps, "db" | "clock">,
   runner: RunnerIdentity,
   stepRunId: Id<"steprun">,
   leaseToken: string,
@@ -300,43 +301,56 @@ export async function submitQuestion(
     throw new LeaseConflictError("step run is not currently leased to this runner");
   }
 
-  await deps.db
-    .insert(questions)
-    .values({
-      id: input.id,
-      stepRunId,
-      groupId: input.groupId,
-      kind: input.kind,
-      body: input.body,
-      options: input.options,
-      multi: input.multi,
-      allowOther: input.allowOther,
-      artifactKey: input.artifactKey,
-    })
-    .onConflictDoNothing();
+  const [run] = await deps.db
+    .select({ projectId: runs.projectId })
+    .from(runs)
+    .where(eq(runs.id, row.runId));
+  if (!run) {
+    throw new LeaseConflictError("step run references a missing run");
+  }
+  const now = deps.clock.now();
 
-  await deps.db
-    .update(stepRuns)
-    .set({
-      outcome: "awaiting-human",
-      leasedBy: null,
-      leaseExpiresAt: null,
-      outputRefBranch: input.ref.branch,
-      outputRefSha: input.ref.sha,
-      sessionBlobKey: input.sessionBlobKey ?? row.sessionBlobKey,
-      sessionId: input.sessionId ?? row.sessionId,
-    })
-    .where(eq(stepRuns.id, stepRunId));
+  await deps.db.transaction(async (tx) => {
+    await tx
+      .insert(questions)
+      .values({
+        id: input.id,
+        stepRunId,
+        groupId: input.groupId,
+        kind: input.kind,
+        body: input.body,
+        options: input.options,
+        multi: input.multi,
+        allowOther: input.allowOther,
+        artifactKey: input.artifactKey,
+      })
+      .onConflictDoNothing();
 
-  // The turn's upload grants are consumed here — the session blob is now
-  // referenced by `session_blob_key` and the artifact batch was never
-  // recorded (a question turn records no artifacts), so the batch must not
-  // outlive its turn.
-  await deps.db
-    .delete(stepRunUploadGrants)
-    .where(
-      and(eq(stepRunUploadGrants.stepRunId, stepRunId), eq(stepRunUploadGrants.attempt, row.attempt)),
-    );
+    await tx
+      .update(stepRuns)
+      .set({
+        outcome: "awaiting-human",
+        leasedBy: null,
+        leaseExpiresAt: null,
+        outputRefBranch: input.ref.branch,
+        outputRefSha: input.ref.sha,
+        sessionBlobKey: input.sessionBlobKey ?? row.sessionBlobKey,
+        sessionId: input.sessionId ?? row.sessionId,
+      })
+      .where(eq(stepRuns.id, stepRunId));
+
+    await queueQuestionNotification(tx, run.projectId, row.runId, now);
+
+    // The turn's upload grants are consumed here — the session blob is now
+    // referenced by `session_blob_key` and the artifact batch was never
+    // recorded (a question turn records no artifacts), so the batch must not
+    // outlive its turn.
+    await tx
+      .delete(stepRunUploadGrants)
+      .where(
+        and(eq(stepRunUploadGrants.stepRunId, stepRunId), eq(stepRunUploadGrants.attempt, row.attempt)),
+      );
+  });
 
   return { questionId: input.id };
 }

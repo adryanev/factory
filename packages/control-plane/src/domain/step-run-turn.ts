@@ -15,10 +15,17 @@
  * chunk it is about to upload). `/log-chunks` genuinely persists to the real
  * `log_chunks` table, and its dedup-by-primary-key behavior is real.
  */
-import { and, eq } from "drizzle-orm";
-import type { Id } from "@factory/shared";
+import { and, eq, inArray } from "drizzle-orm";
+import {
+  generateId,
+  isArtifactKind,
+  normalizeArtifactKey,
+  type ArtifactKind,
+  type Id,
+} from "@factory/shared";
 import { compileStepOutputContract, validatePipelineDefinition } from "@factory/shared";
-import { logChunks, questions, runs, stepRuns } from "../db/schema.js";
+import { artifacts, logChunks, questions, runs, stepRuns, stepRunUploadGrants } from "../db/schema.js";
+import type { Database } from "../db/client.js";
 import type { AppDeps } from "../deps.js";
 import { DomainValidationError, LeaseConflictError } from "./errors.js";
 import type { RunnerIdentity } from "./runners.js";
@@ -54,15 +61,25 @@ async function requireLeaseHolder(
 
 // --- /step-runs/:id/uploads ------------------------------------------------
 
+/** Kuota per artefak: 1 GiB (spec: "Kuota 1 GiB per artefak"). */
+export const MAX_ARTIFACT_BYTES = 1024 * 1024 * 1024;
+/** Kuota per StepRun: 5 GiB (spec: "dan 5 GiB per StepRun"). */
+export const MAX_STEPRUN_ARTIFACT_BYTES = 5 * MAX_ARTIFACT_BYTES;
+
 export interface UploadRequest {
   key: string;
   kind: "artifact" | "session" | "log";
+  /** Declared size in bytes — required for `artifact` so quota is rejected *at URL-mint time*, before a byte is uploaded (spec: "ditolak saat URL diminta, bukan setelah byte naik"). Ignored for `session`/`log`. */
+  sizeBytes?: number;
 }
 
 export interface UploadGrant {
+  /** The stored key — an artifact key is the *normalized slug* (spec: "key dinormalisasi slug"). */
   key: string;
   uploadUrl: string;
   expiresAt: Date;
+  /** The exact object the PUT writes — returned so the Runner never has to guess the bucket layout. */
+  blobKey: string;
 }
 
 /**
@@ -78,14 +95,33 @@ export function blobKeyFor(stepRunId: Id<"steprun">, request: UploadRequest): st
   return `${request.kind}/${stepRunId}/${request.key}`;
 }
 
+/** The key a grant is stored under — artifact keys are slug-normalized before they become blob paths. */
+function grantKeyFor(request: UploadRequest): string {
+  return request.kind === "artifact" ? normalizeArtifactKey(request.key) : request.key;
+}
+
 /**
  * Mints presigned PUT grants — the control plane records *nothing* about the
  * bytes, it just mints URLs (spec: "Control plane tidak memegang byte").
  * `expiresAt` is the stated 5-minute presigned lifetime (spec: "Presigned 5
  * menit dinyatakan, tidak diperpendek").
+ *
+ * The grant *batch* — the `artifact`/`session` requests, the spec's "satu
+ * batch berisi seluruh artefak plus session" — is stored in
+ * `step_run_upload_grants`, and a repeated request **replaces** the previous
+ * batch instead of adding (spec: "`/uploads` mengganti grant sebelumnya
+ * alih-alih menambah, sehingga kuota diperiksa atas satu daftar utuh dan
+ * tidak pernah hanyut"). The quota is therefore checked against exactly one
+ * whole list at mint time — 1 GiB per artifact, 5 GiB per StepRun — and a
+ * later `/result` only accepts artifacts that are still in the current
+ * batch, so repeated requests cannot drift past it (AC2/AC3).
+ *
+ * `kind: "log"` requests are minted one per chunk by the Runner's log
+ * flush and deliberately never touch the stored batch — otherwise every
+ * chunk mint would wipe the turn's artifact grants.
  */
 export async function mintUploadGrants(
-  deps: Pick<AppDeps, "db" | "objectStore">,
+  deps: Pick<AppDeps, "db" | "objectStore" | "clock">,
   runner: RunnerIdentity,
   stepRunId: Id<"steprun">,
   leaseToken: string,
@@ -95,11 +131,81 @@ export async function mintUploadGrants(
   if (row.outcome !== "running" || row.leasedBy !== runner.id) {
     throw new LeaseConflictError("step run is not currently leased to this runner");
   }
+
+  const artifacts_ = requests.filter((request) => request.kind === "artifact");
+  const tracked = requests.filter((request) => request.kind !== "log");
+
+  // Quota at URL-mint time (AC3). Duplicate keys within one batch are
+  // rejected too — two artifacts sharing one (step_run, key) would collide
+  // on the artifacts UNIQUE constraint the moment /result tries to record
+  // both, so the batch is refused up front.
+  const seen = new Set<string>();
+  const batchTotal = artifacts_.reduce((sum, request) => {
+    if (request.sizeBytes === undefined) {
+      throw new DomainValidationError(
+        "artifact_size_required",
+        `artifact '${request.key}' must declare size_bytes so quota is checked before any byte is uploaded`,
+      );
+    }
+    if (request.sizeBytes > MAX_ARTIFACT_BYTES) {
+      throw new DomainValidationError(
+        "artifact_too_large",
+        `artifact '${request.key}' is ${request.sizeBytes} bytes, over the ${MAX_ARTIFACT_BYTES}-byte per-artifact quota`,
+      );
+    }
+    const key = normalizeArtifactKey(request.key);
+    if (seen.has(key)) {
+      throw new DomainValidationError(
+        "artifact_key_conflict",
+        `artifact key '${key}' appears more than once in this upload batch`,
+      );
+    }
+    seen.add(key);
+    return sum + request.sizeBytes;
+  }, 0);
+  if (batchTotal > MAX_STEPRUN_ARTIFACT_BYTES) {
+    throw new DomainValidationError(
+      "artifact_quota_exceeded",
+      `this upload batch declares ${batchTotal} bytes of artifacts, over the ${MAX_STEPRUN_ARTIFACT_BYTES}-byte per-StepRun quota`,
+    );
+  }
+
   const grants: UploadGrant[] = [];
   for (const request of requests) {
-    const { url, expiresAt } = await deps.objectStore.mintPutUrl(blobKeyFor(stepRunId, request));
-    grants.push({ key: request.key, uploadUrl: url, expiresAt });
+    const key = grantKeyFor(request);
+    const blobKey = blobKeyFor(stepRunId, { ...request, key });
+    const { url, expiresAt } = await deps.objectStore.mintPutUrl(blobKey);
+    grants.push({ key, uploadUrl: url, expiresAt, blobKey });
   }
+
+  // Replace, never add — and only for the artifact/session batch, so the
+  // Runner's one-per-chunk log grants leave the batch untouched.
+  if (tracked.length > 0) {
+    const now = deps.clock.now();
+    await deps.db.transaction(async (tx) => {
+      await tx
+        .delete(stepRunUploadGrants)
+        .where(
+          and(
+            eq(stepRunUploadGrants.stepRunId, stepRunId),
+            eq(stepRunUploadGrants.attempt, row.attempt),
+            inArray(stepRunUploadGrants.kind, ["artifact", "session"]),
+          ),
+        );
+      await tx.insert(stepRunUploadGrants).values(
+        tracked.map((request) => ({
+          stepRunId,
+          attempt: row.attempt,
+          key: grantKeyFor(request),
+          kind: request.kind,
+          sizeBytes: request.kind === "artifact" ? request.sizeBytes : 0,
+          blobKey: blobKeyFor(stepRunId, { ...request, key: grantKeyFor(request) }),
+          grantedAt: now,
+        })),
+      );
+    });
+  }
+
   return grants;
 }
 
@@ -217,16 +323,37 @@ export async function submitQuestion(
     })
     .where(eq(stepRuns.id, stepRunId));
 
+  // The turn's upload grants are consumed here — the session blob is now
+  // referenced by `session_blob_key` and the artifact batch was never
+  // recorded (a question turn records no artifacts), so the batch must not
+  // outlive its turn.
+  await deps.db
+    .delete(stepRunUploadGrants)
+    .where(
+      and(eq(stepRunUploadGrants.stepRunId, stepRunId), eq(stepRunUploadGrants.attempt, row.attempt)),
+    );
+
   return { questionId: input.id };
 }
 
 // --- /step-runs/:id/result --------------------------------------------
+
+/** Metadata of one artifact that already uploaded to the object store, riding `POST /result` (spec: "Metadata Artifact menumpang request akhir itu"). */
+export interface ArtifactMetadataInput {
+  /** Reported by the Runner; stored under the normalized slug (spec: "key dinormalisasi slug"). */
+  key: string;
+  kind: ArtifactKind;
+  contentType: string;
+  sizeBytes: number;
+}
 
 export interface ResultInput {
   outcome: "succeeded" | "failed";
   ref?: { branch: string; sha: string } | undefined;
   outputData?: unknown;
   reason?: string | undefined;
+  /** Only meaningful on `succeeded` — a failed turn records nothing, the whole turn "seolah tidak pernah terjadi" (spec). */
+  artifacts?: ArtifactMetadataInput[] | undefined;
 }
 
 export interface ResultRecord {
@@ -288,6 +415,99 @@ function checkStepOutput(
 }
 
 /**
+ * Records the artifacts of a `succeeded` turn inside the same transaction as
+ * the row update, so a rejected artifact batch makes the whole turn "seolah
+ * tidak pernah terjadi" (spec). The upload-before-record order is the
+ * Runner's; what is enforced here is that metadata *rides* `/result` (AC4)
+ * and that it stays honest:
+ *
+ *  - every recorded artifact must be in the current grant batch
+ *    (`step_run_upload_grants` for this attempt) — artifacts from a batch
+ *    that `/uploads` has since replaced are refused, which is the structural
+ *    half of "kuota tidak bisa hanyut lewat permintaan berulang" (AC3);
+ *  - the recorded size must not exceed the size declared at URL-mint time,
+ *    and per-artifact/per-StepRun quotas are re-checked against the recorded
+ *    numbers — the second half of the same guarantee, provable even if the
+ *    Runner declared small sizes and reported large ones;
+ *  - `blob_key` is taken from the grant row the control plane minted, never
+ *    reported by the Runner — the control plane does not trust a Runner's
+ *    guess about the bucket layout.
+ *
+ * Invariant: a row in `artifacts` exists ⇒ its blob exists in the object
+ * store, because the Runner PUTs the bytes before POSTing `/result` and only
+ * the successfully-uploaded subset is ever listed here (AC4/AC5). A blob
+ * whose metadata never arrived is an orphan for the retention GC.
+ */
+async function recordArtifacts(
+  tx: Database,
+  now: Date,
+  row: StepRunRow,
+  artifacts_: ArtifactMetadataInput[],
+): Promise<void> {
+  if (artifacts_.length === 0) {
+    return;
+  }
+  const grants = await tx.select().from(stepRunUploadGrants).where(
+    and(
+      eq(stepRunUploadGrants.stepRunId, row.id),
+      eq(stepRunUploadGrants.attempt, row.attempt),
+    ),
+  );
+  const grantByKey = new Map<string, (typeof grants)[number]>();
+  for (const grant of grants) {
+    if (grant.kind === "artifact") {
+      grantByKey.set(grant.key, grant);
+    }
+  }
+
+  const values: (typeof artifacts.$inferInsert)[] = [];
+  let batchTotal = 0;
+  for (const artifact of artifacts_) {
+    const key = normalizeArtifactKey(artifact.key);
+    const grant = grantByKey.get(key);
+    if (!grant) {
+      throw new DomainValidationError(
+        "artifact_not_granted",
+        `artifact '${key}' was not granted by the current upload batch for this StepRun`,
+      );
+    }
+    if (artifact.sizeBytes > grant.sizeBytes) {
+      throw new DomainValidationError(
+        "artifact_size_exceeds_grant",
+        `artifact '${key}' reports ${artifact.sizeBytes} bytes but only ${grant.sizeBytes} was declared at URL-mint time`,
+      );
+    }
+    if (artifact.sizeBytes > MAX_ARTIFACT_BYTES) {
+      throw new DomainValidationError(
+        "artifact_too_large",
+        `artifact '${key}' is ${artifact.sizeBytes} bytes, over the ${MAX_ARTIFACT_BYTES}-byte per-artifact quota`,
+      );
+    }
+    if (!isArtifactKind(artifact.kind)) {
+      throw new DomainValidationError("artifact_kind_invalid", `artifact '${key}' has unknown kind '${artifact.kind}'`);
+    }
+    batchTotal += artifact.sizeBytes;
+    if (batchTotal > MAX_STEPRUN_ARTIFACT_BYTES) {
+      throw new DomainValidationError(
+        "artifact_quota_exceeded",
+        `this turn records ${batchTotal} bytes of artifacts, over the ${MAX_STEPRUN_ARTIFACT_BYTES}-byte per-StepRun quota`,
+      );
+    }
+    values.push({
+      id: generateId("artifact"),
+      stepRunId: row.id,
+      key,
+      kind: artifact.kind,
+      contentType: artifact.contentType,
+      blobKey: grant.blobKey,
+      sizeBytes: artifact.sizeBytes,
+      createdAt: now,
+    });
+  }
+  await tx.insert(artifacts).values(values);
+}
+
+/**
  * Ends a turn successfully or with failure. Idempotency keys on
  * `lease_token` itself, not a new field (spec: "nol kunci baru ... `/result`
  * dijaga lease_token itu sendiri"): the same token replays the previously
@@ -308,6 +528,13 @@ function checkStepOutput(
  * `DomainValidationError` (400), not a stored row. A `failed` result may
  * carry an optional `ref` — the branch may have been pushed before the turn
  * went sideways (spec: "ref opsional bila branch sempat terdorong").
+ *
+ * Artifact metadata rides the final request (spec: "Metadata Artifact
+ * menumpang request akhir itu"), committed in the same transaction as the
+ * row update so a refused artifact batch voids the whole turn; only a
+ * `succeeded` outcome records artifacts — a failed turn's branch is an
+ * orphan and its artifacts are deliberately not shown ("Output yang ditolak
+ * membuat seluruh giliran seolah tidak pernah terjadi").
  */
 export async function submitResult(
   deps: Pick<AppDeps, "db" | "clock">,
@@ -356,24 +583,47 @@ export async function submitResult(
       })
       .where(eq(stepRuns.id, stepRunId))
       .returning();
+    await clearGrants(deps, row);
     return toResultRecord(updated!);
   }
 
-  const [updated] = await deps.db
-    .update(stepRuns)
-    .set({
-      outcome: input.outcome,
-      reason: input.reason ?? null,
-      outputRefBranch: input.ref?.branch ?? null,
-      outputRefSha: input.ref?.sha ?? null,
-      outputData: input.outputData ?? null,
-    })
-    .where(eq(stepRuns.id, stepRunId))
-    .returning();
+  const recorded = await deps.db.transaction(async (tx) => {
+    if (input.outcome === "succeeded") {
+      await recordArtifacts(tx, deps.clock.now(), row, input.artifacts ?? []);
+    }
+    const [updated] = await tx
+      .update(stepRuns)
+      .set({
+        outcome: input.outcome,
+        reason: input.reason ?? null,
+        outputRefBranch: input.ref?.branch ?? null,
+        outputRefSha: input.ref?.sha ?? null,
+        outputData: input.outputData ?? null,
+      })
+      .where(eq(stepRuns.id, stepRunId))
+      .returning();
+    return updated!;
+  });
+
+  // The batch is consumed by this commit point — whether it recorded
+  // artifacts or not, no later /uploads for this attempt may reference it.
+  await clearGrants(deps, row);
 
   if (input.outcome === "succeeded" && row.branchKey === null) {
     await scheduleDependentsOf(deps, row.runId, row.stepKey);
   }
 
-  return toResultRecord(updated!);
+  return toResultRecord(recorded);
+}
+
+/** Removes the grant batch of one (StepRun, attempt) — a batch is consumed the moment its turn commits. */
+async function clearGrants(
+  deps: Pick<AppDeps, "db">,
+  row: StepRunRow,
+): Promise<void> {
+  await deps.db
+    .delete(stepRunUploadGrants)
+    .where(
+      and(eq(stepRunUploadGrants.stepRunId, row.id), eq(stepRunUploadGrants.attempt, row.attempt)),
+    );
 }

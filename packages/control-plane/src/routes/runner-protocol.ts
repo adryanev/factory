@@ -13,7 +13,7 @@
  * the reply. No handler reaches `db` — see `domain/index.ts`.
  */
 import { createRoute, z, type OpenAPIHono } from "@hono/zod-openapi";
-import { errorResponseSchema, isValidId } from "@factory/shared";
+import { ARTIFACT_KINDS, errorResponseSchema, isValidId } from "@factory/shared";
 import type { AppEnv } from "../http-env.js";
 import type { RouteDeps } from "../domain/index.js";
 import { ClaimCapacityError } from "../domain/index.js";
@@ -157,15 +157,35 @@ const selfDrainRoute = createRoute({
 
 const stepRunIdParamSchema = z.object({ id: z.string().openapi({ param: { name: "id", in: "path" } }) });
 
+const uploadRequestItemSchema = z.discriminatedUnion("kind", [
+  // An artifact declares its size at URL-mint time so the 1 GiB / 5 GiB quota
+  // is rejected before a byte is uploaded (spec: "Kuota ... ditolak saat URL
+  // diminta, bukan setelah byte naik").
+  z.object({
+    key: z.string().min(1),
+    kind: z.literal("artifact"),
+    size_bytes: z.number().int().nonnegative(),
+  }),
+  z.object({ key: z.string().min(1), kind: z.literal("session") }),
+  z.object({ key: z.string().min(1), kind: z.literal("log") }),
+]);
 const uploadsRequestSchema = z
   .object({
     lease_token: z.string(),
-    requests: z.array(z.object({ key: z.string().min(1), kind: z.enum(["artifact", "session", "log"]) })).max(64),
+    requests: z.array(uploadRequestItemSchema).max(64),
   })
   .openapi("UploadGrantRequest");
 const uploadsResponseSchema = z
   .object({
-    grants: z.array(z.object({ key: z.string(), upload_url: z.string(), expires_at: z.string() })),
+    grants: z.array(
+      z.object({
+        key: z.string(),
+        /** The exact object the PUT writes — the Runner records it, never guesses the bucket layout. */
+        blob_key: z.string(),
+        upload_url: z.string(),
+        expires_at: z.string(),
+      }),
+    ),
   })
   .openapi("UploadGrantResponse");
 
@@ -242,6 +262,13 @@ const questionRoute = createRoute({
   },
 });
 
+const resultArtifactSchema = z.object({
+  key: z.string().min(1),
+  kind: z.enum(ARTIFACT_KINDS),
+  content_type: z.string().min(1),
+  size_bytes: z.number().int().nonnegative(),
+});
+
 const resultRequestSchema = z
   .object({
     lease_token: z.string(),
@@ -249,6 +276,9 @@ const resultRequestSchema = z
     ref: z.object({ branch: z.string(), sha: z.string() }).optional(),
     output_data: z.unknown().optional(),
     reason: z.string().optional(),
+    // Metadata of the artifacts that already uploaded, riding this final
+    // request (spec: "Metadata Artifact menumpang request akhir itu").
+    artifacts: z.array(resultArtifactSchema).max(64).optional(),
   })
   .openapi("ResultRequest");
 const resultResponseSchema = z
@@ -373,10 +403,21 @@ export function registerRunnerProtocolRoutes(app: OpenAPIHono<AppEnv>, deps: Rou
       runner,
       id as never,
       lease_token,
-      requests.map((r) => ({ key: r.key, kind: r.kind })),
+      requests.map((request) => ({
+        key: request.key,
+        kind: request.kind,
+        ...(request.kind === "artifact" ? { sizeBytes: request.size_bytes } : {}),
+      })),
     );
     return c.json(
-      { grants: grants.map((g) => ({ key: g.key, upload_url: g.uploadUrl, expires_at: g.expiresAt.toISOString() })) },
+      {
+        grants: grants.map((grant) => ({
+          key: grant.key,
+          blob_key: grant.blobKey,
+          upload_url: grant.uploadUrl,
+          expires_at: grant.expiresAt.toISOString(),
+        })),
+      },
       200,
     );
   });
@@ -422,12 +463,22 @@ export function registerRunnerProtocolRoutes(app: OpenAPIHono<AppEnv>, deps: Rou
   app.openapi(resultRoute, async (c) => {
     const runner = await requireRunner(c, deps);
     const { id } = c.req.valid("param");
-    const { lease_token, outcome, ref, output_data, reason } = c.req.valid("json");
+    const { lease_token, outcome, ref, output_data, reason, artifacts } = c.req.valid("json");
     const recorded = await deps.domain.stepRuns.submitResult(runner, id as never, lease_token, {
       outcome,
       ref,
       outputData: output_data,
       reason,
+      ...(artifacts !== undefined
+        ? {
+            artifacts: artifacts.map((artifact) => ({
+              key: artifact.key,
+              kind: artifact.kind,
+              contentType: artifact.content_type,
+              sizeBytes: artifact.size_bytes,
+            })),
+          }
+        : {}),
     });
     return c.json({ outcome: recorded.outcome, ref: recorded.ref, output_data: recorded.outputData }, 200);
   });

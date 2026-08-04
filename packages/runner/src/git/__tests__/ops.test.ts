@@ -92,6 +92,25 @@ describe("git ops: the Runner's bus transport", () => {
     expect(await git.refHead(cloneDir, "refs/heads/main")).toBe(head);
   });
 
+  it("diff returns the text between base and head — the materialized diff artifact", async () => {
+    const git: GitOps = createGitOps(exec);
+    const base = (await exec("git", ["-C", cloneDir, "rev-parse", "HEAD"])).stdout.trim();
+
+    // The turn changes the worktree and commits; head advances past base.
+    await writeFile(path.join(cloneDir, "changed.txt"), "v1\n");
+    const head = await git.commitAll(cloneDir, "factory: materialize");
+    await writeFile(path.join(cloneDir, "changed.txt"), "v2\n");
+
+    const diff = await git.diff(cloneDir, base, head);
+    expect(diff).toContain("+v1\n");
+    // Deterministic output — never colorized.
+    expect(diff).not.toContain("\u001b[");
+
+    // An empty diff (nothing between two refs) is still a valid result — not
+    // an error — so a clean turn can materialize an empty diff artifact.
+    expect(await git.diff(cloneDir, head, head)).toBe("");
+  });
+
   it("revokeInstallationToken calls DELETE /installation/token with the token as bearer — teardown without the App credential", async () => {
     let seen: { method: string; url: string; authorization: string | null } | null = null;
     const git: GitOps = createGitOps(exec, async (token: string) => {

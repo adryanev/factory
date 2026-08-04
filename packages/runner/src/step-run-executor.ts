@@ -33,8 +33,9 @@ import { OutputInvalidError, TurnCancelledError, type Turn, type TurnResult, typ
 import type { GitOps } from "./git/ops.js";
 import { LogBuffer, createLogSink, type LogChunkUploader, type LogSink } from "./log-buffer.js";
 import { createProtocolLogChunkUploader } from "./log-uploader.js";
+import { createProtocolArtifactUploader, type ArtifactUploader, type UploadedArtifact } from "./artifact-uploader.js";
 import type { Capabilities } from "./capabilities.js";
-import type { ClaimedStepRun, ProtocolClient } from "./protocol/client.js";
+import type { ArtifactWire, ClaimedStepRun, ProtocolClient } from "./protocol/client.js";
 
 export interface StepRunExecutorDeps {
   protocol: ProtocolClient;
@@ -59,6 +60,8 @@ export interface StepRunExecutorDeps {
   logCapBytes?: number;
   /** Overrides the per-StepRun chunk uploader — tests inject a recording fake so no network is touched. Defaults to the protocol-backed uploader. */
   logUploaderFor?: (claimed: ClaimedStepRun) => LogChunkUploader;
+  /** Overrides the per-StepRun artifact uploader — tests inject a recording fake so no network is touched. Defaults to the protocol-backed uploader. */
+  artifactUploaderFor?: (claimed: ClaimedStepRun) => ArtifactUploader;
 }
 
 /** A resolved Step the Runner can actually execute. */
@@ -336,6 +339,9 @@ export async function executeClaimedTurn(deps: StepRunExecutorDeps, claimed: Cla
     ...(deps.logRingBufferBytes !== undefined ? { ringBufferBytes: deps.logRingBufferBytes } : {}),
     ...(deps.logCapBytes !== undefined ? { capBytes: deps.logCapBytes } : {}),
   });
+  const artifactUploader =
+    deps.artifactUploaderFor?.(claimed) ??
+    createProtocolArtifactUploader({ protocol: deps.protocol }, claimed.id, claimed.leaseToken);
   // Idempotent — the explicit calls before each turn-ending POST run the final
   // flush while the lease is still valid, and the outer finally is the backstop
   // for the early-return (cancel) path.
@@ -395,11 +401,16 @@ export async function executeClaimedTurn(deps: StepRunExecutorDeps, claimed: Cla
       }
       const sha = await commitAndPush(deps, claimed, cloneDir, repoUrl, branch, result);
       await stopLogging();
+      // The turn's diff is materialized as an artifact after the push, before
+      // the turn-ending POST (AC6: "Diff dimaterialisasi jadi blob saat
+      // StepRun berakhir, sehingga branch bebas dihapus").
+      const artifacts = await materializeDiff(deps, artifactUploader, claimed, cloneDir, sha);
       await deps.protocol.reportResult({
         stepRunId: claimed.id,
         leaseToken: claimed.leaseToken,
         outcome: "succeeded",
         ref: { branch, sha },
+        ...(artifacts.length > 0 ? { artifacts } : {}),
       });
       return;
     }
@@ -468,17 +479,59 @@ export async function executeClaimedTurn(deps: StepRunExecutorDeps, claimed: Cla
       return;
     }
 
+    // The turn's diff is materialized as an artifact after the push, before
+    // the turn-ending POST (AC6) — only for a `done` turn; a question posts
+    // the branch onward and an invalid Output makes the whole turn void.
+    const uploadedDiffArtifacts = await materializeDiff(deps, artifactUploader, claimed, cloneDir, sha);
     await deps.protocol.reportResult({
       stepRunId: claimed.id,
       leaseToken: claimed.leaseToken,
       outcome: "succeeded",
       ref: { branch, sha },
       outputData: classified.value,
+      ...(uploadedDiffArtifacts.length > 0 ? { artifacts: uploadedDiffArtifacts } : {}),
     });
   } finally {
     await stopLogging();
     await revokeTurnTokens(deps.git, claimed);
   }
+}
+
+/**
+ * Materializes the turn's diff — the pushed branch vs the base ref — as an
+ * artifact, so the branch can be deleted without the change being lost
+ * (spec: "Diff dimaterialisasi jadi blob saat StepRun berakhir, sehingga
+ * branch bebas dihapus"). Called only on a `succeeded` /result: a failed
+ * turn's whole turn "seolah tidak pernah terjadi", and its orphan branch is
+ * the retention GC's to reap.
+ *
+ * Best-effort by design (AC5): a failed `git diff` or a failed upload yields
+ * nothing to ride `/result` — the StepRun is unaffected either way. The blob
+ * is uploaded before the metadata rides `/result`, preserving "baris Artifact
+ * ada ⇒ blob pasti ada".
+ */
+async function materializeDiff(
+  deps: Pick<StepRunExecutorDeps, "git">,
+  uploader: ArtifactUploader,
+  claimed: ClaimedStepRun,
+  cloneDir: string,
+  headSha: string,
+): Promise<ArtifactWire[]> {
+  let diffText: string;
+  try {
+    diffText = await deps.git.diff(cloneDir, claimed.ref.sha, headSha);
+  } catch {
+    return [];
+  }
+  const uploaded = await uploader.uploadArtifacts([
+    { key: "diff", kind: "diff", contentType: "text/x-diff", text: diffText },
+  ]);
+  return uploaded.map((artifact) => ({
+    key: artifact.key,
+    kind: artifact.kind,
+    contentType: artifact.contentType,
+    sizeBytes: artifact.sizeBytes,
+  }));
 }
 
 /** Builds the seam spec for the resolved Step — shell or agent (issue 9). */

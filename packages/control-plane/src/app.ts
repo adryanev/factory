@@ -22,6 +22,7 @@ import { registerSecretRoutes } from "./routes/secrets.js";
 import { registerRunnerProtocolRoutes } from "./routes/runner-protocol.js";
 import { registerRunnerAdminRoutes } from "./routes/runner-admin.js";
 import { registerStepRunLogRoutes } from "./routes/step-run-logs.js";
+import { registerStepRunArtifactRoutes } from "./routes/step-run-artifacts.js";
 import { isRunnerProtocolPath } from "./routes/runner-protocol-paths.js";
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024; // spec: "Batas ukuran: badan JSON 1 MiB semua endpoint" (Runner surface).
@@ -132,6 +133,7 @@ export function createApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerRunnerProtocolRoutes(app, { domain, clock: deps.clock });
   registerRunnerAdminRoutes(app, { domain, clock: deps.clock });
   registerStepRunLogRoutes(app, { domain, clock: deps.clock });
+  registerStepRunArtifactRoutes(app, { domain, clock: deps.clock });
 
   return app;
 }

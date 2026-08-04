@@ -33,6 +33,14 @@ export interface GitOps {
   commitAll(dir: string, message: string): Promise<string>;
   /** Resolves a ref in `dir` to a sha — throws when the ref does not exist. */
   refHead(dir: string, ref: string): Promise<string>;
+  /**
+   * The text diff between `base` and `head` — what this turn changed. The
+   * materialized diff artifact (spec: "Diff dimaterialisasi jadi blob saat
+   * StepRun berakhir, sehingga branch bebas dihapus") is this exact output,
+   * uploaded by the Runner at the turn's end so the branch can be deleted
+   * without the change being lost.
+   */
+  diff(dir: string, base: string, head: string): Promise<string>;
   /** Pushes `sha` to `refs/heads/<branch>` on `origin`, authenticated with `token`. */
   push(cloneDir: string, repoUrl: string, sha: string, branch: string, token: string): Promise<void>;
   /** Revokes an installation token at teardown — `DELETE /installation/token`, authenticated with the token itself. */
@@ -96,6 +104,14 @@ export function createGitOps(exec: GitExec, revokeToken?: (token: string) => Pro
     async refHead(dir, ref) {
       const { stdout } = await git(dir, ["rev-parse", "--verify", ref]);
       return stdout.trim();
+    },
+
+    async diff(dir, base, head) {
+      // `--no-color` keeps the output deterministic whether or not the
+      // process has a tty; `--exit-code` is deliberately NOT used — an empty
+      // diff (a clean turn) is still valid material for the diff artifact.
+      const { stdout } = await git(dir, ["diff", "--no-color", base, head]);
+      return stdout;
     },
 
     async push(cloneDir, _repoUrl, sha, branch, token) {

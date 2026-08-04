@@ -34,6 +34,7 @@ function fakeProtocol(records: { key: string; kind: string }[] = []): {
           key: request.key,
           uploadUrl: `https://blob.invalid/put/${request.key}`,
           expiresAt: "2026-01-01T00:05:00.000Z",
+          blobKey: `log/steprun_1/${request.key}`,
         }));
         return grants;
       },

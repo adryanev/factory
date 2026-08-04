@@ -65,8 +65,11 @@ export function createRunnerClient(baseUrl: string) {
     uploads: (
       secret: string,
       stepRunId: string,
-      input: { lease_token: string; requests: { key: string; kind: "artifact" | "session" | "log" }[] },
-    ) => postRunner<{ grants: { key: string; upload_url: string; expires_at: string }[] }>(
+      input: {
+        lease_token: string;
+        requests: { key: string; kind: "artifact" | "session" | "log"; size_bytes?: number }[];
+      },
+    ) => postRunner<{ grants: { key: string; blob_key: string; upload_url: string; expires_at: string }[] }>(
       baseUrl,
       `/step-runs/${stepRunId}/uploads`,
       secret,
@@ -111,6 +114,7 @@ export function createRunnerClient(baseUrl: string) {
         ref?: { branch: string; sha: string };
         output_data?: unknown;
         reason?: string;
+        artifacts?: { key: string; kind: string; content_type: string; size_bytes: number }[];
       },
     ) => postRunner<{ outcome: string; ref: unknown; output_data: unknown }>(
       baseUrl,

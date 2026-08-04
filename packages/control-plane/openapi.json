@@ -780,6 +780,9 @@
                 "key": {
                   "type": "string"
                 },
+                "blob_key": {
+                  "type": "string"
+                },
                 "upload_url": {
                   "type": "string"
                 },
@@ -789,6 +792,7 @@
               },
               "required": [
                 "key",
+                "blob_key",
                 "upload_url",
                 "expires_at"
               ]
@@ -808,24 +812,69 @@
           "requests": {
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "key": {
-                  "type": "string",
-                  "minLength": 1
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "artifact"
+                      ]
+                    },
+                    "size_bytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "kind",
+                    "size_bytes"
+                  ]
                 },
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "artifact",
-                    "session",
-                    "log"
+                {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "session"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "kind"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "log"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "kind"
                   ]
                 }
-              },
-              "required": [
-                "key",
-                "kind"
               ]
             },
             "maxItems": 64
@@ -1044,6 +1093,44 @@
           },
           "reason": {
             "type": "string"
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "diff",
+                    "transcript",
+                    "document",
+                    "structured",
+                    "command-output",
+                    "binary"
+                  ]
+                },
+                "content_type": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "size_bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "key",
+                "kind",
+                "content_type",
+                "size_bytes"
+              ]
+            },
+            "maxItems": 64
           }
         },
         "required": [
@@ -1107,6 +1194,68 @@
           "size",
           "getUrl",
           "expiresAt"
+        ]
+      },
+      "Artifact": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "diff",
+              "transcript",
+              "document",
+              "structured",
+              "command-output",
+              "binary"
+            ]
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "kind",
+          "contentType",
+          "sizeBytes",
+          "createdAt"
+        ]
+      },
+      "ArtifactRead": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Artifact"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "getUrl": {
+                "type": "string"
+              },
+              "expiresAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "getUrl",
+              "expiresAt"
+            ]
+          }
         ]
       }
     },
@@ -4777,6 +4926,211 @@
           },
           "503": {
             "description": "Too many hanging live-tail connections.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/step-runs/{id}/artifacts": {
+      "get": {
+        "summary": "Lists one StepRun's artifacts — metadata only, no bytes. The optional `key` filter is the per-key history query (spec: 'riwayat adalah kueri per key diurutkan menurut turn'): each turn is its own StepRun, so walking turns with ?key=prd yields the history. Project member.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "key",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ok.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "artifacts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Artifact"
+                      }
+                    }
+                  },
+                  "required": [
+                    "artifacts"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a Project member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such step run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/artifacts/{id}": {
+      "get": {
+        "summary": "One artifact: metadata plus a 5-minute presigned GET, minted only after the Project-membership check. The browser fetches the bytes straight from Garage. Project member.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ok.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactRead"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a Project member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such artifact.",
             "content": {
               "application/json": {
                 "schema": {

@@ -15,6 +15,12 @@ export {
   type Id,
 } from "./id.js";
 export { createLiteralRedactor, REDACTION_PLACEHOLDER } from "./redaction.js";
+export {
+  ARTIFACT_KINDS,
+  isArtifactKind,
+  normalizeArtifactKey,
+  type ArtifactKind,
+} from "./artifacts.js";
 
 export {
   validatePipelineDefinition,

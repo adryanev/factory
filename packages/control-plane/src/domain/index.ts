@@ -31,7 +31,17 @@ import type { RunListFilters, RunPage, RunWithGraph, TriggerRunInput, TriggeredR
 import type { DesiredState, HeartbeatLease, HeartbeatReply, RunnerIdentity } from "./runners.js";
 import type { ClaimedStepRun, ClaimInput } from "./step-run-claim.js";
 import * as stepRunLogsDomain from "./step-run-logs.js";
-import type { LogChunkInput, QuestionInput, ResultInput, ResultRecord, UploadGrant, UploadRequest } from "./step-run-turn.js";
+import * as stepRunArtifactsDomain from "./step-run-artifacts.js";
+import type {
+  ArtifactMetadataInput,
+  LogChunkInput,
+  QuestionInput,
+  ResultInput,
+  ResultRecord,
+  UploadGrant,
+  UploadRequest,
+} from "./step-run-turn.js";
+import type { ArtifactMeta, ArtifactRead } from "./step-run-artifacts.js";
 import type { ServiceAccountInfo, StoredSecret, PutSecretInput } from "./secrets.js";
 
 export type { Principal } from "./principal.js";
@@ -51,6 +61,7 @@ export type { LoginResult } from "./auth.js";
 export type { DesiredState, HeartbeatLease, HeartbeatReply, RunnerIdentity } from "./runners.js";
 export type { ClaimedStepRun, ClaimInput } from "./step-run-claim.js";
 export type {
+  ArtifactMetadataInput,
   LogChunkInput,
   QuestionInput,
   ResultInput,
@@ -58,6 +69,7 @@ export type {
   UploadGrant,
   UploadRequest,
 } from "./step-run-turn.js";
+export type { ArtifactMeta, ArtifactRead } from "./step-run-artifacts.js";
 export type { ServiceAccountInfo, StoredSecret, PutSecretInput } from "./secrets.js";
 
 export interface Domain {
@@ -156,6 +168,14 @@ export interface Domain {
       stepRunId: Id<"steprun">,
       input: { attempt?: number; offset: number },
     ) => Promise<stepRunLogsDomain.LogTailResult>;
+    /** Web surface, Project `member`: one StepRun's artifacts, metadata only. */
+    listArtifacts: (
+      principal: Principal,
+      stepRunId: Id<"steprun">,
+      key?: string,
+    ) => Promise<ArtifactMeta[]>;
+    /** Web surface, Project `member`: one artifact plus a freshly-minted presigned GET. */
+    getArtifact: (principal: Principal, artifactId: Id<"artifact">) => Promise<ArtifactRead>;
   };
   secrets: {
     createServiceAccount: (
@@ -238,6 +258,10 @@ export function createDomain(deps: AppDeps): Domain {
       cancel: (principal, stepRunId) => stepRunOpsDomain.cancelStepRun(deps, principal, stepRunId),
       readLogChunks: (principal, stepRunId, input) =>
         stepRunLogsDomain.readLogChunks(deps, principal, stepRunId, input),
+      listArtifacts: (principal, stepRunId, key) =>
+        stepRunArtifactsDomain.listStepRunArtifacts(deps, principal, stepRunId, key),
+      getArtifact: (principal, artifactId) =>
+        stepRunArtifactsDomain.getArtifact(deps, principal, artifactId),
     },
     secrets: {
       createServiceAccount: (principal, projectId, name) =>

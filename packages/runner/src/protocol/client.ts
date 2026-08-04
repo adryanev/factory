@@ -53,6 +53,8 @@ export interface UploadGrant {
   key: string;
   uploadUrl: string;
   expiresAt: string;
+  /** The exact object the PUT writes — the Runner records it, never guesses the bucket layout. */
+  blobKey: string;
 }
 
 export interface LogChunkWire {
@@ -61,6 +63,13 @@ export interface LogChunkWire {
   blobKey: string;
   byteOffset: number;
   size: number;
+}
+
+export interface ArtifactWire {
+  key: string;
+  kind: "diff" | "transcript" | "document" | "structured" | "command-output" | "binary";
+  contentType: string;
+  sizeBytes: number;
 }
 
 export interface ProtocolClient {
@@ -73,12 +82,14 @@ export interface ProtocolClient {
     ref?: { branch: string; sha: string };
     outputData?: unknown;
     reason?: string;
+    /** Metadata of the artifacts that already uploaded, riding this final request (spec: "Metadata Artifact menumpang request akhir itu"). */
+    artifacts?: ArtifactWire[];
   }): Promise<ResultReply>;
-  /** Mints presigned PUT grants for this turn's artifact/session/log objects — the Runner never asks for more than a URL (spec: "Presigned dua arah"). */
+  /** Mints presigned PUT grants for this turn's artifact/session/log objects — the Runner never asks for more than a URL (spec: "Presigned dua arah"). Artifacts declare `sizeBytes` so the quota is checked at URL-mint time, before a byte is uploaded. */
   mintUploadGrants(input: {
     stepRunId: string;
     leaseToken: string;
-    requests: { key: string; kind: "artifact" | "session" | "log" }[];
+    requests: { key: string; kind: "artifact" | "session" | "log"; sizeBytes?: number }[];
   }): Promise<UploadGrant[]>;
   /** Records log-chunk metadata after the bytes are already in the object store — dedup at the primary key, never a 409 (spec: "Log"). */
   recordLogChunks(input: { stepRunId: string; leaseToken: string; chunks: LogChunkWire[] }): Promise<void>;
@@ -146,13 +157,23 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
       return body;
     },
 
-    async reportResult({ stepRunId, leaseToken, outcome, ref, outputData, reason }) {
+    async reportResult({ stepRunId, leaseToken, outcome, ref, outputData, reason, artifacts }) {
       const { status, body } = await post<ResultReply>(`/step-runs/${stepRunId}/result`, {
         lease_token: leaseToken,
         outcome,
         ...(ref ? { ref } : {}),
         ...(outputData !== undefined ? { output_data: outputData } : {}),
         ...(reason !== undefined ? { reason } : {}),
+        ...(artifacts !== undefined && artifacts.length > 0
+          ? {
+              artifacts: artifacts.map((artifact) => ({
+                key: artifact.key,
+                kind: artifact.kind,
+                content_type: artifact.contentType,
+                size_bytes: artifact.sizeBytes,
+              })),
+            }
+          : {}),
       });
       if (status === 409) {
         throw new Error("result refused: lease no longer valid");
@@ -164,17 +185,21 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
     },
 
     async mintUploadGrants({ stepRunId, leaseToken, requests }) {
-      const { status, body } = await post<{ grants: { key: string; upload_url: string; expires_at: string }[] }>(
-        `/step-runs/${stepRunId}/uploads`,
-        { lease_token: leaseToken, requests },
-      );
+      const { status, body } = await post<{
+        grants: { key: string; blob_key: string; upload_url: string; expires_at: string }[];
+      }>(`/step-runs/${stepRunId}/uploads`, { lease_token: leaseToken, requests });
       if (status === 409) {
         throw new Error("uploads refused: lease no longer valid");
       }
       if (!(status >= 200 && status < 300)) {
         throw new Error(`uploads failed: HTTP ${status}`);
       }
-      return body.grants.map((grant) => ({ key: grant.key, uploadUrl: grant.upload_url, expiresAt: grant.expires_at }));
+      return body.grants.map((grant) => ({
+        key: grant.key,
+        uploadUrl: grant.upload_url,
+        expiresAt: grant.expires_at,
+        blobKey: grant.blob_key,
+      }));
     },
 
     async recordLogChunks({ stepRunId, leaseToken, chunks }) {

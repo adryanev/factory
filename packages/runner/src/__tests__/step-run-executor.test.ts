@@ -4,7 +4,7 @@
  * the token teardown are provable deterministically.
  */
 import { describe, expect, it } from "vitest";
-import { compileStepOutputContract, FACTORY_OUTPUT_TAG } from "@factory/shared";
+import { compileStepOutputContract, FACTORY_OUTPUT_TAG, type ArtifactKind } from "@factory/shared";
 import type { GitOps } from "../git/ops.js";
 import type { ClaimedStepRun, HeartbeatReply, LogChunkWire, ProtocolClient, ResultReply } from "../protocol/client.js";
 import {
@@ -63,6 +63,10 @@ function fakeGit(): GitOps & { calls: string[] } {
       calls.push(`ref-head ${ref}`);
       return "ref-sha";
     },
+    async diff(dir, base, head) {
+      calls.push(`diff ${base}..${head}`);
+      return `diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ +1 +1 @@\n+built\n`;
+    },
     async push(cloneDir, repoUrl, sha, branch, token) {
       calls.push(`push ${branch} ${sha} token=${token}`);
     },
@@ -77,13 +81,13 @@ function fakeProtocol(overrides: {
   heartbeatCancel?: string[];
   resultError?: boolean;
 } = {}): ProtocolClient & {
-  results: ResultReply[];
+  results: { outcome: string; ref: { branch: string; sha: string } | null; outputData: unknown; artifacts?: unknown }[];
   heartbeats: number;
   logChunks: LogChunkWire[];
   uploadGrants: number;
   questions: { id: string; groupId: string; kind: string; body: string; ref: { branch: string; sha: string } }[];
 } {
-  const results: ResultReply[] = [];
+  const results: { outcome: string; ref: { branch: string; sha: string } | null; outputData: unknown; artifacts?: unknown }[] = [];
   const logChunks: LogChunkWire[] = [];
   const questions: { id: string; groupId: string; kind: string; body: string; ref: { branch: string; sha: string } }[] = [];
   let heartbeats = 0;
@@ -109,13 +113,23 @@ function fakeProtocol(overrides: {
       };
     },
     async reportResult(input) {
-      results.push({ outcome: input.outcome, ref: input.ref ?? null, outputData: input.outputData });
+      results.push({
+        outcome: input.outcome,
+        ref: input.ref ?? null,
+        outputData: input.outputData,
+        ...(input.artifacts !== undefined ? { artifacts: input.artifacts } : {}),
+      });
       if (overrides.resultError) throw new Error("result refused: lease no longer valid");
       return { outcome: input.outcome, ref: input.ref ?? null, outputData: input.outputData };
     },
     async mintUploadGrants({ requests }) {
       uploadGrants += 1;
-      return requests.map((request) => ({ key: request.key, uploadUrl: `https://blob.invalid/put/${request.key}`, expiresAt: "2026-01-01T00:05:00.000Z" }));
+      return requests.map((request) => ({
+        key: request.key,
+        uploadUrl: `https://blob.invalid/put/${request.key}`,
+        expiresAt: "2026-01-01T00:05:00.000Z",
+        blobKey: `${request.kind}/steprun_1/${request.key}`,
+      }));
     },
     async recordLogChunks({ chunks }) {
       logChunks.push(...chunks);
@@ -174,9 +188,11 @@ function makeDeps(overrides: {
   repoDirFor?: (owner: string, name: string) => string;
   image?: string;
   heartbeatIntervalMs?: number;
+  artifactUploader?: ReturnType<typeof fakeArtifactUploader>;
 } = {}) {
   const git = overrides.git ?? fakeGit();
   const protocol = overrides.protocol ?? fakeProtocol();
+  const artifactUploader = overrides.artifactUploader ?? fakeArtifactUploader();
   let startTurnCalls: TurnSpec[] = [];
   const deps = {
     protocol,
@@ -185,12 +201,43 @@ function makeDeps(overrides: {
     sandboxImage: overrides.image ?? "factory-sandbox",
     heartbeatIntervalMs: overrides.heartbeatIntervalMs ?? 100,
     capabilities: { agentClis: [] as string[] },
+    artifactUploaderFor: () => artifactUploader,
     startTurn(spec: TurnSpec): Turn {
       startTurnCalls.push(spec);
       return overrides.turn ?? fakeTurn();
     },
   };
-  return { deps, git, protocol, get startTurnCalls() { return startTurnCalls; } };
+  return { deps, git, protocol, artifactUploader, get startTurnCalls() { return startTurnCalls; } };
+}
+
+/** Recording artifact-uploader fake — a PUT that "succeeds" unless told to fail the next N. */
+function fakeArtifactUploader() {
+  const calls: { artifacts: { key: string; kind: ArtifactKind; contentType: string; text: string }[] }[] = [];
+  let failTimes = 0;
+  return {
+    calls,
+    failNext(times: number) {
+      failTimes = times;
+    },
+    async uploadArtifacts(artifacts: { key: string; kind: ArtifactKind; contentType: string; text: string }[]) {
+      calls.push({ artifacts });
+      const uploaded: { key: string; kind: ArtifactKind; contentType: string; sizeBytes: number; blobKey: string }[] = [];
+      for (const artifact of artifacts) {
+        if (failTimes > 0) {
+          failTimes -= 1;
+          continue;
+        }
+        uploaded.push({
+          key: artifact.key,
+          kind: artifact.kind,
+          contentType: artifact.contentType,
+          sizeBytes: artifact.text.length,
+          blobKey: `artifact/steprun_1/${artifact.key}`,
+        });
+      }
+      return uploaded;
+    },
+  };
 }
 
 describe("step-run executor: the commit point", () => {
@@ -204,7 +251,12 @@ describe("step-run executor: the commit point", () => {
     expect(order.indexOf("fetch base-sha token=fetch-token")).toBeLessThan(order.indexOf("push run/run_1/build/t1-a1 commit-sha token=push-token"));
     expect(order.indexOf("push run/run_1/build/t1-a1 commit-sha token=push-token")).toBeLessThan(git.calls.length - 2); // revokes come last
     expect(protocol.results).toEqual([
-      { outcome: "succeeded", ref: { branch: "run/run_1/build/t1-a1", sha: "commit-sha" }, outputData: undefined },
+      {
+        outcome: "succeeded",
+        ref: { branch: "run/run_1/build/t1-a1", sha: "commit-sha" },
+        outputData: undefined,
+        artifacts: [{ key: "diff", kind: "diff", contentType: "text/x-diff", sizeBytes: 70 }],
+      },
     ]);
     // Teardown revokes the two tokens minted at /claim (AC4).
     expect(git.calls.filter((call) => call.startsWith("revoke"))).toEqual(["revoke fetch-token", "revoke push-token"]);
@@ -383,6 +435,53 @@ describe("step-run executor: the commit point", () => {
     expect(text).not.toContain("fetch-token");
     expect(protocol.results).toHaveLength(1); // /result still committed.
   });
+
+  it("AC6 — a succeeded turn materializes the diff (base..head) as an artifact, uploaded after the push and riding /result", async () => {
+    const { deps, git, protocol, artifactUploader } = makeDeps();
+
+    await executeClaimedTurn(deps, claimFixture());
+
+    // The diff was computed from the base ref to the pushed sha...
+    expect(git.calls).toContain("diff base-sha..commit-sha");
+    // ...after the push, before the turn-ending POST.
+    const pushIndex = git.calls.indexOf("push run/run_1/build/t1-a1 commit-sha token=push-token");
+    const diffIndex = git.calls.indexOf("diff base-sha..commit-sha");
+    expect(pushIndex).toBeGreaterThan(-1);
+    expect(diffIndex).toBeGreaterThan(pushIndex);
+
+    // One batch, one diff artifact, uploaded peer-to-peer.
+    expect(artifactUploader.calls).toEqual([
+      { artifacts: [{ key: "diff", kind: "diff", contentType: "text/x-diff", text: "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ +1 +1 @@\n+built\n" }] },
+    ]);
+
+    // The metadata rides /result.
+    expect(protocol.results[0]!.artifacts).toEqual([
+      { key: "diff", kind: "diff", contentType: "text/x-diff", sizeBytes: 70 },
+    ]);
+  });
+
+  it("AC5 — a permanently-failed diff upload is simply not listed; the StepRun still succeeds", async () => {
+    const artifactUploader = fakeArtifactUploader();
+    artifactUploader.failNext(1);
+    const { deps, protocol } = makeDeps({ artifactUploader });
+
+    await executeClaimedTurn(deps, claimFixture());
+
+    expect(protocol.results).toEqual([
+      { outcome: "succeeded", ref: { branch: "run/run_1/build/t1-a1", sha: "commit-sha" }, outputData: undefined },
+    ]);
+    expect(protocol.results[0]!.artifacts).toBeUndefined();
+  });
+
+  it("a failed turn materializes no diff and reports no artifacts — the branch is an orphan either way", async () => {
+    const { deps, git, protocol } = makeDeps({ turn: fakeTurn({ exitCode: 3, stdout: "boom" }) });
+
+    await executeClaimedTurn(deps, claimFixture());
+
+    expect(git.calls.some((call) => call.startsWith("diff"))).toBe(false);
+    expect(protocol.results[0]).toMatchObject({ outcome: "failed" });
+    expect(protocol.results[0]!.artifacts).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -525,6 +624,7 @@ describe("agent Steps: the executor flow", () => {
         outcome: "succeeded",
         ref: { branch: "run/run_1/plan/t1-a1", sha: "commit-sha" },
         outputData: { kind: "done", outputs: { variants: [{ key: "agent-a", brief: "b" }] } },
+        artifacts: [{ key: "diff", kind: "diff", contentType: "text/x-diff", sizeBytes: 70 }],
       },
     ]);
   });

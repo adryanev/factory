@@ -32,9 +32,11 @@
  * user from the Runner; AC6: default-deny egress rules for that user are
  * applied through `deps.egress` before the first spawn.
  */
+import { Output, StructuredOutputError, run } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { FACTORY_OUTPUT_TAG } from "@factory/shared";
 import { createFactoryHostProvider } from "./host-provider.js";
-import type { Turn, TurnResult, TurnRuntimeDeps, TurnSpec } from "./types.js";
+import type { AgentTurnSpec, Turn, TurnResult, TurnRuntimeDeps, TurnSpec } from "./types.js";
 
 /** "→ SIGTERM → tunggu 30 detik → SIGKILL" — docker's `--time` grace (spec: Cancel). */
 export const DOCKER_STOP_GRACE_SECONDS = 30;
@@ -43,6 +45,21 @@ export class TurnCancelledError extends Error {
   constructor() {
     super("turn was cancelled");
     this.name = "TurnCancelledError";
+  }
+}
+
+/**
+ * Thrown by an agent turn when the agent's single `<factory-output>` tag
+ * failed sandcastle's structured-output extraction or validation — after the
+ * `maxRetries` resume attempts were exhausted (AC7). Distinct from
+ * `TurnCancelledError` and from a seam fault: the executor turns it into
+ * `failed` with `reason: output-invalid`, never into a turn fault.
+ */
+export class OutputInvalidError extends Error {
+  constructor(cause: StructuredOutputError) {
+    super(`output-invalid: ${cause.message}`);
+    this.name = "OutputInvalidError";
+    this.cause = cause;
   }
 }
 
@@ -61,6 +78,9 @@ export function shellEnvPrefix(secrets: Record<string, string>): string {
 export function createTurnRuntime(deps: TurnRuntimeDeps) {
   return {
     startTurn(spec: TurnSpec): Turn {
+      if (spec.kind === "agent") {
+        return startAgentTurn(deps, spec);
+      }
       if (spec.kind !== "shell") {
         throw new Error(`unsupported turn kind: ${(spec as { kind: string }).kind}`);
       }
@@ -148,6 +168,118 @@ export function createTurnRuntime(deps: TurnRuntimeDeps) {
           }
         },
       };
+    },
+  };
+}
+
+/**
+ * An agent Step's turn: sandcastle's own `run()` with the compiled
+ * discriminated union as `Output.object({ tag, schema, maxRetries })`. This
+ * is where the single `<factory-output>` tag is extracted and validated with
+ * the one shared schema, where the agent's self-correction happens
+ * (`maxRetries` resume-and-feedback loops), and where `run()` "fails at
+ * entry" if a retry was requested for a provider that cannot resume — which
+ * the Runner avoids by deriving `maxRetries` from capabilities (AC8).
+ *
+ * The turn also streams the agent's raw stdout lines into the live-log sink
+ * (`onLine`), reports the validated Output and the captured session so the
+ * executor can classify `question` vs `done` and (later) resume, and throws
+ * `OutputInvalidError` — not a seam fault — when the Output was rejected.
+ */
+function startAgentTurn(deps: TurnRuntimeDeps, spec: AgentTurnSpec): Turn {
+  let cancelled = false;
+  const abort = new AbortController();
+
+  const done = (async (): Promise<TurnResult> => {
+    if (spec.runsOn === "docker") {
+      await deps.docker.createNetwork(spec.network).catch(() => {});
+    }
+
+    const sandboxProvider =
+      spec.runsOn === "docker"
+        ? docker({ imageName: spec.image, network: spec.network })
+        : createFactoryHostProvider({
+            hostProcess: deps.hostProcess,
+            // Cancel for an agent turn goes through the AbortSignal sandcastle
+            // wires to the agent subprocess; there is no single pgid to track.
+            shouldSkip: () => cancelled,
+            ...(spec.secrets === undefined ? {} : { env: spec.secrets }),
+            ...(deps.hostAgentUser === undefined ? {} : { runAsUser: deps.hostAgentUser }),
+            ...(deps.egress === undefined ? {} : { egress: deps.egress }),
+            ...(spec.egressAllowlist === undefined ? {} : { egressAllowlist: spec.egressAllowlist }),
+          });
+
+    try {
+      const result = await run({
+        agent: deps.agentProviderFor(spec.agent),
+        sandbox: sandboxProvider,
+        cwd: spec.workingDirectory,
+        prompt: spec.prompt,
+        maxIterations: 1,
+        branchStrategy: { type: "branch", branch: spec.branch, baseBranch: spec.baseRef },
+        output: Output.object({
+          tag: FACTORY_OUTPUT_TAG,
+          // `compileStepOutputContract` returns a Zod schema, which is a
+          // Standard Schema — exactly what `Output.object` accepts.
+          schema: spec.outputContract as Parameters<typeof Output.object>[0]["schema"],
+          maxRetries: spec.maxRetries,
+        }),
+        ...(spec.resumeSession !== undefined ? { resumeSession: spec.resumeSession } : {}),
+        signal: abort.signal,
+        ...(spec.onLine
+          ? {
+              logging: {
+                type: "file" as const,
+                path: `${spec.workingDirectory}/.sandcastle/logs/${spec.branch}.log`,
+                verbose: true,
+                onAgentStreamEvent: (event: import("@ai-hero/sandcastle").AgentStreamEvent) => {
+                  if (event.type === "raw") spec.onLine?.(event.line);
+                },
+              },
+            }
+          : {}),
+      });
+      if (cancelled) {
+        throw new TurnCancelledError();
+      }
+
+      const lastIteration = result.iterations.at(-1);
+      return {
+        stdout: result.stdout,
+        exitCode: 0,
+        worktreePath: "",
+        preservedWorktreePath: result.preservedWorktreePath ?? null,
+        output: (result as { output?: unknown }).output,
+        ...(lastIteration?.sessionId !== undefined ? { sessionId: lastIteration.sessionId } : {}),
+        ...(lastIteration?.sessionFilePath !== undefined ? { sessionFilePath: lastIteration.sessionFilePath } : {}),
+      };
+    } catch (error) {
+      if (cancelled) {
+        throw new TurnCancelledError();
+      }
+      if (error instanceof StructuredOutputError) {
+        throw new OutputInvalidError(error);
+      }
+      throw error;
+    } finally {
+      if (spec.runsOn === "docker") {
+        await deps.docker.removeNetwork(spec.network).catch(() => {});
+      }
+    }
+  })();
+
+  return {
+    done,
+    cancel(): void {
+      if (cancelled) return;
+      cancelled = true;
+      abort.abort();
+      if (spec.runsOn === "docker") {
+        void deps.docker
+          .containerIdsOnNetwork(spec.network)
+          .then((ids) => deps.docker.stop(ids, DOCKER_STOP_GRACE_SECONDS))
+          .catch(() => {});
+      }
     },
   };
 }

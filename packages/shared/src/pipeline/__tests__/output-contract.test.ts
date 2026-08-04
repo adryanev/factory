@@ -4,6 +4,8 @@ import {
   compileOutputsSchema,
   compileStepOutputContract,
   generateFormatInstructions,
+  outputsMapSchema,
+  renderFinalPrompt,
   type OutputsMap,
 } from "../output-contract.js";
 
@@ -89,5 +91,41 @@ describe("generateFormatInstructions", () => {
     expect(withoutAsk).not.toContain('"kind":"question"');
     expect(withAsk).toContain('"kind":"question"');
     expect(withAsk).toContain('"kind":"approval"');
+  });
+});
+
+describe("output keys are constrained to [a-z0-9][a-z0-9._-]{0,63} (issue 9, AC2)", () => {
+  it("rejects an agent-emitted Key value that is not git-ref-safe, so the agent can fix itself in-turn", () => {
+    const schema = compileOutputsSchema(variantsOutputs);
+    expect(schema.safeParse({ variants: [{ key: "agent-a", brief: "b" }] }).success).toBe(true);
+    // The same shape with a Key the agent invented that would break at
+    // fan-out is rejected here — with the session still alive (AC2).
+    const bad = schema.safeParse({ variants: [{ key: "My Agent A!", brief: "b" }] });
+    expect(bad.success).toBe(false);
+    if (!bad.success) {
+      expect(bad.error.issues[0]?.message).toContain("[a-z0-9]");
+    }
+  });
+
+  it("does not constrain non-key string fields", () => {
+    const schema = compileOutputsSchema({ brief: { type: "string" } });
+    expect(schema.safeParse({ brief: "Anything at all." }).success).toBe(true);
+  });
+
+  it("does not constrain declared output names (the winning prototype names one prTitle)", () => {
+    expect(outputsMapSchema.safeParse({ prTitle: { type: "string" } }).success).toBe(true);
+  });
+});
+
+describe("renderFinalPrompt", () => {
+  it("appends the format-instruction block to the Step's own prompt text", () => {
+    const final = renderFinalPrompt("Plan three variants.\n", variantsOutputs);
+    expect(final.startsWith("Plan three variants.\n\n")).toBe(true);
+    expect(final).toContain(`<${FACTORY_OUTPUT_TAG}>`);
+    expect(final).toContain('"kind":"done"');
+  });
+
+  it("is the format block alone when there is no base prompt", () => {
+    expect(renderFinalPrompt(undefined, { outputs: {} })).toBe(generateFormatInstructions({ outputs: {} }));
   });
 });

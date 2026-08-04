@@ -6,10 +6,17 @@
  * wall-clock) are provable deterministically.
  */
 import { describe, expect, it } from "vitest";
-import type { Sandbox, SandboxProvider } from "@ai-hero/sandcastle";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import { compileStepOutputContract, FACTORY_OUTPUT_TAG } from "@factory/shared";
+import type { AgentProvider, Sandbox, SandboxProvider } from "@ai-hero/sandcastle";
 import type { EgressControl } from "../egress.js";
 import { createFactoryHostProvider } from "../host-provider.js";
-import { createTurnRuntime, TurnCancelledError } from "../runtime.js";
+import { createHostProcessControl } from "../host-process.js";
+import { createTurnRuntime, OutputInvalidError, TurnCancelledError } from "../runtime.js";
 import type { DockerControl, HostProcessControl, TurnRuntimeDeps } from "../types.js";
 
 function fakeSandbox(overrides: {
@@ -136,6 +143,7 @@ function makeDeps(overrides: {
   hostProcess?: ReturnType<typeof fakeHostProcess>;
   hostAgentUser?: string;
   egress?: ReturnType<typeof fakeEgress>;
+  agentProviderFor?: TurnRuntimeDeps["agentProviderFor"];
 } = {}): TurnRuntimeDeps & {
   createdProviders: SandboxProvider[];
   sandbox: ReturnType<typeof fakeSandbox>;
@@ -154,6 +162,9 @@ function makeDeps(overrides: {
     docker,
     hostProcess,
     egress,
+    agentProviderFor: overrides.agentProviderFor ?? (() => {
+      throw new Error("no agent provider in this test");
+    }),
     ...(overrides.hostAgentUser !== undefined ? { hostAgentUser: overrides.hostAgentUser } : {}),
     ...(overrides.egress !== undefined ? { egress: overrides.egress } : {}),
     async createSandbox(options) {
@@ -337,5 +348,113 @@ describe("agent-runtime: shell turn", () => {
     const turn = runtime.startTurn({ ...shellSpec, egressAllowlist: ["github.com"] });
     await turn.done;
     expect(egress.applied).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Agent turns (issue 9) — the real sandcastle `run()` is driven with a fake
+// *agent provider* whose "agent" is a shell command that echoes the single
+// `<factory-output>` tag, exactly like the seam-2 fakes but through the real
+// seam. No LLM is ever called; the worktree is a throwaway git repo.
+// ---------------------------------------------------------------------------
+
+const execFileAsync = promisify(execFile);
+
+async function makeTempGitRepo(): Promise<string> {
+  const dir = await mkdtemp(path.join(tmpdir(), "factory-agent-turn-"));
+  await execFileAsync("git", ["init", "-q", "-b", "main", dir]);
+  await writeFile(path.join(dir, "a.txt"), "a\n");
+  await execFileAsync("git", ["-C", dir, "add", "-A"]);
+  await execFileAsync("git", ["-C", dir, "-c", "user.name=test", "-c", "user.email=test@factory", "commit", "-q", "-m", "init"]);
+  return dir;
+}
+
+/** An agent provider whose whole "agent" is a shell command that echoes the tag payload. */
+function tagEmittingProvider(payload: string): AgentProvider {
+  const tag = FACTORY_OUTPUT_TAG;
+  const escaped = payload.replace(/'/g, `'\\''`);
+  return {
+    name: "factory-test-agent",
+    env: {},
+    captureSessions: false,
+    buildPrintCommand: () => ({ command: `echo '<${tag}>${escaped}</${tag}>'` }),
+    parseStreamLine: () => [],
+  };
+}
+
+describe("agent-runtime: agent turn (issue 9)", () => {
+  it("runs the agent in the sandbox, and the single <factory-output> tag comes back validated against the shared union", async () => {
+    const repoDir = await makeTempGitRepo();
+    try {
+      const contract = compileStepOutputContract({
+        outputs: { variants: { type: "array", items: { key: "string", brief: "string" } } },
+      });
+      const deps: TurnRuntimeDeps = {
+        docker: fakeDocker(),
+        hostProcess: createHostProcessControl(),
+        createSandbox: async () => {
+          throw new Error("agent turns use run(), never createSandbox");
+        },
+        agentProviderFor: () =>
+          tagEmittingProvider('{"kind":"done","outputs":{"variants":[{"key":"agent-a","brief":"b"}]}}'),
+      };
+      const runtime = createTurnRuntime(deps);
+      const turn = runtime.startTurn({
+        kind: "agent",
+        prompt: `Plan three variants.\n\n<${FACTORY_OUTPUT_TAG}>`,
+        agent: "fake",
+        outputContract: contract,
+        maxRetries: 0,
+        workingDirectory: repoDir,
+        branch: "run/x/plan/t1-a1",
+        baseRef: "main",
+        runsOn: "host",
+        image: "factory-sandbox",
+        network: "factory-steprun-1",
+      });
+
+      const result = await turn.done;
+      expect(result.output).toEqual({
+        kind: "done",
+        outputs: { variants: [{ key: "agent-a", brief: "b" }] },
+      });
+      expect(result.stdout).toContain(`<${FACTORY_OUTPUT_TAG}>`);
+      expect(result.exitCode).toBe(0);
+    } finally {
+      await rm(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  it("a rejected Output surfaces as OutputInvalidError (never a seam fault), so the executor can report output-invalid", async () => {
+    const repoDir = await makeTempGitRepo();
+    try {
+      const contract = compileStepOutputContract({ outputs: { summary: { type: "string" } } });
+      const deps: TurnRuntimeDeps = {
+        docker: fakeDocker(),
+        hostProcess: createHostProcessControl(),
+        createSandbox: async () => {
+          throw new Error("agent turns use run(), never createSandbox");
+        },
+        agentProviderFor: () => tagEmittingProvider('{"kind":"done","outputs":{"summary":42}}'),
+      };
+      const runtime = createTurnRuntime(deps);
+      const turn = runtime.startTurn({
+        kind: "agent",
+        prompt: `Summarise.\n\n<${FACTORY_OUTPUT_TAG}>`,
+        agent: "fake",
+        outputContract: contract,
+        maxRetries: 0,
+        workingDirectory: repoDir,
+        branch: "run/x/plan/t1-a1",
+        baseRef: "main",
+        runsOn: "host",
+        image: "factory-sandbox",
+        network: "factory-steprun-1",
+      });
+
+      await expect(turn.done).rejects.toThrow(OutputInvalidError);
+    } finally {
+      await rm(repoDir, { recursive: true, force: true });
+    }
   });
 });

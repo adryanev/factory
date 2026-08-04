@@ -40,6 +40,9 @@ function fakeProtocol(records: { key: string; kind: string }[] = []): {
       async recordLogChunks({ chunks }) {
         recorded.push(...chunks);
       },
+      async submitQuestion() {
+        throw new Error("unused");
+      },
     },
     minted,
     recorded,

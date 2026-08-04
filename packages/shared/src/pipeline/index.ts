@@ -8,6 +8,7 @@ export {
   compileOutputsSchema,
   compileStepOutputContract,
   generateFormatInstructions,
+  renderFinalPrompt,
   questionSchema,
   FACTORY_OUTPUT_TAG,
   SCALAR_TYPES,

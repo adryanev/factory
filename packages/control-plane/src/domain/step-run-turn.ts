@@ -17,7 +17,8 @@
  */
 import { and, eq } from "drizzle-orm";
 import type { Id } from "@factory/shared";
-import { logChunks, questions, stepRuns } from "../db/schema.js";
+import { compileStepOutputContract, validatePipelineDefinition } from "@factory/shared";
+import { logChunks, questions, runs, stepRuns } from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
 import { DomainValidationError, LeaseConflictError } from "./errors.js";
 import type { RunnerIdentity } from "./runners.js";
@@ -243,6 +244,50 @@ function toResultRecord(row: StepRunRow): ResultRecord {
 }
 
 /**
+ * The authoritative gate on an agent Step's Output (issue 9, AC6/AC7): the
+ * `output_data` a Runner reports at `/result` is checked against the *same*
+ * discriminated union the Runner itself compiled from the same definition
+ * snapshot (`compileStepOutputContract`, shared by both sides). Only the
+ * `done` arm may arrive here — a `question` has its own endpoint and its own
+ * commit point (`/question`); an Output that fails this gate turns the whole
+ * turn into `failed` with `reason: output-invalid`, consuming the ordinary
+ * attempt, and the branch that was already pushed becomes an orphan for GC.
+ *
+ * Returns `no-contract` when the Step has no output contract (`run:` Steps
+ * report no `output_data` and are never gated), `invalid` when the Output
+ * fails the union, and the parsed `done` arm when valid.
+ */
+function checkStepOutput(
+  definition: unknown,
+  stepKey: string,
+  outputData: unknown,
+): { kind: "no-contract" } | { kind: "invalid" } | { kind: "done"; outputs: unknown } {
+  if (typeof definition !== "string") {
+    return { kind: "no-contract" }; // no snapshot to validate against — a run: Step.
+  }
+  const validation = validatePipelineDefinition(definition);
+  if (!validation.valid) {
+    // The definition validated at trigger time; a re-validation failure here
+    // is a control-plane inconsistency, not a Runner's fault to absorb.
+    return { kind: "no-contract" };
+  }
+  const step = validation.pipeline.steps[stepKey];
+  if (!step || (step.outputs === undefined && step.ask === undefined)) {
+    return { kind: "no-contract" };
+  }
+
+  const contract = compileStepOutputContract({
+    ...(step.outputs !== undefined ? { outputs: step.outputs } : {}),
+    ...(step.ask !== undefined ? { ask: step.ask } : {}),
+  });
+  const parsed = contract.safeParse(outputData);
+  if (!parsed.success || (parsed.data as { kind?: string }).kind !== "done") {
+    return { kind: "invalid" };
+  }
+  return { kind: "done", outputs: (parsed.data as { outputs: unknown }).outputs };
+}
+
+/**
  * Ends a turn successfully or with failure. Idempotency keys on
  * `lease_token` itself, not a new field (spec: "nol kunci baru ... `/result`
  * dijaga lease_token itu sendiri"): the same token replays the previously
@@ -286,6 +331,32 @@ export async function submitResult(
       "result_ref_required",
       "a succeeded step run must report the ref it pushed (push branch → upload blob → POST /result)",
     );
+  }
+
+  // The authoritative Output gate (AC6/AC7). The Runner may have validated
+  // for live feedback while the session was still alive; this is where the
+  // Output is allowed or rejected for good, because it is the only thing
+  // that moves scheduling. A rejected Output makes the whole turn `failed`
+  // with `reason: output-invalid`, consuming the ordinary attempt — the
+  // branch it already pushed is an orphan for the retention GC.
+  let checked: ReturnType<typeof checkStepOutput> = { kind: "no-contract" };
+  if (input.outcome === "succeeded") {
+    const [run] = await deps.db.select().from(runs).where(eq(runs.id, row.runId));
+    checked = checkStepOutput(run?.definition, row.stepKey, input.outputData);
+  }
+  if (checked.kind === "invalid") {
+    const [updated] = await deps.db
+      .update(stepRuns)
+      .set({
+        outcome: "failed",
+        reason: "output-invalid",
+        outputRefBranch: input.ref?.branch ?? null,
+        outputRefSha: input.ref?.sha ?? null,
+        outputData: null,
+      })
+      .where(eq(stepRuns.id, stepRunId))
+      .returning();
+    return toResultRecord(updated!);
   }
 
   const [updated] = await deps.db

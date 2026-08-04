@@ -55,15 +55,66 @@ export interface ShellTurnSpec {
 }
 
 /**
- * The seam grows by discriminated union — issue 9 (agent Steps) adds `kind: "agent"`. */
-export type TurnSpec = ShellTurnSpec;
+ * An agent Step's turn (issue 9): the coding agent runs in the sandbox with
+ * the *final* prompt — the Step's own prompt text plus the generated
+ * format-instruction block (AC4: "Blok instruksi dibangkitkan Runner dari
+ * `outputs:` dan ditempelkan ke prompt") — and emits exactly one
+ * `<factory-output>` XML tag in its stdout. Everything the seam needs about
+ * the Output contract is carried here: the compiled discriminated union
+ * (the one schema, from `@factory/shared`), the system tag name, and the
+ * `maxRetries` the Runner derived from the agent's capabilities (AC8) —
+ * sandcastle's `run()` fails at entry when retries are requested for an
+ * agent that cannot resume, so the derivation and the provider must agree.
+ */
+export interface AgentTurnSpec {
+  kind: "agent";
+  /** The final prompt to send — prompt file content plus the format-instruction block. */
+  prompt: string;
+  /** The coding agent CLI, one of the Runner's `KNOWN_AGENT_CLI_NAMES`. */
+  agent: string;
+  /**
+   * The compiled discriminated union (`compileStepOutputContract`), passed
+   * to sandcastle's `Output.object({ tag, schema, maxRetries })`. Typed as
+   * `unknown` because the runner package must not import zod directly — it
+   * reaches zod only through `@factory/shared`; the seam casts it to the
+   * Standard Schema `Output.object` expects.
+   */
+  outputContract: unknown;
+  /** Derived from agent capabilities (AC8): a resumable agent → 2, else 0. */
+  maxRetries: number;
+  /** Resume a prior agent session by id (a follow-up turn after the agent asked a human). */
+  resumeSession?: string;
+  /** Host-side clone dir — the `cwd` anchor sandcastle creates its worktree under. */
+  workingDirectory: string;
+  /** The named branch this turn works on (see `@factory/shared`'s `stepRunBranchName`). */
+  branch: string;
+  /** Commit the named branch forks from — the StepRun's claimed base ref. */
+  baseRef: string;
+  runsOn: RunsOn;
+  /** Docker image for the built-in docker provider (`docker` mode). */
+  image: string;
+  /** Per-StepRun docker network (`docker` mode) — the boundary `cancel()` stops containers on. */
+  network: string;
+  /** The Project's secrets (AC5) — handed to the agent call, never a file. */
+  secrets?: Record<string, string>;
+  /** The Project's default-deny egress allowlist (AC6). */
+  egressAllowlist?: string[];
+  /** Streamed stdout line sink (the live-log chunk source). */
+  onLine?: (line: string) => void;
+}
+
+/**
+ * The seam grows by discriminated union — issue 9 (agent Steps) adds
+ * `kind: "agent"` alongside the issue 6 `kind: "shell"`.
+ */
+export type TurnSpec = ShellTurnSpec | AgentTurnSpec;
 
 export interface TurnResult {
-  /** Combined stdout the command produced. */
+  /** Combined stdout the command produced. For an agent turn this is the raw agent stdout, including the single `<factory-output>` tag. */
   stdout: string;
-  /** The shell command's exit code — 0 is success, anything else is a failed turn. */
+  /** The shell command's exit code — 0 is success, anything else is a failed turn. Always 0 for a resolving agent turn (sandcastle's `run()` throws rather than return a non-zero exit). */
   exitCode: number;
-  /** Host-side worktree path the named branch was checked out in. */
+  /** Host-side worktree path the named branch was checked out in. Empty for agent turns — sandcastle's `run()` manages its own worktree. */
   worktreePath: string;
   /**
    * Non-null exactly when teardown preserved the worktree because it had
@@ -71,6 +122,19 @@ export interface TurnResult {
    * the worktree was clean (and removed), meaning there is nothing to commit.
    */
   preservedWorktreePath: string | null;
+  /**
+   * The turn's structured Output, when the seam already extracted and
+   * validated it (agent turns run through sandcastle's `Output.object` with
+   * the one shared schema, so this is already conformant). Absent for shell
+   * turns and for agent turns whose Output was rejected — the executor
+   * falls back to parsing the tag from `stdout`, and a rejected Output
+   * surfaces as `OutputInvalidError` instead.
+   */
+  output?: unknown;
+  /** The agent session id captured by the turn, when available. */
+  sessionId?: string;
+  /** Host path to the captured session JSONL, when available. */
+  sessionFilePath?: string;
 }
 
 export interface Turn {
@@ -117,4 +181,11 @@ export interface TurnRuntimeDeps {
   hostAgentUser?: string;
   /** Egress enforcement (AC6) — when present, `exec:host` installs default-deny allowlist rules for the agent user. */
   egress?: import("./egress.js").EgressControl;
+  /**
+   * Builds the sandcastle `AgentProvider` for an agent CLI name (issue 9's
+   * agent turns). Injectable so tests can substitute a provider without
+   * dialing a real agent CLI; the production default maps the known CLIs to
+   * sandcastle's own providers.
+   */
+  agentProviderFor: (name: string) => import("@ai-hero/sandcastle").AgentProvider;
 }

@@ -10,9 +10,9 @@
  * menggantung" (spec) — this is deliberately not `LISTEN/NOTIFY` (explicitly
  * deferred in "Out of Scope": "aturan 'ukur sebelum optimasi' menahannya").
  */
-import { eq } from "drizzle-orm";
-import { isProtocolVersionSupported, type Id } from "@factory/shared";
-import { githubAppInstallations, projects, repositories, runs, stepRuns } from "../db/schema.js";
+import { and, eq } from "drizzle-orm";
+import { isProtocolVersionSupported, renderFinalPrompt, validatePipelineDefinition, type Id } from "@factory/shared";
+import { githubAppInstallations, groups, projects, repositories, runs, stepRuns } from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
 import { loadSqlStatement } from "../db/sql/load.js";
 import { ProtocolVersionError } from "./errors.js";
@@ -74,6 +74,15 @@ export interface ClaimedStepRun {
    * egress (AC6).
    */
   egressAllowlist: string[];
+  /**
+   * The id of the Group an interactive Step's `ask:` addresses, resolved by
+   * the control plane at claim time (spec: "Runner tidak pernah menanyakan
+   * apa pun tentang dunia; semua yang ia butuh ikut di muatan /claim"). Null
+   * for non-interactive Steps — and for an interactive Step whose `ask.group`
+   * names no Group of this Project, in which case the Runner's Question POST
+   * will be refused at the door.
+   */
+  askGroupId: Id<"group"> | null;
 }
 
 export interface ClaimInput {
@@ -120,6 +129,32 @@ async function hydrateClaimedRow(
   if (!installation) {
     throw new Error(`repository ${repository.id} references a missing github app installation`);
   }
+
+  // The one place this StepRun's final prompt is pinned down (AC5): the same
+  // shared `renderFinalPrompt` the Runner uses to build the prompt it sends,
+  // persisted on the row the moment the turn is claimed so the UI can show
+  // "prompt final yang dikirim" — not the verbatim file content. Null for
+  // run: Steps, which have no prompt.
+  const step = parseSnapshotStep(run.definition, row.step_key);
+  const finalPrompt = step ? finalPromptForStep(run.definitionFiles, step) : null;
+  if (finalPrompt !== null) {
+    await deps.db
+      .update(stepRuns)
+      .set({ finalPrompt })
+      .where(eq(stepRuns.id, row.id));
+  }
+
+  // The Group an interactive Step's `ask:` names, resolved here — the Runner
+  // never asks the world anything.
+  let askGroupId: Id<"group"> | null = null;
+  if (step?.ask) {
+    const [group] = await deps.db
+      .select({ id: groups.id })
+      .from(groups)
+      .where(and(eq(groups.projectId, run.projectId), eq(groups.name, step.ask.group)));
+    askGroupId = group?.id ?? null;
+  }
+
   return {
     id: row.id,
     runId: row.run_id,
@@ -141,7 +176,32 @@ async function hydrateClaimedRow(
     gitTokens: await mintTurnTokens(deps, repository.owner, repository.name, installation.installationId),
     secrets: await resolveSecretsForPrincipal(deps, run.projectId, run.credentialPrincipalId),
     egressAllowlist: project.egressAllowlist,
+    askGroupId,
   };
+}
+
+/** Parses the claimed run's definition snapshot and returns the Step named by `stepKey`, or undefined when the snapshot is unusable. */
+function parseSnapshotStep(definition: unknown, stepKey: string): import("@factory/shared").Pipeline["steps"][string] | undefined {
+  if (typeof definition !== "string") return undefined;
+  const validation = validatePipelineDefinition(definition);
+  if (!validation.valid) return undefined;
+  return validation.pipeline.steps[stepKey];
+}
+
+/** The final prompt for a Step — its own prompt text (promptFile content or inline prompt) plus the format-instruction block. Null when the Step has no prompt. */
+function finalPromptForStep(
+  definitionFiles: unknown,
+  step: ReturnType<typeof parseSnapshotStep>,
+): string | null {
+  if (!step) return null;
+  const basePrompt = step.promptFile
+    ? (definitionFiles as Record<string, string> | undefined)?.[step.promptFile]
+    : step.prompt;
+  if (basePrompt === undefined) return null;
+  return renderFinalPrompt(basePrompt, {
+    ...(step.outputs !== undefined ? { outputs: step.outputs } : {}),
+    ...(step.ask !== undefined ? { ask: step.ask } : {}),
+  });
 }
 
 /**

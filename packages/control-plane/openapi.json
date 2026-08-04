@@ -302,6 +302,10 @@
           },
           "outputData": {
             "nullable": true
+          },
+          "finalPrompt": {
+            "type": "string",
+            "nullable": true
           }
         },
         "required": [
@@ -319,7 +323,8 @@
           "readyAt",
           "startedAt",
           "outputRefBranch",
-          "outputRefSha"
+          "outputRefSha",
+          "finalPrompt"
         ]
       },
       "RunDetail": {
@@ -574,6 +579,10 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "ask_group_id": {
+                "type": "string",
+                "nullable": true
               }
             },
             "required": [
@@ -589,7 +598,8 @@
               "lease_expires_at",
               "git_tokens",
               "secrets",
-              "egress_allowlist"
+              "egress_allowlist",
+              "ask_group_id"
             ]
           }
         },

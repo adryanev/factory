@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { KEY_PATTERN, KEY_PATTERN_DESCRIPTION } from "./key.js";
 
 /**
  * The Output contract: a small type language of its own (spec.md, "Kontrak
@@ -13,6 +14,15 @@ import { z } from "zod";
  * scalar type and do not nest. Every field is required — optionality does
  * not exist in v1. `description:` is optional and has exactly one reader:
  * the format-instruction block generator below.
+ *
+ * Two identifier shapes carry the Key constraint `[a-z0-9][a-z0-9._-]{0,63}`
+ * (issue 9, AC2): the `key` field inside an array's flat object — what a
+ * `branchesFrom` reads to fan out — constrains the *value* in the compiled
+ * schema, not only at fan-out, so an agent whose emitted Key is not
+ * git-ref-safe fixes itself inside the turn, while the session is still
+ * alive. The declared `outputs:` names themselves are deliberately *not*
+ * constrained (the winning prototype names an Output `prTitle`), and the
+ * agent is told them rather than asked to invent them.
  */
 
 export const SCALAR_TYPES = ["string", "number", "boolean"] as const;
@@ -59,7 +69,12 @@ function scalarZod(type: ScalarType): z.ZodTypeAny {
 function flatObjectZod(descriptor: FlatObjectDescriptor): z.ZodTypeAny {
   const shape: Record<string, z.ZodTypeAny> = {};
   for (const [field, type] of Object.entries(descriptor)) {
-    shape[field] = scalarZod(type);
+    // A field named `key` is the fan-out Key (`branchesFrom` reads it) — it
+    // compiles to a `string` constrained to the Key pattern, so an agent that
+    // emits a Key that is not git-ref-safe is rejected *here*, with the
+    // session still alive, instead of at fan-out (issue 9, AC2).
+    shape[field] =
+      field === "key" ? z.string().regex(KEY_PATTERN, KEY_PATTERN_DESCRIPTION) : scalarZod(type);
   }
   // .strict(): every field is required and no undeclared field is
   // tolerated — this compiled schema is the authoritative gate on what an
@@ -227,4 +242,22 @@ export function generateFormatInstructions(step: StepOutputContractSource): stri
   }
 
   return lines.join("\n");
+}
+
+/**
+ * The final prompt sent to the agent: the Step's own prompt text (the
+ * `promptFile:`/`prompt:` content) with the generated format-instruction
+ * block appended. This is what makes "UI menampilkan prompt final yang
+ * dikirim, bukan hanya isi file aslinya" (issue 9, AC5) possible — the prompt
+ * that reaches the agent is deliberately not the verbatim file content
+ * (spec.md, "Kontrak Output"), and both the Runner (which sends it) and the
+ * control plane (which persists it for the UI) build it through this one
+ * function so the two can never drift.
+ */
+export function renderFinalPrompt(basePrompt: string | undefined, step: StepOutputContractSource): string {
+  const block = generateFormatInstructions(step);
+  if (basePrompt === undefined || basePrompt === "") {
+    return block;
+  }
+  return `${basePrompt}\n\n${block}`;
 }

@@ -72,6 +72,10 @@ const claimedStepRunSchema = z.object({
   secrets: z.record(z.string(), z.string()),
   // Default-deny egress allowlist for the sandbox (AC6).
   egress_allowlist: z.array(z.string()),
+  // The Group an interactive Step's ask: addresses, resolved here (spec:
+  // "semua yang ia butuh ikut di muatan /claim"). Null for non-interactive
+  // Steps.
+  ask_group_id: z.string().nullable(),
 });
 const claimResponseSchema = z.object({ step_run: claimedStepRunSchema.nullable() }).openapi("ClaimResponse");
 
@@ -320,6 +324,7 @@ export function registerRunnerProtocolRoutes(app: OpenAPIHono<AppEnv>, deps: Rou
           git_tokens: { fetch: toTokenWire(claimed.gitTokens.fetch), push: toTokenWire(claimed.gitTokens.push) },
           secrets: claimed.secrets,
           egress_allowlist: claimed.egressAllowlist,
+          ask_group_id: claimed.askGroupId,
         },
       },
       200,

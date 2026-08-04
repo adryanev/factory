@@ -1,0 +1,1 @@
+ALTER TABLE "step_runs" ADD COLUMN "final_prompt" text;

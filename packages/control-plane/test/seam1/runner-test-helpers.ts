@@ -105,8 +105,9 @@ export async function seedReadyStepRun(
   pool: Pool,
   overrides: Partial<StepRunFixtureInput> = {},
   ids: IdGenerator = realIdGenerator(),
+  runOverrides: { definition?: unknown; definitionFiles?: Record<string, string> } = {},
 ): Promise<SeededReadyStepRun> {
-  const fixture = await seedRunFixture(pool, ids);
+  const fixture = await seedRunFixture(pool, ids, runOverrides);
   const stepRunId = await seedStepRun(pool, ids, {
     runId: fixture.runId,
     repositoryId: fixture.repositoryId,

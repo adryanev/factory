@@ -4,10 +4,21 @@
  * the token teardown are provable deterministically.
  */
 import { describe, expect, it } from "vitest";
+import { compileStepOutputContract, FACTORY_OUTPUT_TAG } from "@factory/shared";
 import type { GitOps } from "../git/ops.js";
 import type { ClaimedStepRun, HeartbeatReply, LogChunkWire, ProtocolClient, ResultReply } from "../protocol/client.js";
-import { executeClaimedTurn, execModeFor, resolveStep, runOneCycle, startCancelWatch } from "../step-run-executor.js";
-import { TurnCancelledError, type Turn, type TurnResult, type TurnSpec } from "../agent-runtime/index.js";
+import {
+  classifyAgentOutput,
+  deriveMaxRetries,
+  executeClaimedTurn,
+  execModeFor,
+  parseFactoryOutputTag,
+  resolveStep,
+  runOneCycle,
+  startCancelWatch,
+  RESUMABLE_AGENTS,
+} from "../step-run-executor.js";
+import { OutputInvalidError, TurnCancelledError, type Turn, type TurnResult, type TurnSpec } from "../agent-runtime/index.js";
 
 function claimFixture(overrides: Partial<ClaimedStepRun> = {}): ClaimedStepRun {
   return {
@@ -29,6 +40,7 @@ function claimFixture(overrides: Partial<ClaimedStepRun> = {}): ClaimedStepRun {
     },
     secrets: { DEPLOY_KEY: "super-secret-value" },
     egressAllowlist: ["github.com", "registry.npmjs.org"],
+    askGroupId: null,
     ...overrides,
   };
 }
@@ -69,14 +81,17 @@ function fakeProtocol(overrides: {
   heartbeats: number;
   logChunks: LogChunkWire[];
   uploadGrants: number;
+  questions: { id: string; groupId: string; kind: string; body: string; ref: { branch: string; sha: string } }[];
 } {
   const results: ResultReply[] = [];
   const logChunks: LogChunkWire[] = [];
+  const questions: { id: string; groupId: string; kind: string; body: string; ref: { branch: string; sha: string } }[] = [];
   let heartbeats = 0;
   let uploadGrants = 0;
   return {
     results,
     logChunks,
+    questions,
     heartbeats,
     uploadGrants,
     async claim() {
@@ -104,6 +119,10 @@ function fakeProtocol(overrides: {
     },
     async recordLogChunks({ chunks }) {
       logChunks.push(...chunks);
+    },
+    async submitQuestion(input) {
+      questions.push({ ...input.question, ref: input.ref });
+      return { questionId: `question_${questions.length}` };
     },
   };
 }
@@ -165,6 +184,7 @@ function makeDeps(overrides: {
     repoDirFor: overrides.repoDirFor ?? ((owner: string, name: string) => `/repos/${owner}-${name}`),
     sandboxImage: overrides.image ?? "factory-sandbox",
     heartbeatIntervalMs: overrides.heartbeatIntervalMs ?? 100,
+    capabilities: { agentClis: [] as string[] },
     startTurn(spec: TurnSpec): Turn {
       startTurnCalls.push(spec);
       return overrides.turn ?? fakeTurn();
@@ -268,6 +288,7 @@ describe("step-run executor: the commit point", () => {
       repoDirFor: () => "/repos/acme-backend",
       sandboxImage: "factory-sandbox",
       heartbeatIntervalMs: 10,
+      capabilities: { agentClis: [] as string[] },
       startTurn: () => turn,
     };
 
@@ -296,11 +317,32 @@ describe("step-run executor: the commit point", () => {
     expect(full.git.calls.some((call) => call.startsWith("push"))).toBe(true);
   });
 
-  it("resolveStep rejects a claimed step that is not a run: step", () => {
+  it("resolveStep resolves an agent Step with the final prompt built from outputs: (AC4)", () => {
     const agentClaimed = claimFixture({
-      definition: "version: 1\nname: p\nrepo: backend\nsteps:\n  build:\n    prompt: do it\n",
+      definition:
+        "version: 1\nname: p\nrepo: backend\nsteps:\n  plan:\n    promptFile: .factory/prompts/plan.md\n    outputs:\n      variants:\n        type: array\n        items: { key: string, brief: string }\n",
+      definitionFiles: { ".factory/prompts/plan.md": "Plan three variants.\n" },
+      stepKey: "plan",
     });
-    expect(() => resolveStep(agentClaimed)).toThrow(/not a run: step/);
+    const step = resolveStep(agentClaimed);
+    expect(step.kind).toBe("agent");
+    if (step.kind === "agent") {
+      expect(step.agent).toBe("claude");
+      // The format-instruction block is appended — the prompt is no longer
+      // the verbatim file content, which is exactly why the UI must show the
+      // final prompt (AC5).
+      expect(step.finalPrompt).toContain("Plan three variants.");
+      expect(step.finalPrompt).toContain(`<${FACTORY_OUTPUT_TAG}>`);
+      expect(step.finalPrompt).toContain('"kind":"done"');
+    }
+  });
+
+  it("resolveStep throws for a step that is neither run: nor agent", () => {
+    const badClaimed = claimFixture({
+      definition: "version: 1\nname: p\nrepo: backend\nsteps:\n  pr:\n    kind: pull-request\n",
+      stepKey: "pr",
+    });
+    expect(() => resolveStep(badClaimed)).toThrow(/neither a run: step nor an agent step/);
   });
 
   it("captures onLine output into chunks, redacts the turn's git tokens, and flushes before /result", async () => {
@@ -315,6 +357,7 @@ describe("step-run executor: the commit point", () => {
       repoDirFor: () => "/repos/acme-backend",
       sandboxImage: "factory-sandbox",
       heartbeatIntervalMs: 100,
+      capabilities: { agentClis: [] as string[] },
       logFlushIntervalMs: 100_000, // no timer tick — the explicit pre-/result flush is what's under test.
       logUploaderFor: () => ({
         async upload(chunk: { text: string; seq: number; byteOffset: number }) {
@@ -339,5 +382,235 @@ describe("step-run executor: the commit point", () => {
     expect(text).toContain("push token is [redacted] and again [redacted]\n");
     expect(text).not.toContain("fetch-token");
     expect(protocol.results).toHaveLength(1); // /result still committed.
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Agent Steps (issue 9): parse the single <factory-output> tag, classify it
+// against the shared union, and drive the question / done / invalid outcomes
+// through the same commit point as shell Steps.
+// ---------------------------------------------------------------------------
+
+const AGENT_DEFINITION = `version: 1
+name: p
+repo: backend
+concurrency: cancel
+steps:
+  plan:
+    promptFile: .factory/prompts/plan.md
+    outputs:
+      variants:
+        type: array
+        items: { key: string, brief: string }
+`;
+
+// The same shape, but with an interactive Step — its contract has the
+// `question` arm, so an agent that asks instead of finishing is valid.
+const ASK_DEFINITION = `version: 1
+name: p
+repo: backend
+concurrency: cancel
+steps:
+  plan:
+    promptFile: .factory/prompts/plan.md
+    ask:
+      group: reviewer
+      kind: approval
+`;
+
+function agentClaim(overrides: Partial<ClaimedStepRun> = {}): ClaimedStepRun {
+  return claimFixture({
+    stepKey: "plan",
+    definition: AGENT_DEFINITION,
+    definitionFiles: { ".factory/prompts/plan.md": "Plan three variants.\n" },
+    ...overrides,
+  });
+}
+
+function askClaim(overrides: Partial<ClaimedStepRun> = {}): ClaimedStepRun {
+  return claimFixture({
+    stepKey: "plan",
+    definition: ASK_DEFINITION,
+    definitionFiles: { ".factory/prompts/plan.md": "Plan three variants.\n" },
+    ...overrides,
+  });
+}
+
+function tagResult(payload: string, extra: Partial<TurnResult> = {}): Turn {
+  const tag = FACTORY_OUTPUT_TAG;
+  return fakeTurn({
+    stdout: `thinking...\n<${tag}>${payload}</${tag}>\n`,
+    exitCode: 0,
+    preservedWorktreePath: "/tmp/clone/.sandcastle/worktrees/run-x",
+    ...extra,
+  });
+}
+
+describe("agent Steps: classify the Output against the shared union", () => {
+  it("deriveMaxRetries is 2 for a resumable installed agent, 0 otherwise (AC8)", () => {
+    const withClaude = { agentClis: ["claude", "codex"] };
+    const withCursor = { agentClis: ["cursor-agent"] };
+    expect(deriveMaxRetries(withClaude, "claude")).toBe(2);
+    expect(deriveMaxRetries(withClaude, "codex")).toBe(2);
+    expect(deriveMaxRetries(withCursor, "cursor-agent")).toBe(0); // cursor cannot resume.
+    expect(deriveMaxRetries(withCursor, "claude")).toBe(0); // not installed.
+    expect(RESUMABLE_AGENTS).toEqual(new Set(["claude", "codex"]));
+  });
+
+  it("parseFactoryOutputTag extracts the tag's JSON from stdout, unwrapping a code fence", () => {
+    const tag = FACTORY_OUTPUT_TAG;
+    expect(
+      parseFactoryOutputTag(`<${tag}>{"kind":"done","outputs":{}}</${tag}>`),
+    ).toEqual({ kind: "done", outputs: {} });
+    expect(
+      parseFactoryOutputTag(`<${tag}>\`\`\`json\n{"kind":"done","outputs":{}}\n\`\`\`</${tag}>`),
+    ).toEqual({ kind: "done", outputs: {} });
+    expect(parseFactoryOutputTag("no tag here")).toBeUndefined();
+    expect(parseFactoryOutputTag(`<${tag}>not json</${tag}>`)).toBeUndefined();
+  });
+
+  it("classifyAgentOutput prefers the already-extracted output, and falls back to parsing stdout", () => {
+    const contract = compileStepOutputContract({
+      outputs: { variants: { type: "array", items: { key: "string", brief: "string" } } },
+    });
+    const done = classifyAgentOutput(
+      { stdout: "<factory-output>ignored</factory-output>", output: { kind: "done", outputs: { variants: [] } } },
+      contract,
+    );
+    expect(done).toMatchObject({ kind: "done" });
+
+    const fromStdout = classifyAgentOutput(
+      { stdout: `<${FACTORY_OUTPUT_TAG}>{"kind":"done","outputs":{"variants":[]}}</${FACTORY_OUTPUT_TAG}>` },
+      contract,
+    );
+    expect(fromStdout).toMatchObject({ kind: "done" });
+  });
+
+  it("classifyAgentOutput rejects a missing tag, unparseable JSON, and a schema violation", () => {
+    const contract = compileStepOutputContract({
+      outputs: { variants: { type: "array", items: { key: "string", brief: "string" } } },
+    });
+    expect(classifyAgentOutput({ stdout: "no tag" }, contract)).toEqual({ kind: "invalid" });
+    expect(classifyAgentOutput({ stdout: `<${FACTORY_OUTPUT_TAG}>nope</${FACTORY_OUTPUT_TAG}>` }, contract)).toEqual({ kind: "invalid" });
+    // A Key that is not git-ref-safe fails the union (AC2) — the agent is
+    // told, while the session is still alive.
+    expect(
+      classifyAgentOutput(
+        { stdout: `<${FACTORY_OUTPUT_TAG}>{"kind":"done","outputs":{"variants":[{"key":"My Agent!","brief":"b"}]}}</${FACTORY_OUTPUT_TAG}>` },
+        contract,
+      ),
+    ).toEqual({ kind: "invalid" });
+  });
+
+  it("a question Output classifies as a Question with its arm's shape", () => {
+    const contract = compileStepOutputContract({ ask: { kind: "approval" } });
+    const classified = classifyAgentOutput(
+      { stdout: `<${FACTORY_OUTPUT_TAG}>{"kind":"question","question":{"kind":"approval","body":"OK?"}}</${FACTORY_OUTPUT_TAG}>` },
+      contract,
+    );
+    expect(classified).toMatchObject({ kind: "question", question: { kind: "approval", body: "OK?" } });
+  });
+});
+
+describe("agent Steps: the executor flow", () => {
+  it("a valid done Output flows to /result as the turn's output_data (AC6)", async () => {
+    const protocol = fakeProtocol();
+    const git = fakeGit();
+    const deps = makeDeps({ protocol, git, turn: tagResult('{"kind":"done","outputs":{"variants":[{"key":"agent-a","brief":"b"}]}}') });
+
+    await executeClaimedTurn(deps.deps, agentClaim());
+
+    expect(protocol.results).toEqual([
+      {
+        outcome: "succeeded",
+        ref: { branch: "run/run_1/plan/t1-a1", sha: "commit-sha" },
+        outputData: { kind: "done", outputs: { variants: [{ key: "agent-a", brief: "b" }] } },
+      },
+    ]);
+  });
+
+  it("an invalid Output reports failed with reason output-invalid, and the branch push still happens before the report (AC7)", async () => {
+    const protocol = fakeProtocol();
+    const git = fakeGit();
+    const deps = makeDeps({ protocol, git, turn: tagResult('{"kind":"done","outputs":{"variants":[{"key":"My Agent!","brief":"b"}]}}') });
+
+    await executeClaimedTurn(deps.deps, agentClaim());
+
+    expect(protocol.results[0]).toMatchObject({ outcome: "failed" });
+    // The branch was pushed (an orphan for the retention GC), and the report
+    // carries its ref so the control plane records where the orphan lives.
+    expect(git.calls).toContain("push run/run_1/plan/t1-a1 commit-sha token=push-token");
+    expect(protocol.results[0]!.ref).toEqual({ branch: "run/run_1/plan/t1-a1", sha: "commit-sha" });
+  });
+
+  it("an OutputInvalidError from the real seam reports failed with reason output-invalid", async () => {
+    const protocol = fakeProtocol();
+    const git = fakeGit();
+    const deps = makeDeps({
+      protocol,
+      git,
+      turn: {
+        done: Promise.reject(new OutputInvalidError(new Error("structured output failed") as never)),
+        cancel: () => {},
+      } as Turn,
+    });
+
+    await executeClaimedTurn(deps.deps, agentClaim());
+    expect(protocol.results).toEqual([{ outcome: "failed", ref: null, outputData: undefined }]);
+  });
+
+  it("a question Output pushes the branch first, then POSTs the Question with the ref (spec: 'push branch → … → POST Question')", async () => {
+    const protocol = fakeProtocol();
+    const git = fakeGit();
+    const deps = makeDeps({
+      protocol,
+      git,
+      turn: tagResult('{"kind":"question","question":{"kind":"approval","body":"Approve this?"}}'),
+    });
+
+    await executeClaimedTurn(deps.deps, askClaim({ askGroupId: "group_1" }));
+
+    // The branch was pushed before the Question was posted.
+    expect(git.calls.indexOf("push run/run_1/plan/t1-a1 commit-sha token=push-token")).toBeLessThan(
+      git.calls.length - 2,
+    );
+    expect(protocol.questions).toHaveLength(1);
+    expect(protocol.questions[0]).toMatchObject({
+      groupId: "group_1",
+      kind: "approval",
+      body: "Approve this?",
+      ref: { branch: "run/run_1/plan/t1-a1", sha: "commit-sha" },
+    });
+    expect(protocol.questions[0]!.id).toMatch(/^question_/);
+    // A question turn posts no /result — the row moves to awaiting-human via /question.
+    expect(protocol.results).toHaveLength(0);
+  });
+
+  it("a question Output with no resolved group reports failed rather than posting a broken Question", async () => {
+    const protocol = fakeProtocol();
+    const deps = makeDeps({
+      protocol,
+      turn: tagResult('{"kind":"question","question":{"kind":"approval","body":"Approve this?"}}'),
+    });
+
+    await executeClaimedTurn(deps.deps, askClaim({ askGroupId: null }));
+    expect(protocol.questions).toHaveLength(0);
+    expect(protocol.results[0]).toMatchObject({ outcome: "failed" });
+  });
+
+  it("the agent turn spec carries the final prompt, the compiled contract, and the derived maxRetries", async () => {
+    const protocol = fakeProtocol();
+    const { deps, startTurnCalls } = makeDeps({ protocol, turn: tagResult('{"kind":"done","outputs":{"variants":[]}}') });
+    deps.capabilities = { agentClis: ["claude"] };
+    await executeClaimedTurn(deps, agentClaim());
+
+    const spec = startTurnCalls[0] as TurnSpec & { kind: "agent" };
+    expect(spec.kind).toBe("agent");
+    if (spec.kind === "agent") {
+      expect(spec.prompt).toContain("Plan three variants.");
+      expect(spec.prompt).toContain(`<${FACTORY_OUTPUT_TAG}>`);
+      expect(spec.maxRetries).toBe(2); // claude is resumable and installed.
+      expect(spec.agent).toBe("claude");
+    }
   });
 });

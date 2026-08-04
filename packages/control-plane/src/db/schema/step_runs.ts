@@ -98,6 +98,13 @@ export const stepRuns = pgTable(
     outputRefBranch: text("output_ref_branch"),
     outputRefSha: text("output_ref_sha"),
     outputData: jsonb("output_data"),
+    // Prompt final yang benar-benar dikirim ke agent (issue 9, AC5): isi
+    // promptFile/prompt + blok instruksi format yang dibangkitkan dari
+    // outputs:. Ditulis saat giliran diklaim — momen prompt itu "dikirim" —
+    // dan ditampilkan UI, karena prompt yang sampai ke agent bukan lagi
+    // verbatim isi file (spec: "Kontrak Output"). NULL untuk Step run: yang
+    // tidak punya prompt.
+    finalPrompt: text("final_prompt"),
     // Lokasi session di blob store, diunggah sebelum POST Question — dibaca
     // giliran lanjutan lewat presigned GET di muatan `/claim` (spec: "Step
     // yang menunggu manusia").

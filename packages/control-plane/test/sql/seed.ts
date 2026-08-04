@@ -53,6 +53,9 @@ export interface RunFixtureOverrides {
   artifactsPurgedAt?: Date | null;
   logsPurgedAt?: Date | null;
   branchesPurgedAt?: Date | null;
+  /** The inline definition snapshot (YAML text). Defaults to an empty object — run: fixtures never read it. */
+  definition?: unknown;
+  definitionFiles?: Record<string, string>;
 }
 
 export interface RunFixtureChain {
@@ -79,8 +82,8 @@ export async function seedRun(
     credentialPrincipalId: chain.principalId,
     refBranch: "main",
     refSha: "a".repeat(40),
-    definition: {},
-    definitionFiles: {},
+    definition: overrides.definition ?? {},
+    definitionFiles: overrides.definitionFiles ?? {},
     endedAt: overrides.endedAt ?? null,
     artifactsPurgedAt: overrides.artifactsPurgedAt ?? null,
     logsPurgedAt: overrides.logsPurgedAt ?? null,
@@ -89,9 +92,13 @@ export async function seedRun(
   return runId;
 }
 
-export async function seedRunFixture(pool: Pool, ids: ReturnType<typeof testIdGenerator>) {
+export async function seedRunFixture(
+  pool: Pool,
+  ids: ReturnType<typeof testIdGenerator>,
+  runOverrides: RunFixtureOverrides = {},
+) {
   const chain = await seedProjectRepoPrincipal(pool, ids);
-  const runId = await seedRun(pool, ids, chain);
+  const runId = await seedRun(pool, ids, chain, runOverrides);
   return { ...chain, runId };
 }
 

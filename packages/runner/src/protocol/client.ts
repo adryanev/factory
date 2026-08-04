@@ -30,6 +30,8 @@ export interface ClaimedStepRun {
   secrets: Record<string, string>;
   /** Default-deny egress allowlist for the sandbox (AC6). */
   egressAllowlist: string[];
+  /** The Group an interactive Step's ask: addresses, resolved at claim (null for non-interactive Steps). */
+  askGroupId: string | null;
 }
 
 export interface HeartbeatReply {
@@ -80,6 +82,23 @@ export interface ProtocolClient {
   }): Promise<UploadGrant[]>;
   /** Records log-chunk metadata after the bytes are already in the object store — dedup at the primary key, never a 409 (spec: "Log"). */
   recordLogChunks(input: { stepRunId: string; leaseToken: string; chunks: LogChunkWire[] }): Promise<void>;
+  /** The commit point of a turn that ends by asking a human (spec: "push branch → unggah session ke blob → POST Question"). */
+  submitQuestion(input: {
+    stepRunId: string;
+    leaseToken: string;
+    question: {
+      id: string;
+      groupId: string;
+      kind: "text" | "choice" | "approval" | "edit-artifact";
+      body: string;
+      options?: { id: string; label: string; description?: string }[];
+      multi?: boolean;
+      allowOther?: boolean;
+      artifactKey?: string;
+    };
+    ref: { branch: string; sha: string };
+    sessionBlobKey?: string;
+  }): Promise<{ questionId: string }>;
 }
 
 export function createProtocolClient(baseUrl: string, secret: string): ProtocolClient {
@@ -175,6 +194,31 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
       if (!(status >= 200 && status < 300)) {
         throw new Error(`log-chunks failed: HTTP ${status}`);
       }
+    },
+
+    async submitQuestion({ stepRunId, leaseToken, question, ref, sessionBlobKey }) {
+      const { status, body } = await post<{ question_id: string }>(`/step-runs/${stepRunId}/question`, {
+        lease_token: leaseToken,
+        question: {
+          id: question.id,
+          group_id: question.groupId,
+          kind: question.kind,
+          body: question.body,
+          ...(question.options !== undefined ? { options: question.options } : {}),
+          ...(question.multi !== undefined ? { multi: question.multi } : {}),
+          ...(question.allowOther !== undefined ? { allow_other: question.allowOther } : {}),
+          ...(question.artifactKey !== undefined ? { artifact_key: question.artifactKey } : {}),
+        },
+        ref,
+        ...(sessionBlobKey !== undefined ? { session_blob_key: sessionBlobKey } : {}),
+      });
+      if (status === 409) {
+        throw new Error("question refused: lease no longer valid");
+      }
+      if (!(status >= 200 && status < 300)) {
+        throw new Error(`question failed: HTTP ${status}`);
+      }
+      return { questionId: body.question_id };
     },
   };
 }

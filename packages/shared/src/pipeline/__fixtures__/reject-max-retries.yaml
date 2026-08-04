@@ -1,0 +1,17 @@
+# Rule: maxRetries: is never written in YAML. The Runner derives it from
+# agent capabilities (resume-able -> 2, else 0); sandcastle's run() refuses
+# to start when the two disagree, so writing it would be a silent lie.
+version: 1
+name: maxRetries written in YAML
+repo: backend
+maxRetries: 2
+
+steps:
+  plan:
+    promptFile: prompts/plan.md
+    maxRetries: 2
+    branches:
+      - key: agent-a
+        agent: claude
+        maxRetries: 2
+        promptFile: prompts/plan.md

@@ -255,6 +255,22 @@ describe("Key type is constrained [a-z0-9][a-z0-9._-]{0,63}, no slug normalisati
   });
 });
 
+describe("maxRetries: is never written in YAML (issue 9, AC8)", () => {
+  it("rejects maxRetries at the Pipeline, Step, and Branch levels, pointing at each line", () => {
+    const result = validatePipelineDefinition(fixture("reject-max-retries.yaml"));
+    expectInvalid(result);
+    const found = result.issues.filter((i) => i.message.includes("derives it from agent capabilities"));
+    expect(found).toHaveLength(3);
+    expect(found.map((i) => i.path)).toEqual([
+      ["maxRetries"],
+      ["steps", "plan", "maxRetries"],
+      ["steps", "plan", "branches", 0, "maxRetries"],
+    ]);
+    // Every issue points at a real line in the source text.
+    expect(found.every((i) => typeof i.line === "number")).toBe(true);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Errors point at a line.
 // ---------------------------------------------------------------------------

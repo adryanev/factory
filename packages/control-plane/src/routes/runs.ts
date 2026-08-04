@@ -63,6 +63,9 @@ const stepRunSchema = z
     outputRefBranch: z.string().nullable(),
     outputRefSha: z.string().nullable(),
     outputData: z.unknown().nullable(),
+    // Prompt final yang benar-benar dikirim ke agent (issue 9, AC5) — isi
+    // file + blok instruksi format. NULL sebelum giliran diklaim.
+    finalPrompt: z.string().nullable(),
   })
   .openapi("StepRun");
 
@@ -113,6 +116,7 @@ function toStepRunResponse(stepRun: StepRun) {
     outputRefBranch: stepRun.outputRefBranch,
     outputRefSha: stepRun.outputRefSha,
     outputData: stepRun.outputData,
+    finalPrompt: stepRun.finalPrompt,
   };
 }
 

@@ -76,6 +76,17 @@ const claimedStepRunSchema = z.object({
   // "semua yang ia butuh ikut di muatan /claim"). Null for non-interactive
   // Steps.
   ask_group_id: z.string().nullable(),
+  // The previous turn's session, when this is a resumed turn (issue 13, AC2):
+  // the blob the Runner downloads and hands to the agent's `resumeSession`.
+  // Null for a fresh turn.
+  session: z
+    .object({
+      id: z.string(),
+      blob_key: z.string(),
+      get_url: z.string(),
+      expires_at: z.string(),
+    })
+    .nullable(),
   // The Join manifest (issue #11, AC7): the upstream branches this Join Step
   // gathers, as data — empty for a Step that joins nothing. The Runner
   // fetches only the entries whose `repo` is its own; the rest are reads,
@@ -252,6 +263,9 @@ const questionRequestSchema = z
     question: questionSchema,
     ref: z.object({ branch: z.string(), sha: z.string() }),
     session_blob_key: z.string().optional(),
+    // The agent session id the blob carries — preserved on the row so a
+    // resumed turn can resumeSession it (issue 13, AC2).
+    session_id: z.string().optional(),
   })
   .openapi("QuestionRequest");
 
@@ -360,6 +374,15 @@ export function registerRunnerProtocolRoutes(app: OpenAPIHono<AppEnv>, deps: Rou
           secrets: claimed.secrets,
           egress_allowlist: claimed.egressAllowlist,
           ask_group_id: claimed.askGroupId,
+          session:
+            claimed.session === null
+              ? null
+              : {
+                  id: claimed.session.id,
+                  blob_key: claimed.session.blobKey,
+                  get_url: claimed.session.getUrl,
+                  expires_at: claimed.session.expiresAt.toISOString(),
+                },
           join_manifest: claimed.joinManifest,
         },
       },
@@ -450,7 +473,7 @@ export function registerRunnerProtocolRoutes(app: OpenAPIHono<AppEnv>, deps: Rou
   app.openapi(questionRoute, async (c) => {
     const runner = await requireRunner(c, deps);
     const { id } = c.req.valid("param");
-    const { lease_token, question, ref, session_blob_key } = c.req.valid("json");
+    const { lease_token, question, ref, session_blob_key, session_id } = c.req.valid("json");
     const { questionId } = await deps.domain.stepRuns.submitQuestion(runner, id as never, lease_token, {
       id: question.id as never,
       groupId: question.group_id as never,
@@ -462,6 +485,7 @@ export function registerRunnerProtocolRoutes(app: OpenAPIHono<AppEnv>, deps: Rou
       artifactKey: question.artifact_key,
       ref,
       sessionBlobKey: session_blob_key,
+      sessionId: session_id,
     });
     return c.json({ question_id: questionId }, 200);
   });

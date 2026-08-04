@@ -34,6 +34,8 @@
  */
 import { Output, StructuredOutputError, run } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { FACTORY_OUTPUT_TAG } from "@factory/shared";
 import { createFactoryHostProvider } from "./host-provider.js";
 import type { AgentTurnSpec, Turn, TurnResult, TurnRuntimeDeps, TurnSpec } from "./types.js";
@@ -215,6 +217,24 @@ function startAgentTurn(deps: TurnRuntimeDeps, spec: AgentTurnSpec): Turn {
           });
 
     try {
+      // A resumed turn resumes from a session that may never have been on this
+      // machine (issue 13, AC1 — the Runner is interchangeable). The executor
+      // downloaded the JSONL from the blob store; materialize it at the
+      // provider's host session path so sandcastle's resume precheck and
+      // `resumeIntoSandbox` find it, exactly where the provider would have
+      // captured it.
+      if (spec.resumeSession !== undefined && spec.resumeSessionContent !== undefined) {
+        const provider = deps.agentProviderFor(spec.agent);
+        const hostPath = provider.sessionStorage?.hostSessionFilePath(
+          spec.workingDirectory,
+          spec.resumeSession,
+        );
+        if (hostPath) {
+          await mkdir(dirname(hostPath), { recursive: true });
+          await writeFile(hostPath, spec.resumeSessionContent);
+        }
+      }
+
       const result = await run({
         agent: deps.agentProviderFor(spec.agent),
         sandbox: sandboxProvider,

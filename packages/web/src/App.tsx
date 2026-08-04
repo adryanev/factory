@@ -1,8 +1,15 @@
 /**
- * Scaffold only — no product screens. This proves the `web` package builds
- * and typechecks with React + Vite; the visual language and real screens
- * (spec: "Bahasa visual") land in later issues.
+ * The web surface's root. Issue 13 adds the "Menunggu saya" surface — the
+ * human-in-the-loop answering UI — on top of the scaffold; the monitoring and
+ * grilling screens arrive in their own issues.
  */
+import { QuestionList } from "./questions/QuestionList";
+
 export function App(): React.JSX.Element {
-  return <p>factory web scaffold</p>;
+  return (
+    <main>
+      <h1>factory</h1>
+      <QuestionList />
+    </main>
+  );
 }

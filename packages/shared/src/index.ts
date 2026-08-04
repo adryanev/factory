@@ -67,4 +67,9 @@ export {
   type Question,
   type QuestionKind,
   type UsageReport,
+  type QuestionOption,
+  type Answer,
+  answerSchema,
+  renderAnswerForAgent,
+  renderQuestionForHuman,
 } from "./pipeline/index.js";

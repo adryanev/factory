@@ -9,10 +9,8 @@ export {
   compileStepOutputContract,
   generateFormatInstructions,
   renderFinalPrompt,
-  questionSchema,
   FACTORY_OUTPUT_TAG,
   SCALAR_TYPES,
-  QUESTION_KINDS,
   outputDescriptorSchema,
   outputsMapSchema,
   usageReportSchema,
@@ -22,10 +20,22 @@ export type {
   OutputsMap,
   ScalarType,
   FlatObjectDescriptor,
-  Question,
-  QuestionKind,
   UsageReport,
 } from "./output-contract.js";
+
+export {
+  questionSchema,
+  questionOptionSchema,
+  answerSchema,
+  QUESTION_KINDS,
+  questionSchemaByKind,
+  renderAnswerForAgent,
+  renderQuestionForHuman,
+  type Question,
+  type QuestionKind,
+  type QuestionOption,
+  type Answer,
+} from "../question.js";
 
 export { KEY_PATTERN, isValidKey } from "./key.js";
 export { DURATION_PATTERN, durationSchema, humanTimeoutSchema } from "./duration.js";

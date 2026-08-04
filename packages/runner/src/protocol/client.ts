@@ -35,6 +35,12 @@ export interface ClaimedStepRun {
   /** The Group an interactive Step's ask: addresses, resolved at claim (null for non-interactive Steps). */
   askGroupId: string | null;
   /**
+   * The previous turn's session, when this is a resumed turn (issue 13, AC2):
+   * the blob the Runner downloads and hands to the agent's `resumeSession`.
+   * Null for a fresh turn.
+   */
+  session: { id: string; blobKey: string; getUrl: string; expiresAt: string } | null;
+  /**
    * The Join manifest (issue #11, AC7): the upstream branches this Join Step
    * gathers, as data. Empty for a Step that joins nothing. The Runner fetches
    * only the entries whose `repo` equals its own repository; the rest are
@@ -118,6 +124,8 @@ export interface ProtocolClient {
     };
     ref: { branch: string; sha: string };
     sessionBlobKey?: string;
+    /** The agent session id the blob carries — preserved so a resumed turn can `resumeSession` it (issue 13, AC2). */
+    sessionId?: string;
   }): Promise<{ questionId: string }>;
 }
 
@@ -151,9 +159,21 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
       if (!(status >= 200 && status < 300)) {
         throw new Error(`claim failed: HTTP ${status}`);
       }
-      const stepRun = body.step_run as ClaimedStepRun | null;
+      const wire = body.step_run as (Omit<ClaimedStepRun, "session"> & {
+        session?: { id: string; blob_key: string; get_url: string; expires_at: string } | null;
+      }) | null;
+      const stepRun = wire as ClaimedStepRun | null;
       if (stepRun) {
         stepRun.joinManifest = stepRun.joinManifest ?? [];
+        stepRun.session =
+          wire?.session === null || wire?.session === undefined
+            ? null
+            : {
+                id: wire.session.id,
+                blobKey: wire.session.blob_key,
+                getUrl: wire.session.get_url,
+                expiresAt: wire.session.expires_at,
+              };
       }
       return stepRun;
     },
@@ -233,7 +253,7 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
       }
     },
 
-    async submitQuestion({ stepRunId, leaseToken, question, ref, sessionBlobKey }) {
+    async submitQuestion({ stepRunId, leaseToken, question, ref, sessionBlobKey, sessionId }) {
       const { status, body } = await post<{ question_id: string }>(`/step-runs/${stepRunId}/question`, {
         lease_token: leaseToken,
         question: {
@@ -248,6 +268,7 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
         },
         ref,
         ...(sessionBlobKey !== undefined ? { session_blob_key: sessionBlobKey } : {}),
+        ...(sessionId !== undefined ? { session_id: sessionId } : {}),
       });
       if (status === 409) {
         throw new Error("question refused: lease no longer valid");

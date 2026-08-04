@@ -18,7 +18,7 @@
  * is already cancelled; a `/result` for it would be 409).
  */
 import path from "node:path";
-import { writeFile, rm } from "node:fs/promises";
+import { readFile, writeFile, rm } from "node:fs/promises";
 import {
   compileStepOutputContract,
   createLiteralRedactor,
@@ -37,6 +37,7 @@ import type { GitOps } from "./git/ops.js";
 import { LogBuffer, createLogSink, type LogChunkUploader, type LogSink } from "./log-buffer.js";
 import { createProtocolLogChunkUploader } from "./log-uploader.js";
 import { createProtocolArtifactUploader, type ArtifactUploader, type UploadedArtifact } from "./artifact-uploader.js";
+import { createProtocolSessionStorage, type AgentSessionStorage } from "./session-storage.js";
 import type { Capabilities } from "./capabilities.js";
 import type { ArtifactWire, ClaimedStepRun, ProtocolClient } from "./protocol/client.js";
 
@@ -65,6 +66,8 @@ export interface StepRunExecutorDeps {
   logUploaderFor?: (claimed: ClaimedStepRun) => LogChunkUploader;
   /** Overrides the per-StepRun artifact uploader — tests inject a recording fake so no network is touched. Defaults to the protocol-backed uploader. */
   artifactUploaderFor?: (claimed: ClaimedStepRun) => ArtifactUploader;
+  /** The Runner's session transport (issue 13, AC2) — the third blob consumer. Defaults to the protocol-backed implementation; tests inject a recording fake so no network is touched. */
+  sessionStorage?: AgentSessionStorage;
 }
 
 /** A resolved Step the Runner can actually execute. */
@@ -357,6 +360,7 @@ export async function executeClaimedTurn(deps: StepRunExecutorDeps, claimed: Cla
   const artifactUploader =
     deps.artifactUploaderFor?.(claimed) ??
     createProtocolArtifactUploader({ protocol: deps.protocol }, claimed.id, claimed.leaseToken);
+  const sessionStorage = deps.sessionStorage ?? createProtocolSessionStorage({ protocol: deps.protocol });
   // Idempotent — the explicit calls before each turn-ending POST run the final
   // flush while the lease is still valid, and the outer finally is the backstop
   // for the early-return (cancel) path.
@@ -371,8 +375,37 @@ export async function executeClaimedTurn(deps: StepRunExecutorDeps, claimed: Cla
     await deps.git.ensureRepo(cloneDir, repoUrl);
     await deps.git.fetch(cloneDir, repoUrl, claimed.ref.sha, claimed.gitTokens.fetch.token);
 
+    // Issue 13, AC1/AC2: a resumed turn continues the same conversation on any
+    // free machine — the session JSONL comes from the blob store (the claim's
+    // presigned GET), downloaded here so the turn spec can hand it to the
+    // agent's resume. A download that fails fails the turn; the lease sweep
+    // retries from the same turn, never a new recovery class.
+    let resumeSessionId: string | undefined;
+    let resumeSessionContent: string | undefined;
+    if (claimed.session !== null) {
+      try {
+        resumeSessionContent = await sessionStorage.downloadSession({ getUrl: claimed.session.getUrl });
+        resumeSessionId = claimed.session.id;
+      } catch {
+        await stopLogging();
+        await deps.protocol.reportResult({
+          stepRunId: claimed.id,
+          leaseToken: claimed.leaseToken,
+          outcome: "failed",
+          reason: "session-download-failed",
+        });
+        return;
+      }
+    }
+    const resume =
+      resumeSessionId !== undefined && resumeSessionContent !== undefined
+        ? { resumeSessionId, resumeSessionContent }
+        : {};
+
     logSink.start();
-    const turn = deps.startTurn(turnSpecFor(deps, claimed, step, branch, (line) => logSink.write(`${line}\n`)));
+    const turn = deps.startTurn(
+      turnSpecFor(deps, claimed, step, branch, (line) => logSink.write(`${line}\n`), resume),
+    );
 
     const cancelWatch = startCancelWatch(deps, claimed, () => turn.cancel());
 
@@ -474,6 +507,47 @@ export async function executeClaimedTurn(deps: StepRunExecutorDeps, claimed: Cla
         });
         return;
       }
+      // The commit point's order (spec: "push branch → unggah session ke blob
+      // → POST Question") and its invariant (AC2: "Question ada ⇒ ref dan
+      // session pasti ada"): the branch is already pushed above, so the
+      // session must be uploaded before the Question is posted. A missing
+      // capture or a failed upload means no Question — the turn reports failed
+      // and is retried as an attempt of the same turn, never a new recovery
+      // class.
+      let sessionBlobKey: string | undefined;
+      let sessionId: string | undefined;
+      if (result.sessionId !== undefined && result.sessionFilePath !== undefined) {
+        try {
+          const content = await readFile(result.sessionFilePath, "utf-8");
+          sessionBlobKey = await sessionStorage.uploadSession({
+            stepRunId: claimed.id,
+            leaseToken: claimed.leaseToken,
+            sessionId: result.sessionId,
+            content,
+          });
+          sessionId = result.sessionId;
+        } catch {
+          await stopLogging();
+          await deps.protocol.reportResult({
+            stepRunId: claimed.id,
+            leaseToken: claimed.leaseToken,
+            outcome: "failed",
+            reason: "session-upload-failed",
+            ref: { branch, sha },
+          });
+          return;
+        }
+      } else {
+        await stopLogging();
+        await deps.protocol.reportResult({
+          stepRunId: claimed.id,
+          leaseToken: claimed.leaseToken,
+          outcome: "failed",
+          reason: "session-unavailable",
+          ref: { branch, sha },
+        });
+        return;
+      }
       await deps.protocol.submitQuestion({
         stepRunId: claimed.id,
         leaseToken: claimed.leaseToken,
@@ -498,6 +572,8 @@ export async function executeClaimedTurn(deps: StepRunExecutorDeps, claimed: Cla
             : {}),
         },
         ref: { branch, sha },
+        sessionBlobKey,
+        sessionId,
       });
       return;
     }
@@ -568,6 +644,7 @@ function turnSpecFor(
   step: ResolvedRunStep,
   branch: string,
   onLine: (line: string) => void,
+  resume: { resumeSessionId?: string; resumeSessionContent?: string } = {},
 ): TurnSpec {
   const common = {
     workingDirectory: deps.repoDirFor(claimed.repository.owner, claimed.repository.name),
@@ -603,6 +680,9 @@ function turnSpecFor(
     }),
     // AC8: maxRetries is derived from agent capabilities, never written in YAML.
     maxRetries: deriveMaxRetries(deps.capabilities, step.agent),
+    // Issue 13, AC1/AC2: resume the same conversation on any free machine.
+    ...(resume.resumeSessionId !== undefined ? { resumeSession: resume.resumeSessionId } : {}),
+    ...(resume.resumeSessionContent !== undefined ? { resumeSessionContent: resume.resumeSessionContent } : {}),
     ...common,
   };
 }

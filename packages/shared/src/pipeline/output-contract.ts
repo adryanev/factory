@@ -1,5 +1,12 @@
 import { z } from "zod";
 import { KEY_PATTERN, KEY_PATTERN_DESCRIPTION } from "./key.js";
+import {
+  QUESTION_KINDS,
+  questionSchema,
+  questionSchemaByKind,
+  type Question,
+  type QuestionKind,
+} from "../question.js";
 
 /**
  * The Output contract: a small type language of its own (spec.md, "Kontrak
@@ -110,47 +117,22 @@ export function compileOutputsSchema(outputs: OutputsMap | undefined): z.ZodType
 
 /**
  * Question / Answer, closed union (spec.md, "Step yang menunggu manusia").
- * Lives here because compiling a Step's `ask:` into its output contract
- * needs exactly one arm of it — the arm matching `ask.kind`.
+ * The schemas live in `../question.ts` (issue 13, AC4 — one module shared by
+ * the control plane, the Runner, and the web); this file only compiles a
+ * Step's `ask:` into its output contract, which needs exactly one arm of the
+ * union — the arm matching `ask.kind`.
  */
-export const questionOptionSchema = z.object({
-  id: z.string(),
-  label: z.string(),
-  description: z.string().optional(),
-});
 
-export const QUESTION_KINDS = ["text", "choice", "approval", "edit-artifact"] as const;
-export type QuestionKind = (typeof QUESTION_KINDS)[number];
-
-const questionTextSchema = z.object({ kind: z.literal("text"), body: z.string() });
-const questionChoiceSchema = z.object({
-  kind: z.literal("choice"),
-  body: z.string(),
-  options: z.array(questionOptionSchema).min(1),
-  multi: z.boolean(),
-  allowOther: z.boolean(),
-});
-const questionApprovalSchema = z.object({ kind: z.literal("approval"), body: z.string() });
-const questionEditArtifactSchema = z.object({
-  kind: z.literal("edit-artifact"),
-  body: z.string(),
-  artifactKey: z.string(),
-});
-
-export const questionSchema = z.discriminatedUnion("kind", [
-  questionTextSchema,
-  questionChoiceSchema,
-  questionApprovalSchema,
-  questionEditArtifactSchema,
-]);
-export type Question = z.infer<typeof questionSchema>;
-
-const questionSchemaByKind: Record<QuestionKind, z.ZodTypeAny> = {
-  text: questionTextSchema,
-  choice: questionChoiceSchema,
-  approval: questionApprovalSchema,
-  "edit-artifact": questionEditArtifactSchema,
-};
+// Re-exported for the pipeline barrel, which used to read them from here.
+export {
+  questionOptionSchema,
+  questionSchema,
+  questionSchemaByKind,
+  QUESTION_KINDS,
+  type Question,
+  type QuestionKind,
+  type QuestionOption,
+} from "../question.js";
 
 /**
  * The token usage an agent may report inside the `done` arm of its Output

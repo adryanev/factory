@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { boolean, check, index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
-import type { Id } from "@factory/shared";
+import type { Answer, Id, QuestionOption } from "@factory/shared";
 import { groups } from "./projects.js";
 import { users } from "./principals.js";
 import { stepRuns } from "./step_runs.js";
@@ -28,10 +28,10 @@ export const questions = pgTable(
       .$type<Id<"steprun">>(),
     kind: text("kind").notNull().$type<"text" | "choice" | "approval" | "edit-artifact">(),
     body: text("body").notNull(),
-    options: jsonb("options"),
-    multi: boolean("multi"),
-    allowOther: boolean("allow_other"),
-    artifactKey: text("artifact_key"),
+    options: jsonb("options").$type<QuestionOption[] | null>(),
+    multi: boolean("multi").$type<boolean | null>(),
+    allowOther: boolean("allow_other").$type<boolean | null>(),
+    artifactKey: text("artifact_key").$type<string | null>(),
     // Question ditujukan ke Group (audiens), bukan individu (spec: "Step
     // yang menunggu manusia").
     groupId: text("group_id")
@@ -45,7 +45,7 @@ export const questions = pgTable(
     answeredByPrincipalId: text("answered_by_principal_id")
       .references(() => users.principalId)
       .$type<Id<"user">>(),
-    answer: jsonb("answer"),
+    answer: jsonb("answer").$type<Answer | null>(),
   },
   (table) => [
     check(

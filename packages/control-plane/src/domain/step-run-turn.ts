@@ -264,6 +264,8 @@ export interface QuestionInput {
   artifactKey?: string | undefined;
   ref: { branch: string; sha: string };
   sessionBlobKey?: string | undefined;
+  /** The agent session id the blob carries — preserved so a resumed turn can `resumeSession` it (issue 13, AC2). */
+  sessionId?: string | undefined;
 }
 
 /**
@@ -322,6 +324,7 @@ export async function submitQuestion(
       outputRefBranch: input.ref.branch,
       outputRefSha: input.ref.sha,
       sessionBlobKey: input.sessionBlobKey ?? row.sessionBlobKey,
+      sessionId: input.sessionId ?? row.sessionId,
     })
     .where(eq(stepRuns.id, stepRunId));
 

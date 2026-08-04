@@ -1,6 +1,6 @@
 {
-  "id": "df3aef39-c20a-41aa-b029-0b960c967bef",
-  "prevId": "0333f1bc-7671-481a-a330-3f79c65bed2e",
+  "id": "b80ee66c-aa2b-4e88-b2c3-294c8127497a",
+  "prevId": "df3aef39-c20a-41aa-b029-0b960c967bef",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1278,6 +1278,19 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "step_run_costs_price_version_price_versions_version_fk": {
+          "name": "step_run_costs_price_version_price_versions_version_fk",
+          "tableFrom": "step_run_costs",
+          "tableTo": "price_versions",
+          "columnsFrom": [
+            "price_version"
+          ],
+          "columnsTo": [
+            "version"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -1551,6 +1564,65 @@
           "value": "\"step_runs\".\"kind\" is null or \"step_runs\".\"kind\" = 'pull-request'"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.price_versions": {
+      "name": "price_versions",
+      "schema": "",
+      "columns": {
+        "version": {
+          "name": "version",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "effective_at": {
+          "name": "effective_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "input_token_usd_per_million": {
+          "name": "input_token_usd_per_million",
+          "type": "numeric(12, 6)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "output_token_usd_per_million": {
+          "name": "output_token_usd_per_million",
+          "type": "numeric(12, 6)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "price_versions_effective_at_idx": {
+          "name": "price_versions_effective_at_idx",
+          "columns": [
+            {
+              "expression": "effective_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.questions": {

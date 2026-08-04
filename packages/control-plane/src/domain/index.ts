@@ -33,6 +33,11 @@ import type { ClaimedStepRun, ClaimInput } from "./step-run-claim.js";
 import * as stepRunLogsDomain from "./step-run-logs.js";
 import * as stepRunArtifactsDomain from "./step-run-artifacts.js";
 import * as costsDomain from "./costs.js";
+import * as stepRunQuestionsDomain from "./step-run-questions.js";
+import type {
+  AnswerQuestionResult,
+  QuestionState,
+} from "./step-run-questions.js";
 import type {
   ArtifactMetadataInput,
   LogChunkInput,
@@ -180,6 +185,18 @@ export interface Domain {
     /** Web surface, Project `member`: one artifact plus a freshly-minted presigned GET. */
     getArtifact: (principal: Principal, artifactId: Id<"artifact">) => Promise<ArtifactRead>;
   };
+  questions: {
+    /** Web surface, group member: the "Menunggu saya" list — every open Question whose audience Group contains the caller. */
+    listWaiting: (principal: Principal) => Promise<QuestionState[]>;
+    /** Web surface, group member: one Question's latest state. */
+    get: (principal: Principal, questionId: Id<"question">) => Promise<QuestionState>;
+    /** Web surface, group member: record an answer, compare-and-set. `race-lost` is the ordinary outcome of losing the race (AC8), not an exception. */
+    answer: (
+      principal: Principal,
+      questionId: Id<"question">,
+      answer: import("@factory/shared").Answer,
+    ) => Promise<AnswerQuestionResult>;
+  };
   secrets: {
     createServiceAccount: (
       principal: Principal,
@@ -273,6 +290,12 @@ export function createDomain(deps: AppDeps): Domain {
         stepRunArtifactsDomain.listStepRunArtifacts(deps, principal, stepRunId, key),
       getArtifact: (principal, artifactId) =>
         stepRunArtifactsDomain.getArtifact(deps, principal, artifactId),
+    },
+    questions: {
+      listWaiting: (principal) => stepRunQuestionsDomain.listWaitingQuestions(deps, principal),
+      get: (principal, questionId) => stepRunQuestionsDomain.getQuestion(deps, principal, questionId),
+      answer: (principal, questionId, answer) =>
+        stepRunQuestionsDomain.answerQuestion(deps, principal, questionId, answer),
     },
     secrets: {
       createServiceAccount: (principal, projectId, name) =>

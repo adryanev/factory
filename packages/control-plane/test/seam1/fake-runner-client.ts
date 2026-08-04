@@ -102,6 +102,7 @@ export function createRunnerClient(baseUrl: string) {
         };
         ref: { branch: string; sha: string };
         session_blob_key?: string;
+        session_id?: string;
       },
     ) => postRunner<{ question_id: string }>(baseUrl, `/step-runs/${stepRunId}/question`, secret, input),
 

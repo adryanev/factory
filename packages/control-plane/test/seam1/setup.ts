@@ -6,6 +6,9 @@
  * control plane itself — a Runner-shaped test only needs to be an ordinary
  * HTTP client.
  */
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -13,6 +16,7 @@ import { Pool } from "pg";
 import { createDatabase } from "../../src/db/client.js";
 import { MIGRATIONS_FOLDER } from "../../src/db/migrations-path.js";
 import { createClaimConnectionLimiter, type AppDeps, type Clock, type RandomSource } from "../../src/deps.js";
+import { createFileKeyRing } from "../../src/domain/master-key.js";
 import { bootstrapBreakGlassAccount } from "../../src/domain/auth.js";
 import { bootControlPlane } from "../../src/boot.js";
 import { CSRF_HEADER_NAME, CSRF_HEADER_VALUE } from "../../src/csrf.js";
@@ -27,6 +31,13 @@ export interface TestRig {
   pool: Pool;
   githubOAuth: FakeGithubOAuthClient;
   gitHost: FakeGitHost;
+  /**
+   * Absolute path of this rig's master key file — the key material comes
+   * from a FILE, never an env var (spec), and the rig exercises exactly that
+   * path. Rotation tests rewrite this file (adding a key version) and call
+   * the rotate endpoint to observe the incremental re-encryption.
+   */
+  masterKeyFile: string;
   /** Moves the injected clock. No test in this rig ever reads the wall clock. */
   setClock(date: Date): void;
   /** `fetch` with the CSRF header every mutating request needs already set — tests only add it explicitly when they mean to test its absence. */
@@ -83,6 +94,13 @@ export async function startTestRig(options: TestRigOptions = {}): Promise<TestRi
   const githubOAuth = createFakeGithubOAuthClient();
   const gitHost = createFakeGitHost();
 
+  // Master key from a FILE — exactly the production shape (spec). One stable
+  // version 1 key; rotation tests rewrite this file to add version 2.
+  const masterKeyDir = await mkdtemp(path.join(os.tmpdir(), "factory-master-key-"));
+  const masterKeyFile = path.join(masterKeyDir, "master-key.json");
+  const v1Key = "1a".repeat(32);
+  await writeFile(masterKeyFile, JSON.stringify({ currentVersion: 1, keys: { "1": v1Key } }));
+
   const deps: AppDeps = {
     db: createDatabase(pool),
     pool,
@@ -90,6 +108,7 @@ export async function startTestRig(options: TestRigOptions = {}): Promise<TestRi
     random: seededRandom(42),
     githubOAuth,
     gitHost,
+    keyring: createFileKeyRing(masterKeyFile),
     claimHoldRangeMs: options.claimHoldRangeMs ?? { min: 150, max: 350 },
     claimLimiter: createClaimConnectionLimiter(options.maxHangingClaims ?? 2000),
   };
@@ -112,6 +131,7 @@ export async function startTestRig(options: TestRigOptions = {}): Promise<TestRi
     pool,
     githubOAuth,
     gitHost,
+    masterKeyFile,
     setClock: (date: Date) => {
       currentTime = date;
     },
@@ -144,6 +164,7 @@ export async function startTestRig(options: TestRigOptions = {}): Promise<TestRi
       });
       await pool.end();
       await container.stop();
+      await rm(masterKeyDir, { recursive: true, force: true });
     },
   };
 }

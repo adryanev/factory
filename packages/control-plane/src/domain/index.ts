@@ -21,6 +21,8 @@ import * as runnersDomain from "./runners.js";
 import * as claimDomain from "./step-run-claim.js";
 import * as turnDomain from "./step-run-turn.js";
 import * as stepRunOpsDomain from "./step-run-ops.js";
+import * as secretsDomain from "./secrets.js";
+import * as egressDomain from "./egress.js";
 import type { Principal } from "./principal.js";
 import type { LoginResult } from "./auth.js";
 import type { Project, ProjectRole } from "./projects.js";
@@ -29,6 +31,7 @@ import type { RunListFilters, RunPage, RunWithGraph, TriggerRunInput, TriggeredR
 import type { DesiredState, HeartbeatLease, HeartbeatReply, RunnerIdentity } from "./runners.js";
 import type { ClaimedStepRun, ClaimInput } from "./step-run-claim.js";
 import type { LogChunkInput, QuestionInput, ResultInput, ResultRecord, UploadGrant, UploadRequest } from "./step-run-turn.js";
+import type { ServiceAccountInfo, StoredSecret, PutSecretInput } from "./secrets.js";
 
 export type { Principal } from "./principal.js";
 export type { Project, ProjectRole } from "./projects.js";
@@ -54,6 +57,7 @@ export type {
   UploadGrant,
   UploadRequest,
 } from "./step-run-turn.js";
+export type { ServiceAccountInfo, StoredSecret, PutSecretInput } from "./secrets.js";
 
 export interface Domain {
   auth: {
@@ -75,6 +79,11 @@ export interface Domain {
       role: ProjectRole,
     ) => Promise<void>;
     selfAddAsMember: (principal: Principal, projectId: Id<"project">) => Promise<void>;
+    updateSettings: (
+      principal: Principal,
+      projectId: Id<"project">,
+      patch: { allowSharedAgentCredential?: boolean },
+    ) => Promise<Project>;
   };
   groups: {
     create: (principal: Principal, projectId: Id<"project">, name: string) => Promise<Group>;
@@ -141,6 +150,27 @@ export interface Domain {
     /** Operator surface, Project `member`. */
     cancel: (principal: Principal, stepRunId: Id<"steprun">) => Promise<void>;
   };
+  secrets: {
+    createServiceAccount: (
+      principal: Principal,
+      projectId: Id<"project">,
+      name: string,
+    ) => Promise<ServiceAccountInfo>;
+    listServiceAccounts: (principal: Principal, projectId: Id<"project">) => Promise<ServiceAccountInfo[]>;
+    store: (principal: Principal, projectId: Id<"project">, input: PutSecretInput) => Promise<StoredSecret>;
+    update: (
+      principal: Principal,
+      projectId: Id<"project">,
+      secretId: Id<"secret">,
+      value: string,
+    ) => Promise<StoredSecret>;
+    remove: (principal: Principal, projectId: Id<"project">, secretId: Id<"secret">) => Promise<void>;
+    list: (principal: Principal, projectId: Id<"project">) => Promise<StoredSecret[]>;
+    rotate: (principal: Principal, projectId: Id<"project">) => Promise<{ rotated: number; toVersion: number }>;
+  };
+  egress: {
+    setAllowlist: (principal: Principal, projectId: Id<"project">, allowlist: string[]) => Promise<string[]>;
+  };
 }
 
 export function createDomain(deps: AppDeps): Domain {
@@ -161,6 +191,8 @@ export function createDomain(deps: AppDeps): Domain {
         projectsDomain.addProjectMember(deps, principal, projectId, targetPrincipalId, role),
       selfAddAsMember: (principal, projectId) =>
         projectsDomain.selfAddAsProjectMember(deps, principal, projectId),
+      updateSettings: (principal, projectId, patch) =>
+        projectsDomain.updateProjectSettings(deps, principal, projectId, patch),
     },
     groups: {
       create: (principal, projectId, name) => groupsDomain.createGroup(deps, principal, projectId, name),
@@ -197,6 +229,23 @@ export function createDomain(deps: AppDeps): Domain {
       submitResult: (runner, stepRunId, leaseToken, input) =>
         turnDomain.submitResult(deps, runner, stepRunId, leaseToken, input),
       cancel: (principal, stepRunId) => stepRunOpsDomain.cancelStepRun(deps, principal, stepRunId),
+    },
+    secrets: {
+      createServiceAccount: (principal, projectId, name) =>
+        secretsDomain.createServiceAccount(deps, principal, projectId, name),
+      listServiceAccounts: (principal, projectId) =>
+        secretsDomain.listServiceAccounts(deps, principal, projectId),
+      store: (principal, projectId, input) => secretsDomain.storeSecret(deps, principal, projectId, input),
+      update: (principal, projectId, secretId, value) =>
+        secretsDomain.updateSecretValue(deps, principal, projectId, secretId, value),
+      remove: (principal, projectId, secretId) =>
+        secretsDomain.deleteSecret(deps, principal, projectId, secretId),
+      list: (principal, projectId) => secretsDomain.listSecrets(deps, principal, projectId),
+      rotate: (principal, projectId) => secretsDomain.rotateProjectSecrets(deps, principal, projectId),
+    },
+    egress: {
+      setAllowlist: (principal, projectId, allowlist) =>
+        egressDomain.setProjectEgressAllowlist(deps, principal, projectId as never, allowlist),
     },
   };
 }

@@ -66,6 +66,12 @@ const claimedStepRunSchema = z.object({
   lease_token: z.string(),
   lease_expires_at: z.string(),
   git_tokens: z.object({ fetch: gitTokenSchema, push: gitTokenSchema }),
+  // Resolved at scheduling (spec: "secret di-resolve saat penjadwalan") for
+  // the Run's credential Principal; the Runner hands these to the agent call
+  // and never writes them to a file inside the sandbox (AC5).
+  secrets: z.record(z.string(), z.string()),
+  // Default-deny egress allowlist for the sandbox (AC6).
+  egress_allowlist: z.array(z.string()),
 });
 const claimResponseSchema = z.object({ step_run: claimedStepRunSchema.nullable() }).openapi("ClaimResponse");
 
@@ -312,6 +318,8 @@ export function registerRunnerProtocolRoutes(app: OpenAPIHono<AppEnv>, deps: Rou
           lease_token: claimed.leaseToken,
           lease_expires_at: claimed.leaseExpiresAt.toISOString(),
           git_tokens: { fetch: toTokenWire(claimed.gitTokens.fetch), push: toTokenWire(claimed.gitTokens.push) },
+          secrets: claimed.secrets,
+          egress_allowlist: claimed.egressAllowlist,
         },
       },
       200,

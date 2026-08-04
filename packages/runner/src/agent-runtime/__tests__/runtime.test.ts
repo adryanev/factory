@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Sandbox, SandboxProvider } from "@ai-hero/sandcastle";
+import type { EgressControl } from "../egress.js";
 import { createFactoryHostProvider } from "../host-provider.js";
 import { createTurnRuntime, TurnCancelledError } from "../runtime.js";
 import type { DockerControl, HostProcessControl, TurnRuntimeDeps } from "../types.js";
@@ -80,14 +81,18 @@ function fakeDocker(): DockerControl & { calls: string[] } {
 function fakeHostProcess(overrides: { exitCode?: number; stdout?: string; delayMs?: number } = {}): HostProcessControl & {
   killed: number[];
   spawned: number;
+  spawnOptions: { env: Record<string, string>; runAsUser?: string }[];
 } {
   let spawned = 0;
   const killed: number[] = [];
+  const spawnOptions: { env: Record<string, string>; runAsUser?: string }[] = [];
   return {
     spawned,
     killed,
+    spawnOptions,
     spawnShell(command, cwd, options) {
       spawned += 1;
+      spawnOptions.push({ env: options.env, ...(options.runAsUser !== undefined ? { runAsUser: options.runAsUser } : {}) });
       return {
         pgid: 4242,
         result: new Promise((resolve) => {
@@ -109,25 +114,48 @@ function fakeHostProcess(overrides: { exitCode?: number; stdout?: string; delayM
   };
 }
 
+function fakeEgress(): EgressControl & { applied: { user: string; allowlist: string[] }[]; removed: string[] } {
+  const applied: { user: string; allowlist: string[] }[] = [];
+  const removed: string[] = [];
+  return {
+    applied,
+    removed,
+    async apply(user, allowlist) {
+      applied.push({ user, allowlist });
+      return `anchor-${user}`;
+    },
+    async remove(handle) {
+      removed.push(handle);
+    },
+  };
+}
+
 function makeDeps(overrides: {
   sandbox?: ReturnType<typeof fakeSandbox>;
   docker?: ReturnType<typeof fakeDocker>;
   hostProcess?: ReturnType<typeof fakeHostProcess>;
+  hostAgentUser?: string;
+  egress?: ReturnType<typeof fakeEgress>;
 } = {}): TurnRuntimeDeps & {
   createdProviders: SandboxProvider[];
   sandbox: ReturnType<typeof fakeSandbox>;
   docker: ReturnType<typeof fakeDocker>;
   hostProcess: ReturnType<typeof fakeHostProcess>;
+  egress: ReturnType<typeof fakeEgress> | undefined;
 } {
   const sandbox = overrides.sandbox ?? fakeSandbox();
   const docker = overrides.docker ?? fakeDocker();
   const hostProcess = overrides.hostProcess ?? fakeHostProcess();
+  const egress = overrides.egress ?? fakeEgress();
   const createdProviders: SandboxProvider[] = [];
   return {
     createdProviders,
     sandbox,
     docker,
     hostProcess,
+    egress,
+    ...(overrides.hostAgentUser !== undefined ? { hostAgentUser: overrides.hostAgentUser } : {}),
+    ...(overrides.egress !== undefined ? { egress: overrides.egress } : {}),
     async createSandbox(options) {
       createdProviders.push(options.sandbox);
       // Host mode: exercise the *real* host provider (tag "bind-mount") with
@@ -243,5 +271,71 @@ describe("agent-runtime: shell turn", () => {
     turn.cancel(); // cancelled before the command spawns — the host provider's shouldSkip swallows the spawn.
     await expect(turn.done).rejects.toThrow(TurnCancelledError);
     expect(deps.hostProcess.spawned).toBe(0); // the command never even started.
+  });
+
+  it("AC5 — host mode injects the secrets into the spawned process environment, not a file", async () => {
+    const deps = makeDeps();
+    const runtime = createTurnRuntime(deps);
+    const turn = runtime.startTurn({
+      ...shellSpec,
+      secrets: { DEPLOY_KEY: "super-secret", API_KEY: "another-secret" },
+    });
+    await turn.done;
+
+    expect(deps.hostProcess.spawnOptions).toHaveLength(1);
+    expect(deps.hostProcess.spawnOptions[0]!.env).toMatchObject({
+      DEPLOY_KEY: "super-secret",
+      API_KEY: "another-secret",
+    });
+    // The secrets ride the spawned process environment, which is not visible
+    // in `ps` (unlike argv) and is never a file inside the sandbox.
+  });
+
+  it("AC5 — docker mode inlines the secrets as shell env assignments in the command, never a file", async () => {
+    const deps = makeDeps();
+    const runtime = createTurnRuntime(deps);
+    const turn = runtime.startTurn({
+      ...shellSpec,
+      runsOn: "docker",
+      secrets: { DEPLOY_KEY: "super secret with 'quotes'" },
+    });
+    await turn.done;
+
+    const command = deps.sandbox.execCalls[0]!.command;
+    expect(command).toContain("DEPLOY_KEY='super secret with '\\''quotes'\\'''");
+    expect(command).toContain("make build");
+    // No file was written into the sandbox — the only transport is the command
+    // itself (visible in docker inspect — a documented unprotected surface).
+    expect(deps.sandbox.execCalls).toHaveLength(1);
+  });
+
+  it("AC7 — exec:host spawns the agent as the configured OS user, separate from the Runner", async () => {
+    const deps = makeDeps({ hostAgentUser: "factoryjob" });
+    const runtime = createTurnRuntime(deps);
+    const turn = runtime.startTurn(shellSpec);
+    await turn.done;
+    expect(deps.hostProcess.spawnOptions[0]!.runAsUser).toBe("factoryjob");
+  });
+
+  it("AC6 — host mode applies the default-deny allowlist rules for the agent user and removes them at teardown", async () => {
+    const egress = fakeEgress();
+    const deps = makeDeps({ hostAgentUser: "factoryjob", egress });
+    const runtime = createTurnRuntime(deps);
+    const turn = runtime.startTurn({ ...shellSpec, egressAllowlist: ["github.com", "registry.npmjs.org"] });
+    await turn.done;
+
+    expect(egress.applied).toEqual([
+      { user: "factoryjob", allowlist: ["github.com", "registry.npmjs.org"] },
+    ]);
+    expect(egress.removed).toEqual(["anchor-factoryjob"]);
+  });
+
+  it("AC6 — without an agent user there is no egress scope, and no rules are applied", async () => {
+    const egress = fakeEgress();
+    const deps = makeDeps({ egress });
+    const runtime = createTurnRuntime(deps);
+    const turn = runtime.startTurn({ ...shellSpec, egressAllowlist: ["github.com"] });
+    await turn.done;
+    expect(egress.applied).toEqual([]);
   });
 });

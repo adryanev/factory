@@ -26,6 +26,10 @@ export interface ClaimedStepRun {
   leaseToken: string;
   leaseExpiresAt: string;
   gitTokens: { fetch: GitTokenWire; push: GitTokenWire };
+  /** The Project's secrets, resolved at claim — handed to the agent call, never written to a file inside the sandbox (AC5). */
+  secrets: Record<string, string>;
+  /** Default-deny egress allowlist for the sandbox (AC6). */
+  egressAllowlist: string[];
 }
 
 export interface HeartbeatReply {

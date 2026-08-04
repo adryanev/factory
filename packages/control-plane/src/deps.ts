@@ -16,6 +16,7 @@ import type { Pool } from "pg";
 import { createDatabase, type Database } from "./db/client.js";
 import { createGithubOAuthClient, type GithubOAuthClient } from "./domain/github-identity.js";
 import { createGithubHost, type GithubAppConfig, type GitHost } from "./domain/git-host.js";
+import type { KeyRing } from "./domain/master-key.js";
 
 export interface Clock {
   now(): Date;
@@ -63,6 +64,14 @@ export interface AppDeps {
   githubOAuth: GithubOAuthClient;
   gitHost: GitHost;
   /**
+   * The master key, loaded from a FILE at boot (spec: "Master key dari file,
+   * bukan environment variable") — see `domain/master-key.ts` for why the
+   * key material must never ride an env var. Decrypting a secret row is the
+   * one use; every decryption goes through `domain/secrets.ts`, never a
+   * route.
+   */
+  keyring: KeyRing;
+  /**
    * `/claim`'s long-poll hold duration is randomized server-side in this
    * range so a herd of Runners arriving together (e.g. right after a
    * control-plane restart) breaks up within one cycle instead of
@@ -109,7 +118,8 @@ const MAX_HANGING_CLAIM_CONNECTIONS = 2000;
 export function createDeps(
   pool: Pool,
   githubConfig: GithubOAuthConfig,
-  gitHostConfig?: GithubAppConfig,
+  gitHostConfig: GithubAppConfig | undefined,
+  keyring: KeyRing,
 ): AppDeps {
   return {
     db: createDatabase(pool),
@@ -118,6 +128,7 @@ export function createDeps(
     random: createSystemRandom(),
     githubOAuth: createGithubOAuthClient(githubConfig),
     gitHost: createGithubHost(gitHostConfig),
+    keyring,
     claimHoldRangeMs: PRODUCTION_CLAIM_HOLD_RANGE_MS,
     claimLimiter: createClaimConnectionLimiter(MAX_HANGING_CLAIM_CONNECTIONS),
   };

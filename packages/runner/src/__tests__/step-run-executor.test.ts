@@ -27,6 +27,8 @@ function claimFixture(overrides: Partial<ClaimedStepRun> = {}): ClaimedStepRun {
       fetch: { token: "fetch-token", expiresAt: "2026-01-01T01:00:00.000Z", repositoryIds: [1], permissions: { contents: "write" } },
       push: { token: "push-token", expiresAt: "2026-01-01T01:00:00.000Z", repositoryIds: [1], permissions: { contents: "write" } },
     },
+    secrets: { DEPLOY_KEY: "super-secret-value" },
+    egressAllowlist: ["github.com", "registry.npmjs.org"],
     ...overrides,
   };
 }
@@ -200,6 +202,15 @@ describe("step-run executor: the commit point", () => {
     expect(spec).not.toHaveProperty("timeoutSeconds");
     expect(spec).not.toHaveProperty("deadline");
     expect(spec).not.toHaveProperty("wallClock");
+  });
+
+  it("AC5/AC6 — the claim's secrets and egress allowlist travel to the turn spec (handed to the agent call, never a file)", async () => {
+    const { deps, startTurnCalls } = makeDeps();
+    await executeClaimedTurn(deps, claimFixture({ secrets: { DEPLOY_KEY: "super-secret" } }));
+
+    const spec = startTurnCalls[0]! as TurnSpec & { kind: "shell" };
+    expect(spec.secrets).toEqual({ DEPLOY_KEY: "super-secret" });
+    expect(spec.egressAllowlist).toEqual(["github.com", "registry.npmjs.org"]);
   });
 
   it("AC8 — a step declaring exec:host selects the host provider; exec:docker (and the default) selects docker", () => {

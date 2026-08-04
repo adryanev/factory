@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, pgTable, primaryKey, text, unique } from "drizzle-orm/pg-core";
+import { boolean, check, jsonb, pgTable, primaryKey, text, unique } from "drizzle-orm/pg-core";
 import type { Id } from "@factory/shared";
+import { DEFAULT_EGRESS_ALLOWLIST } from "../../domain/egress-policy.js";
 import { users } from "./principals.js";
 
 /**
@@ -19,6 +20,11 @@ export const projects = pgTable("projects", {
   // Izin sadar per Project untuk `runsOn: [exec:host]`, bawaan mati (spec:
   // "saya ingin mode eksekusi langsung di host jadi izin ... sadar per Project").
   hostExecAllowed: boolean("host_exec_allowed").notNull().default(false),
+  // Default-deny egress dari Sandbox; allowlist per Project ini adalah
+  // satu-satunya pengecualian. Perubahan dicatat di audit log (spec:
+  // "Default-deny egress dari Sandbox; allowlist per Project masuk daftar
+  // audit"). Default = allowlist bawaan (`egress-policy.ts`).
+  egressAllowlist: jsonb("egress_allowlist").$type<string[]>().notNull().default(DEFAULT_EGRESS_ALLOWLIST),
   // Satu outgoing webhook per Project — kolom di sini, bukan tabel tersendiri,
   // karena tidak ada kardinalitas untuk dimodelkan (spec: "Notifikasi").
   notificationWebhookUrl: text("notification_webhook_url"),

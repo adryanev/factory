@@ -26,6 +26,7 @@ import { registerStepRunArtifactRoutes } from "./routes/step-run-artifacts.js";
 import { registerCostRoutes } from "./routes/costs.js";
 import { registerQuestionRoutes } from "./routes/questions.js";
 import { registerPipelineEditorRoutes } from "./routes/pipeline-editor.js";
+import { registerAutomationRoutes, GITHUB_WEBHOOK_PATH } from "./routes/automation.js";
 import { isRunnerProtocolPath } from "./routes/runner-protocol-paths.js";
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024; // spec: "Batas ukuran: badan JSON 1 MiB semua endpoint" (Runner surface).
@@ -73,10 +74,13 @@ export function createApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   // — a Runner is a bearer-authenticated non-browser client with no ambient
   // cookie a foreign origin could ever ride, so this defense has nothing to
   // defend for those paths, and requiring the header there would just be
-  // friction with no security value.
+  // friction with no security value. Same for the GitHub App webhook
+  // (`/webhook/github`): it authenticates by HMAC, not by cookie, and its
+  // real gate is the signature check inside `domain/automation.ts`.
   app.use("*", async (c, next) => {
     const isMutating = !["GET", "HEAD", "OPTIONS"].includes(c.req.method);
-    if (isMutating && !isRunnerProtocolPath(c.req.path) && c.req.header(CSRF_HEADER_NAME) === undefined) {
+    const exempt = isRunnerProtocolPath(c.req.path) || c.req.path === GITHUB_WEBHOOK_PATH;
+    if (isMutating && !exempt && c.req.header(CSRF_HEADER_NAME) === undefined) {
       return c.json(
         { code: "csrf_header_required", message: `mutating requests must send the ${CSRF_HEADER_NAME} header` },
         403,
@@ -140,6 +144,7 @@ export function createApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerCostRoutes(app, { domain, clock: deps.clock });
   registerQuestionRoutes(app, { domain, clock: deps.clock });
   registerPipelineEditorRoutes(app, { domain, clock: deps.clock });
+  registerAutomationRoutes(app, { domain, clock: deps.clock });
 
   return app;
 }

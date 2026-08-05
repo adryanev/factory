@@ -2,7 +2,7 @@ export { validatePipelineDefinition } from "./validate.js";
 export type { ValidationResult, ValidationIssue } from "./validate.js";
 export { serializePipeline } from "./serialize.js";
 
-export { pipelineSchema, stepSchema, branchSchema, outputRefSchema, joinPolicySchema, askSchema, resolveEffectiveStep } from "./schema.js";
+export { pipelineSchema, stepSchema, branchSchema, outputRefSchema, joinPolicySchema, askSchema, onSchema, onPushSchema, cronExpressionSchema, resolveEffectiveStep, type RawOn } from "./schema.js";
 export type { Pipeline, Step, Branch, OutputRef, JoinPolicy } from "./types.js";
 
 export {
@@ -42,6 +42,9 @@ export {
 
 export { KEY_PATTERN, isValidKey } from "./key.js";
 export { DURATION_PATTERN, durationSchema, humanTimeoutSchema } from "./duration.js";
+
+export { globMatches, anyGlobMatches, globToRegExp } from "./glob.js";
+export { cronMatches, isValidCronExpression } from "./cron.js";
 
 export { stepRunBranchName, type StepRunBranchInput } from "./step-run-branch.js";
 

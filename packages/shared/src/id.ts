@@ -50,6 +50,7 @@ export const ID_PREFIXES = [
   // nothing is stored — but it is a client-generated id like every other
   // prefix, and a table-less prefix is exactly as cheap.
   "edit",
+  "skip",
 ] as const;
 export type IdPrefix = (typeof ID_PREFIXES)[number];
 

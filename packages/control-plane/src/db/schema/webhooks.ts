@@ -3,16 +3,30 @@ import type { Id } from "@factory/shared";
 import { repositories } from "./repositories.js";
 
 /**
- * Dedup lapis pertama: `X-GitHub-Delivery` selama 24 jam (spec: "Automation").
- * `deliveryId` adalah id GitHub sendiri (bukan id yang kita bangkitkan), jadi
- * primary key polos sudah cukup sebagai dedup — tidak perlu partial unique
- * index di sini (issue 25-database-schema.md, bagian "Dedup").
+ * Dedup lapis pertama + antrean event mentah: `X-GitHub-Delivery` sebagai
+ * primary key (spec: "Automation"). `deliveryId` adalah id GitHub sendiri
+ * (bukan id yang kita bangkitkan), jadi primary key polos sudah cukup sebagai
+ * dedup — tidak perlu partial unique index di sini (issue
+ * 25-database-schema.md, bagian "Dedup").
+ *
+ * Endpoint webhook memverifikasi HMAC lalu menaruh event mentah di sini dan
+ * menjawab 2xx; seluruh pekerjaan pemetaan terjadi di sweep, di luar jalur
+ * request GitHub (ticket 22: "menaruh event mentah di tabel dan menjawab
+ * 2xx. Seluruh pekerjaan pemetaan terjadi setelah itu"). `processedAt` adalah
+ * penanda pemetaan: `NULL` = belum dipetakan, diambil sweep dari yang paling
+ * tua. Kegagalan pemetaan membiarkan baris tetap `NULL` sehingga pengiriman
+ * berikutnya mencoba lagi; baris yang lebih tua dari jendela 24 jam dipangkas
+ * apa pun statusnya, jadi retry punya batas natural (dan GitHub sendiri punya
+ * tombol redelivery untuk yang hilang).
  */
 export const webhookDeliveries = pgTable(
   "webhook_deliveries",
   {
     deliveryId: text("delivery_id").primaryKey(),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    eventType: text("event_type").notNull(),
+    payload: jsonb("payload").notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
   },
   (table) => [index("webhook_deliveries_received_at_idx").on(table.receivedAt)],
 );
@@ -21,9 +35,12 @@ export const webhookDeliveries = pgTable(
  * Cache definisi Pipeline — wajib (bukan optimasi murni) karena pemetaan
  * webhook→Pipeline butuh tahu Pipeline apa yang ada tanpa menembak GitHub
  * tiap kejadian, tapi tetap boleh dihapus kapan saja karena jalur pengisian
- * sinkron saat miss selalu ada (spec: "Automation"). Diperbarui di latar
- * saat push ke default branch; TIDAK PERNAH dibaca jalur eksekusi — eksekusi
- * membaca snapshot di `runs.definition`.
+ * sinkron saat miss selalu ada (spec: "Automation"). Ini **indeks penemuan**
+ * (repository, path) mana yang Pipeline; `parsed` disimpan agar isi cache
+ * bisa diperiksa, tapi TIDAK PERNAH dibaca jalur eksekusi — eksekusi membaca
+ * definisi segar dari ref yang dipicu dan menyimpan snapshot di
+ * `runs.definition`. `ref`/`contentSha` mencatat dari mana baris ini diisi,
+ * sehingga panggilan yang butuh definisi segar bisa tahu kapan baris usang.
  */
 export const pipelineDefinitionCache = pgTable(
   "pipeline_definition_cache",

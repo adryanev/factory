@@ -22,6 +22,7 @@ import * as claimDomain from "./step-run-claim.js";
 import * as turnDomain from "./step-run-turn.js";
 import * as stepRunOpsDomain from "./step-run-ops.js";
 import * as secretsDomain from "./secrets.js";
+import * as automationDomain from "./automation.js";
 import * as egressDomain from "./egress.js";
 import type { Principal } from "./principal.js";
 import type { LoginResult } from "./auth.js";
@@ -260,6 +261,29 @@ export interface Domain {
     list: (principal: Principal, projectId: Id<"project">) => Promise<StoredSecret[]>;
     rotate: (principal: Principal, projectId: Id<"project">) => Promise<{ rotated: number; toVersion: number }>;
   };
+  automation: {
+    /**
+     * The `/webhook/github` surface: verify the HMAC, drop the raw event
+     * (layer-1 dedup), answer. All mapping happens on the sweep — see
+     * `domain/automation.ts`.
+     */
+    ingestWebhook: (
+      input: automationDomain.WebhookIngestInput,
+    ) => Promise<automationDomain.WebhookIngestResult>;
+    /**
+     * The sweep — webhook deliveries → triggers, the concurrency-queue drain,
+     * and the schedule evaluation. Wired into `sweepExpiredLeases` so it
+     * rides boot + the executor cadence; tests call it directly.
+     */
+    sweep: () => Promise<{ deliveries: number; drained: number }>;
+    /** The "cron yang dilewati" list — Project `member`, keyset on id DESC. */
+    listCronSkips: (
+      principal: Principal,
+      projectId: Id<"project">,
+      cursor: string | null,
+      limit: number,
+    ) => Promise<automationDomain.CronSkipPage>;
+  };
   egress: {
     setAllowlist: (principal: Principal, projectId: Id<"project">, allowlist: string[]) => Promise<string[]>;
   };
@@ -375,6 +399,22 @@ export function createDomain(deps: AppDeps): Domain {
         secretsDomain.deleteSecret(deps, principal, projectId, secretId),
       list: (principal, projectId) => secretsDomain.listSecrets(deps, principal, projectId),
       rotate: (principal, projectId) => secretsDomain.rotateProjectSecrets(deps, principal, projectId),
+    },
+    automation: {
+      ingestWebhook: (input) =>
+        automationDomain.ingestWebhook(
+          { db: deps.db, clock: deps.clock, gitHost: deps.gitHost, githubWebhookSecret: deps.githubWebhookSecret },
+          input,
+        ),
+      sweep: () =>
+        automationDomain.sweepAutomation({
+          db: deps.db,
+          clock: deps.clock,
+          gitHost: deps.gitHost,
+          scheduleWatermark: deps.automationScheduleWatermark,
+        }),
+      listCronSkips: (principal, projectId, cursor, limit) =>
+        automationDomain.listCronSkips(deps, principal, projectId, cursor, limit),
     },
     egress: {
       setAllowlist: (principal, projectId, allowlist) =>

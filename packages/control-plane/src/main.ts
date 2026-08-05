@@ -69,6 +69,9 @@ async function main(): Promise<void> {
       // PR's checks area back to this Run's page (issue #17, AC7).
       runPageBaseUrl: process.env["FACTORY_WEB_URL"] ?? `http://localhost:${port}`,
     },
+    // The one GitHub App webhook secret (issue #18) — the HMAC the
+    // `/webhook/github` endpoint verifies before touching a payload.
+    requiredEnv("GITHUB_WEBHOOK_SECRET"),
   );
 
   // Idempotent — safe to run on every boot, including a config'd password

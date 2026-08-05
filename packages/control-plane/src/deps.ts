@@ -58,6 +58,22 @@ export function createClaimConnectionLimiter(maxHangingConnections: number): Cla
 export interface AppDeps {
   db: Database;
   /**
+   * The shared secret the GitHub App webhook signs with (issue #18). One
+   * endpoint, one secret — the HMAC check in `domain/automation.ts` is the
+   * only consumer; a wrong or absent secret means every webhook is rejected
+   * before its payload is trusted.
+   */
+  githubWebhookSecret: string;
+  /**
+   * Mutable per-process watermark for the schedule sweep (issue #18): one
+   * `on: schedule` evaluation per UTC minute per instance. Lives on deps so
+   * each test rig carries its own (the fixed test clock would otherwise
+   * freeze every rig behind the first one to sweep). Same shape as the
+   * `claimLimiter` precedent — deps is the composition root, and this is
+   * per-process state, not a route's business.
+   */
+  automationScheduleWatermark: { minute: string | null };
+  /**
    * The raw `pg.Pool` `db` wraps. Exists for exactly one caller:
    * `domain/step-run-claim.ts`'s hand-written `claim_step_run.sql`, which
    * needs positional `$1..$5` parameter binding and `FOR UPDATE SKIP LOCKED`
@@ -182,6 +198,7 @@ export function createDeps(
     controlPlaneInstanceId: "control-plane-unconfigured",
     runPageBaseUrl: "http://localhost:3000",
   },
+  githubWebhookSecret: string = "unconfigured-webhook-secret",
 ): AppDeps {
   const clock = createSystemClock();
   return {
@@ -193,6 +210,8 @@ export function createDeps(
     gitHost: createGithubHost(gitHostConfig),
     notificationSender: createNotificationSender(),
     keyring,
+    githubWebhookSecret,
+    automationScheduleWatermark: { minute: null },
     claimHoldRangeMs: PRODUCTION_CLAIM_HOLD_RANGE_MS,
     claimLimiter: createClaimConnectionLimiter(MAX_HANGING_CLAIM_CONNECTIONS),
     liveTailHoldMs: LIVE_TAIL_HOLD_MS,

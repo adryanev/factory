@@ -1,4 +1,4 @@
-export type { Pipeline, RawStep as Step, RawBranch as Branch } from "./schema.js";
+export type { Pipeline, RawStep as Step, RawBranch as Branch, RawOn as On } from "./schema.js";
 export type { OutputDescriptor, OutputsMap, ScalarType, FlatObjectDescriptor, Question, QuestionKind } from "./output-contract.js";
 
 /** A statically resolvable reference to an upstream Step's Output field. */

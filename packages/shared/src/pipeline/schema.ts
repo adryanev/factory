@@ -2,6 +2,7 @@ import { z } from "zod";
 import { KEY_PATTERN, KEY_PATTERN_DESCRIPTION } from "./key.js";
 import { durationSchema, humanTimeoutSchema } from "./duration.js";
 import { outputsMapSchema, QUESTION_KINDS } from "./output-contract.js";
+import { isValidCronExpression } from "./cron.js";
 
 /**
  * The Pipeline definition schema (spec.md, "Definisi Pipeline").
@@ -39,6 +40,46 @@ export const onHumanTimeoutSchema = z.enum(["fail", "continue"]);
 const keySchema = z
   .string()
   .regex(KEY_PATTERN, `Key ${KEY_PATTERN_DESCRIPTION}`);
+
+// ---------------------------------------------------------------------------
+// `on:` — the Automation trigger block (issue #18, spec: "Automation").
+// ---------------------------------------------------------------------------
+
+export const cronExpressionSchema = z
+  .string()
+  .refine(isValidCronExpression, {
+    message: "not a valid 5-field cron expression (minute hour day-of-month month day-of-week)",
+  });
+
+/**
+ * `on: { push: ... }` — the push filters. `branches:`/`paths:` use the
+ * whole-value wildcard language of `glob.ts` (`*`, `**`, `?`); `repos:`
+ * names other Repositories of the same Project and is what makes a Pipeline
+ * **lintas repo** (cross-repo): when one of those Repositories gets a push,
+ * this Pipeline is read from the default branch of its own host Repository
+ * and triggered over the pushed ref (ticket 22, "Pemetaan kejadian →
+ * Pipeline").
+ */
+export const onPushSchema = z.object({
+  branches: z.array(z.string().min(1)).optional(),
+  paths: z.array(z.string().min(1)).optional(),
+  repos: z.array(z.string().min(1)).optional(),
+});
+
+export const onSchema = z
+  .object({
+    push: onPushSchema.optional(),
+    pullRequest: z.boolean().optional(),
+    schedule: z.array(cronExpressionSchema).optional(),
+  })
+  .refine(
+    (on) => on.push !== undefined || on.pullRequest === true || (on.schedule?.length ?? 0) > 0,
+    {
+      message: "on: must declare at least one trigger — push:, pullRequest: true, or a non-empty schedule:.",
+    },
+  );
+
+export type RawOn = z.infer<typeof onSchema>;
 
 // ---------------------------------------------------------------------------
 // Branch (an element of `branches:`) — a full Step, minus the fields that
@@ -124,10 +165,15 @@ const pipelineShapeSchema = z.object({
   version: z.literal(1),
   name: z.string().min(1),
   repo: z.string().min(1),
+  // Automation triggers (issue #18). A Pipeline without `on:` is
+  // manual-trigger-only — automation reads this block, never anything else.
+  on: onSchema.optional(),
   unschedulableAfter: durationSchema.optional(),
   // No default on purpose: the "ask: requires concurrency:" rule below must
-  // tell an omitted field apart from an explicitly written one.
-  concurrency: z.string().min(1).optional(),
+  // tell an omitted field apart from an explicitly written one. `cancel`
+  // (the built-in default) is applied at the automation trigger site, never
+  // here — the same reason the join: default lives at its runtime call site.
+  concurrency: z.enum(["cancel", "queue"]).optional(),
   steps: z
     .record(z.string().min(1), stepSchema)
     .refine((steps) => Object.keys(steps).length > 0, {

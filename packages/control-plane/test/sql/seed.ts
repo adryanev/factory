@@ -164,8 +164,8 @@ export async function seedWebhookDelivery(
   purgedAt: Date | null = null,
 ): Promise<string> {
   await pool.query(
-    `insert into webhook_deliveries (delivery_id, received_at, purged_at) values ($1, $2, $3)`,
-    [deliveryId, receivedAt, purgedAt],
+    `insert into webhook_deliveries (delivery_id, received_at, event_type, payload, purged_at) values ($1, $2, $3, $4, $5)`,
+    [deliveryId, receivedAt, "push", { action: "test" }, purgedAt],
   );
   return deliveryId;
 }

@@ -59,6 +59,7 @@ async function joinCommand(args: string[]): Promise<number> {
     baseUrl,
     token,
     identityFilePath,
+    agentUser,
     probe: createSudoIsolationProbe(agentUser),
   });
   console.log(`joined as ${runnerId}; identity written to ${identityFilePath}`);

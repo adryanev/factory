@@ -26,12 +26,18 @@ describe("joinRunner — the isolation gate before identity", () => {
         baseUrl: "https://factory.example",
         token: "jointoken_1",
         identityFilePath: path.join(dir, "identity.json"),
+        agentUser: "_factoryjob",
         probe,
         exchange,
       });
       expect(order).toEqual(["verify", "exchange:https://factory.example:jointoken_1"]);
       const written = JSON.parse(await readFile(path.join(dir, "identity.json"), "utf-8"));
-      expect(written).toEqual({ runnerId: "runner_abc", secret: "rnr_secret" });
+      expect(written).toEqual({
+        runnerId: "runner_abc",
+        secret: "rnr_secret",
+        baseUrl: "https://factory.example",
+        agentUser: "_factoryjob",
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -48,6 +54,7 @@ describe("joinRunner — the isolation gate before identity", () => {
         baseUrl: "https://factory.example",
         token: "jointoken_1",
         identityFilePath: IDENTITY_PATH,
+        agentUser: "_factoryjob",
         probe,
         exchange,
       }),
@@ -66,6 +73,7 @@ describe("joinRunner — the isolation gate before identity", () => {
           baseUrl: "https://factory.example",
           token: "jointoken_1",
           identityFilePath,
+          agentUser: "_factoryjob",
           probe,
           exchange: async () => ({ runnerId: "x", secret: "y" }),
         }),

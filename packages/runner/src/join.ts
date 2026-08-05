@@ -58,15 +58,26 @@ export interface JoinInput {
   baseUrl: string;
   token: string;
   identityFilePath: string;
+  agentUser: string;
   probe: IsolationProbe;
   exchange?: (baseUrl: string, token: string) => Promise<JoinExchange>;
 }
 
-/** The full gated join: verify isolation, exchange the token, persist identity. */
+/**
+ * The full gated join: verify isolation, exchange the token, persist identity.
+ * The persisted identity carries `baseUrl` and `agentUser` alongside the
+ * credential because `run` receives only `--identity` from the launchd unit —
+ * whatever the daemon needs to reach the control plane and to drop the agent
+ * to its own OS user has to survive in that one file.
+ */
 export async function joinRunner(input: JoinInput): Promise<JoinExchange> {
   await verifyIsolation(input.identityFilePath, input.probe);
   const exchange = input.exchange ?? exchangeJoinToken;
   const identity = await exchange(input.baseUrl, input.token);
-  await writeIdentity(input.identityFilePath, identity);
+  await writeIdentity(input.identityFilePath, {
+    ...identity,
+    baseUrl: input.baseUrl.replace(/\/$/, ""),
+    agentUser: input.agentUser,
+  });
   return identity;
 }

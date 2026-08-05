@@ -9,14 +9,25 @@ import path from "node:path";
 export interface RunnerIdentity {
   runnerId: string;
   secret: string;
+  /**
+   * Where this machine joined. The launchd daemon runs `run --identity <file>`
+   * and nothing else, so the control-plane URL has no other way to reach the
+   * daemon — it is written once at join and read on every start.
+   */
+  baseUrl: string;
+  /** The OS user `exec:host` drops the agent to — the isolation boundary `join` already verified. */
+  agentUser: string;
 }
 
 function isRunnerIdentity(value: unknown): value is RunnerIdentity {
+  const record = value as Record<string, unknown>;
   return (
     typeof value === "object" &&
     value !== null &&
-    typeof (value as Record<string, unknown>)["runnerId"] === "string" &&
-    typeof (value as Record<string, unknown>)["secret"] === "string"
+    typeof record["runnerId"] === "string" &&
+    typeof record["secret"] === "string" &&
+    typeof record["baseUrl"] === "string" &&
+    typeof record["agentUser"] === "string"
   );
 }
 
@@ -30,6 +41,13 @@ export async function readIdentity(identityFilePath: string): Promise<RunnerIden
       return null;
     }
     throw error;
+  }
+  // The installer creates the identity file empty (mode 0600, owned by the
+  // runner user) and `join` fills it later. An empty file is "never joined",
+  // not corruption — without this the launchd daemon crash-loops between
+  // install and join.
+  if (raw.trim() === "") {
+    return null;
   }
   const parsed: unknown = JSON.parse(raw);
   if (!isRunnerIdentity(parsed)) {

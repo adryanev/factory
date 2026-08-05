@@ -26,7 +26,12 @@ from defending against that, and only that.
 - **Secrets ride the `/claim` payload** and are handed directly to the agent
   call — never written to a file inside the sandbox.
 - **Default-deny egress** from the sandbox; the per-Project allowlist is the
-  only exception set, and every change is audited.
+  only exception set, and every change is audited. **Enforced today only in
+  `exec:host`**, where the Runner installs pf rules for the agent's OS user.
+  In `exec:docker` the allowlist reaches the Runner on the `/claim` payload
+  but is not yet applied at the network layer: the sandbox joins an ordinary
+  bridge network and can reach anything the host can. Treat docker-mode
+  egress as unprotected until that lands.
 - **`exec:host` runs the agent as a separate OS user** from the Runner, so
   that user cannot read the Runner's secret files (mode `0600`).
 

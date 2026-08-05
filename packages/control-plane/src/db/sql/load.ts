@@ -26,3 +26,22 @@ export function loadSqlStatement(fileName: string): string {
     .trim();
   return withoutComments.endsWith(";") ? withoutComments.slice(0, -1) : withoutComments;
 }
+
+/**
+ * Strips full-line `--` comments and splits on `;`, returning the bare
+ * statements — the same text a caller would send over the wire, without the
+ * prose that documents them. The exact mirror of `test/sql/db-rig.ts`'s
+ * `loadSqlStatements`, so `retention_sweeps.sql`'s SELECT/UPDATE pairs are
+ * read identically by the contract test and by `domain/retention-sweeps.ts`.
+ */
+export function loadSqlStatements(fileName: string): string[] {
+  const raw = readFileSync(path.join(here, fileName), "utf-8");
+  const withoutComments = raw
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("--"))
+    .join("\n");
+  return withoutComments
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter((statement) => statement.length > 0);
+}

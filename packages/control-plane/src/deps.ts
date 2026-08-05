@@ -231,5 +231,9 @@ function createNoopObjectStore(clock: Clock): ObjectStore {
       Promise.resolve({ url: `https://blob.invalid/${key}?mock-presigned-put=1`, expiresAt: clock.now() }),
     mintGetUrl: (key) =>
       Promise.resolve({ url: `https://blob.invalid/${key}?mock-presigned-get=1`, expiresAt: clock.now() }),
+    // No-op like the fake URLs above — a process without Garage credentials
+    // never deletes anything real (the retention sweeper is only started by
+    // `main.ts`, which requires Garage config).
+    deleteObject: async () => {},
   };
 }

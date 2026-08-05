@@ -102,4 +102,23 @@ describe("Garage contract: presigned PUT/GET round trip", () => {
     expect(ttlSeconds).toBeGreaterThanOrEqual(300 - 5);
     expect(ttlSeconds).toBeLessThanOrEqual(300);
   });
+
+  it("deleteObject reclaims the object the presigned PUT uploaded", async () => {
+    const key = `artifact/steprun_contract_2/a1`;
+    const payload = "bytes that must stop existing\n";
+
+    const put = await store.mintPutUrl(key);
+    const putResponse = await fetch(put.url, { method: "PUT", body: payload });
+    expect(putResponse.status).toBe(200);
+
+    await store.deleteObject(key);
+
+    const get = await store.mintGetUrl(key);
+    const getResponse = await fetch(get.url);
+    expect(getResponse.status).toBe(404);
+  });
+
+  it("deleteObject of a key that is already gone is not an error (idempotent)", async () => {
+    await expect(store.deleteObject("artifact/steprun_contract_2/never-existed")).resolves.toBeUndefined();
+  });
 });

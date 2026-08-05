@@ -163,6 +163,16 @@ export interface GitHost {
   ): Promise<PullRequest>;
   /** Posts a Commit Status to a commit SHA — the checks-area link back to the Run page (issue #17, AC7). Checks API rejected by design. */
   postCommitStatus(repo: RepoRef, sha: string, status: CommitStatusInput, token: string): Promise<void>;
+  /**
+   * Lists the bare branch names under `prefix` (e.g. `run/<run-id>`) that
+   * currently exist in `repo` — the retention sweep's half of "branch yatim
+   * dari giliran yang mati ikut dibersihkan": the sweep deletes by prefix,
+   * not by row, so a branch a dead turn pushed without ever recording it is
+   * found too. Returns branches only; the caller never needs the SHAs.
+   */
+  listRefsByPrefix(repo: RepoRef, prefix: string, token: string): Promise<string[]>;
+  /** Deletes one branch (bare name) from `repo`. A ref that is already gone is success, not an error — idempotent by shape, mirroring `push`'s 422 rule. */
+  deleteRef(repo: RepoRef, branch: string, token: string): Promise<void>;
 }
 
 /** Credentials that let the control plane act as the GitHub App itself (minting installation tokens). `privateKey` is the app's PEM; never logged, never leaves the process. */
@@ -385,6 +395,46 @@ export function createGithubHost(config?: GithubAppConfig): GitHost {
       if (!response.ok) {
         throw new GithubRequestError(
           `github commit status post failed: ${response.status}`,
+          response.status,
+          retryAfterFrom(response),
+        );
+      }
+    },
+
+    async listRefsByPrefix(repo, prefix, token) {
+      // matching-refs returns every ref whose full name starts with
+      // `refs/heads/<prefix>` — the sweep's per-Run branch set, recorded or
+      // orphan. `prefix` is a bare branch prefix (`run/<run-id>`); the API
+      // path keeps the slashes literal.
+      const response = await fetch(
+        `https://api.github.com/repos/${repo.owner}/${repo.name}/git/matching-refs/heads/${prefix}`,
+        { headers: { ...GITHUB_ACCEPT, authorization: `Bearer ${token}` } },
+      );
+      if (!response.ok) {
+        throw new GithubRequestError(
+          `github ref listing failed: ${response.status}`,
+          response.status,
+          retryAfterFrom(response),
+        );
+      }
+      const body = (await response.json()) as { refs: { ref: string }[] };
+      const fullPrefix = `refs/heads/${prefix}`;
+      return body.refs
+        .map((entry) => entry.ref)
+        .filter((ref) => ref.startsWith(fullPrefix))
+        .map((ref) => ref.slice("refs/heads/".length));
+    },
+
+    async deleteRef(repo, branch, token) {
+      const response = await fetch(
+        `https://api.github.com/repos/${repo.owner}/${repo.name}/git/refs/heads/${branch}`,
+        { method: "DELETE", headers: { ...GITHUB_ACCEPT, authorization: `Bearer ${token}` } },
+      );
+      // 422/404 = the ref is already gone — deleting twice is fine, exactly
+      // the way `push` treats a 422 on an existing ref as success.
+      if (!response.ok && response.status !== 422 && response.status !== 404) {
+        throw new GithubRequestError(
+          `github ref delete failed: ${response.status}`,
           response.status,
           retryAfterFrom(response),
         );

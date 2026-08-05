@@ -63,6 +63,11 @@ export interface FindRecord {
   base: string;
 }
 
+export interface RefDeleteRecord {
+  repo: RepoRef;
+  branch: string;
+}
+
 export interface FakeGitHost extends GitHost {
   /** Registers `ref` as resolving to `sha` for `repo`. */
   registerRef(repo: RepoRef, ref: string, sha: string): void;
@@ -80,6 +85,10 @@ export interface FakeGitHost extends GitHost {
   statuses: StatusRecord[];
   /** Every `findOpenPullRequest` call, in order — proves the find-then-create idempotency order. */
   finds: FindRecord[];
+  /** Every `listRefsByPrefix` call, in order — the retention sweep's ref-listing half. */
+  listedRefs: { repo: RepoRef; prefix: string }[];
+  /** Every `deleteRef` call, in order — the retention sweep's branch-deletion half. */
+  deletedRefs: RefDeleteRecord[];
   /** Force the next N mints to fail — proves a claim whose minting fails un-leases the row. */
   failNextMints: number;
   /** Force the next N `createPullRequest` calls to throw a transient 5xx — proves the retry path. */
@@ -109,6 +118,8 @@ export function createFakeGitHost(): FakeGitHost {
     pullRequests: [],
     statuses: [],
     finds: [],
+    listedRefs: [],
+    deletedRefs: [],
     failNextMints: 0,
     failNextCreates: 0,
     failNextStatuses: 0,
@@ -120,6 +131,8 @@ export function createFakeGitHost(): FakeGitHost {
       this.pullRequests.length = 0;
       this.statuses.length = 0;
       this.finds.length = 0;
+      this.listedRefs.length = 0;
+      this.deletedRefs.length = 0;
       this.failNextMints = 0;
       this.failNextCreates = 0;
       this.failNextStatuses = 0;
@@ -237,6 +250,19 @@ export function createFakeGitHost(): FakeGitHost {
         throw new Error("github commit status post failed: 503");
       }
       this.statuses.push({ repo, sha, status, token });
+    },
+    async listRefsByPrefix(repo, prefix) {
+      this.listedRefs.push({ repo, prefix });
+      const keyPrefix = `${repoKey(repo)}@`;
+      return [...refs.keys()]
+        .filter((key) => key.startsWith(keyPrefix))
+        .map((key) => key.slice(keyPrefix.length))
+        .filter((ref) => ref.startsWith(prefix))
+        .sort();
+    },
+    async deleteRef(repo, branch) {
+      this.deletedRefs.push({ repo, branch });
+      refs.delete(`${repoKey(repo)}@${branch}`);
     },
   };
 }

@@ -32,6 +32,15 @@ export interface ObjectStore {
   mintPutUrl(key: string): Promise<MintedUrl>;
   /** A presigned GET for the browser to read `key` straight from the bucket. */
   mintGetUrl(key: string): Promise<MintedUrl>;
+  /**
+   * Deletes `key` from the bucket — the retention sweep's half of the seam
+   * (spec: "aplikasi menghapus objek Garage ... di luar transaksi SQL ini").
+   * A DELETE carries no object bytes, so this is not a byte path: the
+   * control plane signs and issues the request itself, and never proxies
+   * a payload either way. Idempotent: a key that is already gone is not an
+   * error (S3 answers 204/404 either way).
+   */
+  deleteObject(key: string): Promise<void>;
 }
 
 export interface S3ObjectStoreConfig {
@@ -72,7 +81,7 @@ function amzDateFormat(date: Date): string {
  * shape the S3 API accepts for presigned PUT/GET and the shape Garage's S3
  * layer understands (verified hands-on against v2.3.0, see recon-deps.md).
  */
-function presign(config: S3ObjectStoreConfig, method: "PUT" | "GET", key: string, now: Date): MintedUrl {
+function presign(config: S3ObjectStoreConfig, method: "PUT" | "GET" | "DELETE", key: string, now: Date): MintedUrl {
   const endpoint = config.endpoint.replace(/\/+$/, "");
   const host = new URL(endpoint).host;
   const canonicalUri = `/${config.bucket}/${key.split("/").map(canonicalEncode).join("/")}`;
@@ -114,5 +123,13 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig, now: () => Date
   return {
     mintPutUrl: (key) => Promise.resolve(presign(config, "PUT", key, now())),
     mintGetUrl: (key) => Promise.resolve(presign(config, "GET", key, now())),
+    deleteObject: async (key) => {
+      const minted = presign(config, "DELETE", key, now());
+      const response = await fetch(minted.url, { method: "DELETE" });
+      // 404 = the object was already reclaimed — deleting twice is fine.
+      if (!response.ok && response.status !== 404) {
+        throw new Error(`garage delete failed: ${response.status}`);
+      }
+    },
   };
 }

@@ -14,6 +14,7 @@ import { bootstrapBreakGlassAccount } from "./domain/auth.js";
 import { createFileKeyRing } from "./domain/master-key.js";
 import { bootControlPlane } from "./boot.js";
 import { startControlPlaneStepExecutor } from "./domain/control-plane-steps.js";
+import { startRetentionSweeper } from "./domain/retention-sweeps.js";
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
@@ -82,7 +83,16 @@ async function main(): Promise<void> {
   // claims and runs `kind: pull-request` StepRuns. It does not gate the
   // listener the way the lease sweep does; it is a worker, not a barrier.
   const executor = startControlPlaneStepExecutor(deps);
-  const stop = (): void => executor.stop();
+
+  // The retention sweeper (issue #19) — reclaims old Run bytes and branches
+  // on an hourly cadence, driven by Postgres state, not bucket lifecycle
+  // rules. Like the executor: a worker, not a boot barrier.
+  const retentionSweeper = startRetentionSweeper(deps);
+
+  const stop = (): void => {
+    executor.stop();
+    retentionSweeper.stop();
+  };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
 

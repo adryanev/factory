@@ -34,8 +34,10 @@ export interface SqlRig {
  * seeing each other's leftover rows instead.
  */
 export async function resetDatabase(pool: Pool): Promise<void> {
+  // webhook_deliveries has no FK to anything, so it must be named explicitly
+  // — everything else under test cascades from runs/step_runs.
   await pool.query(
-    `truncate table runs, step_runs, projects, repositories, github_app_installations, principals, audit_log restart identity cascade`,
+    `truncate table runs, step_runs, projects, repositories, github_app_installations, principals, audit_log, webhook_deliveries restart identity cascade`,
   );
 }
 

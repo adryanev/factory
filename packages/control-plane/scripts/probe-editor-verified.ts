@@ -8,7 +8,7 @@
  * repository the App is installed on:
  *
  *   GITHUB_APP_ID=<id> \
- *   GITHUB_APP_PRIVATE_KEY="$(cat app.pem)" \
+ *   GITHUB_APP_PRIVATE_KEY_FILE=app.pem \
  *   GITHUB_INSTALLATION_ID=<installation id> \
  *   GITHUB_REPO_OWNER=<owner> \
  *   GITHUB_REPO_NAME=<name> \
@@ -27,6 +27,7 @@
  * REST API are signed by GitHub's own key and rendered `Verified`. Run this
  * probe against a real installation to settle it.
  */
+import { readFileSync } from "node:fs";
 import { createGithubHost } from "../src/domain/git-host.js";
 import { EDITOR_COMMITTER } from "../src/domain/pipeline-editor.js";
 
@@ -41,7 +42,7 @@ function requiredEnv(name: string): string {
 
 async function main(): Promise<void> {
   const appId = Number(requiredEnv("GITHUB_APP_ID"));
-  const privateKey = requiredEnv("GITHUB_APP_PRIVATE_KEY");
+  const privateKey = readFileSync(requiredEnv("GITHUB_APP_PRIVATE_KEY_FILE"), "utf-8");
   const installationId = Number(requiredEnv("GITHUB_INSTALLATION_ID"));
   const repo = {
     owner: requiredEnv("GITHUB_REPO_OWNER"),

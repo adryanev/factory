@@ -31,15 +31,9 @@ function requiredEnv(name: string): string {
  * the path may ride `GITHUB_APP_PRIVATE_KEY_FILE`, the material never does
  * (same rule as the master key, same CVE-2025-66032 reasoning; a PEM is
  * multi-line, which makes it mechanically wrong for an env var anyway).
- * The env-var form survives only for local dev, where a packaged
- * `deploy/keys` directory does not exist.
  */
 function githubAppPrivateKey(): string {
-  const pathEnv = process.env["GITHUB_APP_PRIVATE_KEY_FILE"];
-  if (pathEnv) {
-    return readFileSync(pathEnv, "utf-8");
-  }
-  return requiredEnv("GITHUB_APP_PRIVATE_KEY");
+  return readFileSync(requiredEnv("GITHUB_APP_PRIVATE_KEY_FILE"), "utf-8");
 }
 
 async function main(): Promise<void> {

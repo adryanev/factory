@@ -188,7 +188,7 @@ const MAX_HANGING_LIVE_TAIL_CONNECTIONS = 2000;
  * `gitHostConfig`, and `objectStoreConfig` come from the environment in
  * `main.ts` — infra config, not the clock/random/network seams this file
  * otherwise documents as injected. `gitHostConfig` carries the GitHub App
- * credentials (`GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY`) that let the control
+ * credentials (`GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY_FILE`) that let the control
  * plane mint installation tokens at `/claim` (see `domain/git-host.ts`);
  * without them the host is read-only for public repos and minting throws a
  * clear "not configured". `objectStoreConfig` carries the Garage credentials

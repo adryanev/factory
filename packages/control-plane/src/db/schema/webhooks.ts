@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { index, jsonb, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
 import type { Id } from "@factory/shared";
 import { repositories } from "./repositories.js";
@@ -18,6 +19,13 @@ import { repositories } from "./repositories.js";
  * berikutnya mencoba lagi; baris yang lebih tua dari jendela 24 jam dipangkas
  * apa pun statusnya, jadi retry punya batas natural (dan GitHub sendiri punya
  * tombol redelivery untuk yang hilang).
+ *
+ * `purgedAt` memakai pola penanda retensi yang sama dengan keempat sweep
+ * lainnya (spec: "Sweep `webhook_deliveries` 24 jam memakai pola penanda
+ * yang sama"): nullable, dengan partial index `(received_at) WHERE purged_at
+ * IS NULL`, sehingga sweep-nya indexed scan yang menyusut sambil bekerja dan
+ * idempoten. Baris ini tidak menunjuk blob apa pun — satu-satunya kerja
+ * sweep adalah menulis penandanya (db/sql/retention_sweeps.sql).
  */
 export const webhookDeliveries = pgTable(
   "webhook_deliveries",
@@ -27,8 +35,14 @@ export const webhookDeliveries = pgTable(
     eventType: text("event_type").notNull(),
     payload: jsonb("payload").notNull(),
     processedAt: timestamp("processed_at", { withTimezone: true }),
+    purgedAt: timestamp("purged_at", { withTimezone: true }),
   },
-  (table) => [index("webhook_deliveries_received_at_idx").on(table.receivedAt)],
+  (table) => [
+    index("webhook_deliveries_received_at_idx").on(table.receivedAt),
+    index("webhook_deliveries_retention_idx")
+      .on(table.receivedAt)
+      .where(sql`${table.purgedAt} is null`),
+  ],
 );
 
 /**

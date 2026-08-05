@@ -16,6 +16,8 @@ export interface FakeObjectStore extends ObjectStore {
   mintedPuts: string[];
   /** Every blobKey a GET was minted for, in order. */
   mintedGets: string[];
+  /** Every blobKey `deleteObject` removed, in order — the retention sweep's half of the seam. */
+  deleted: string[];
   /** The Runner's half: PUTs bytes to the minted URL. */
   putFromUrl(url: string, body: string): void;
   /** The browser's half: GETs bytes back from the minted URL. */
@@ -42,10 +44,12 @@ export function createFakeObjectStore(now: () => Date = () => new Date("2026-01-
   const objects = new Map<string, string>();
   const mintedPuts: string[] = [];
   const mintedGets: string[] = [];
+  const deleted: string[] = [];
   return {
     objects,
     mintedPuts,
     mintedGets,
+    deleted,
     mintPutUrl: async (key) => {
       mintedPuts.push(key);
       return mint("https://blob.invalid/put", key, now());
@@ -53,6 +57,10 @@ export function createFakeObjectStore(now: () => Date = () => new Date("2026-01-
     mintGetUrl: async (key) => {
       mintedGets.push(key);
       return mint("https://blob.invalid/get", key, now());
+    },
+    deleteObject: async (key) => {
+      deleted.push(key);
+      objects.delete(key);
     },
     putFromUrl(url, body) {
       objects.set(keyFromUrl(url), body);

@@ -156,3 +156,16 @@ export async function seedStepRun(
   });
   return id;
 }
+
+export async function seedWebhookDelivery(
+  pool: Pool,
+  deliveryId: string,
+  receivedAt: Date,
+  purgedAt: Date | null = null,
+): Promise<string> {
+  await pool.query(
+    `insert into webhook_deliveries (delivery_id, received_at, purged_at) values ($1, $2, $3)`,
+    [deliveryId, receivedAt, purgedAt],
+  );
+  return deliveryId;
+}

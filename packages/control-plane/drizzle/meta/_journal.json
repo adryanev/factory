@@ -78,6 +78,13 @@
       "when": 1785853951539,
       "tag": "0010_giant_tarot",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785904499666,
+      "tag": "0011_chief_nightshade",
+      "breakpoints": true
     }
   ]
 }

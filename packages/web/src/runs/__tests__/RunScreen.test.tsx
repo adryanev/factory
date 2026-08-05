@@ -58,7 +58,7 @@ function definition(includeReview = true): string {
   return `version: 1
 name: Checkout monitor
 repo: backend
-concurrency: review
+concurrency: cancel
 steps:
   plan:
     run: echo plan

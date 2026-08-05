@@ -13,6 +13,7 @@ import { requireProjectMembership } from "./projects.js";
 import { DomainValidationError, NotFoundError } from "./errors.js";
 import { advanceGraph, finalizeRunIfDone, parsePipelineSnapshot } from "./graph-advance.js";
 import { sweepPendingNotifications } from "./notifications.js";
+import { sweepAutomation } from "./automation.js";
 
 const TERMINAL_OUTCOMES = new Set(["succeeded", "failed", "cancelled", "skipped"]);
 
@@ -95,7 +96,8 @@ export async function cancelStepRun(
  * heartbeat renewal for the same reasoning, spelled out once there.
  */
 export async function sweepExpiredLeases(
-  deps: Pick<AppDeps, "db"> & Partial<Pick<AppDeps, "clock" | "notificationSender">>,
+  deps: Pick<AppDeps, "db"> &
+    Partial<Pick<AppDeps, "clock" | "notificationSender" | "gitHost" | "automationScheduleWatermark">>,
 ): Promise<Id<"steprun">[]> {
   const rows = await deps.db
     .update(stepRuns)
@@ -115,6 +117,17 @@ export async function sweepExpiredLeases(
       db: deps.db,
       clock: deps.clock,
       notificationSender: deps.notificationSender,
+    });
+  }
+  if (deps.clock && deps.gitHost && deps.automationScheduleWatermark) {
+    // Issue #18: webhook deliveries → triggers, the concurrency-queue drain,
+    // and the schedule sweep ride the same cadence (boot + every executor
+    // cycle) as the lease and notification sweeps — no poller of their own.
+    await sweepAutomation({
+      db: deps.db,
+      clock: deps.clock,
+      gitHost: deps.gitHost,
+      scheduleWatermark: deps.automationScheduleWatermark,
     });
   }
   return rows.map((row) => row.id);

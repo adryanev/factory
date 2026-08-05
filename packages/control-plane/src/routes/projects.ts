@@ -106,7 +106,7 @@ const updateProjectSettingsRoute = createRoute({
   method: "patch",
   path: "/projects/{id}",
   summary:
-    "Admin settings write. Configures the User→ServiceAccount fallback or the one Project notification channel webhook. The webhook URL is never returned.",
+    "Admin settings write. Configures the User→ServiceAccount fallback, the one Project notification channel webhook, or the automation kill switch (`automationEnabled` — admin-only, audited under its own action kind). The webhook URL is never returned.",
   request: {
     params: idParamSchema,
     body: {
@@ -115,6 +115,7 @@ const updateProjectSettingsRoute = createRoute({
           schema: z.object({
             allowSharedAgentCredential: z.boolean().optional(),
             notificationWebhookUrl: z.string().url().max(2048).nullable().optional(),
+            automationEnabled: z.boolean().optional(),
           }),
         },
       },
@@ -195,6 +196,7 @@ export function registerProjectRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDeps)
       ...(body.notificationWebhookUrl !== undefined
         ? { notificationWebhookUrl: body.notificationWebhookUrl }
         : {}),
+      ...(body.automationEnabled !== undefined ? { automationEnabled: body.automationEnabled } : {}),
     });
     return c.json(toProjectResponse(project), 200);
   });

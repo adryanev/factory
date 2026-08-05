@@ -181,6 +181,8 @@ describe("Runner protocol: heartbeat, lease renewal, and the lease sweep", () =>
       notificationSender: { send: async () => undefined },
       keyring: { currentVersion: () => 1, key: () => Buffer.alloc(32, 1) },
       objectStore: createFakeObjectStore(),
+      githubWebhookSecret: "test-webhook-secret",
+      automationScheduleWatermark: { minute: null },
       claimHoldRangeMs: { min: 50, max: 100 },
       claimLimiter: createClaimConnectionLimiter(2000),
       liveTailHoldMs: 400,

@@ -26,6 +26,7 @@ export type AuditAction =
   | "project.service_account_created"
   | "project.egress_allowlist_updated"
   | "project.settings_updated"
+  | "project.automation_enabled_updated"
   | "secret.stored"
   | "secret.updated"
   | "secret.deleted"

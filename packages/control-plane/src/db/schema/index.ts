@@ -12,4 +12,5 @@ export * from "./questions.js";
 export * from "./artifacts.js";
 export * from "./runners.js";
 export * from "./webhooks.js";
+export * from "./automation.js";
 export * from "./notifications.js";

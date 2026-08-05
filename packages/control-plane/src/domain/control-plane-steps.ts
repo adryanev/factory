@@ -66,7 +66,14 @@ export const COMMIT_STATUS_CONTEXT = "factory";
 /** The world the executor reaches into — a strict subset of `AppDeps`. */
 export type ControlPlaneStepDeps = Pick<
   AppDeps,
-  "pool" | "db" | "gitHost" | "clock" | "notificationSender" | "controlPlaneInstanceId" | "runPageBaseUrl"
+  | "pool"
+  | "db"
+  | "gitHost"
+  | "clock"
+  | "notificationSender"
+  | "controlPlaneInstanceId"
+  | "runPageBaseUrl"
+  | "automationScheduleWatermark"
 >;
 
 interface ClaimedControlPlaneRow {

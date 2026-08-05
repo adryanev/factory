@@ -45,6 +45,7 @@ export const ID_PREFIXES = [
   "jointoken",
   "audit",
   "session",
+  "skip",
 ] as const;
 export type IdPrefix = (typeof ID_PREFIXES)[number];
 

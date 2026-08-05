@@ -137,6 +137,8 @@ export async function startTestRig(options: TestRigOptions = {}): Promise<TestRi
     notificationSender,
     keyring: createFileKeyRing(masterKeyFile),
     objectStore,
+    githubWebhookSecret: "test-webhook-secret",
+    automationScheduleWatermark: { minute: null },
     claimHoldRangeMs: options.claimHoldRangeMs ?? { min: 150, max: 350 },
     claimLimiter: createClaimConnectionLimiter(options.maxHangingClaims ?? 2000),
     liveTailHoldMs: options.liveTailHoldMs ?? 400,

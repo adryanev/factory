@@ -170,17 +170,27 @@ export async function requireProjectMembership(
 }
 
 /**
- * Admin-only settings write for a Project. Today exactly one knob exists —
- * `allowSharedAgentCredential`, the User→ServiceAccount credential fallback,
- * **default off** (spec: "Fallback User→ServiceAccount lewat
- * `allowSharedAgentCredential`, bawaan mati"). Returning the updated Project
- * row keeps the response truthful (the write is idempotent).
+ * Admin-only settings write for a Project. Today the knobs are
+ * `allowSharedAgentCredential` (the User→ServiceAccount credential fallback,
+ * **default off** — spec: "Fallback User→ServiceAccount lewat
+ * `allowSharedAgentCredential`, bawaan mati"), the one notification channel
+ * webhook, and `automationEnabled` — the incident kill switch that turns off
+ * every automation trigger of the Project at once, without a PR to every
+ * Repository that has `on:` (ticket 22: "Ia hanya bisa mematikan, tidak
+ * pernah menyalakan sesuatu yang tidak ditulis di file"). It can only turn
+ * off; it cannot express a trigger. The toggle is its own audit kind — an
+ * incident switch deserves its own line, not a settings blob. Returning the
+ * updated Project row keeps the response truthful (the write is idempotent).
  */
 export async function updateProjectSettings(
   deps: Pick<AppDeps, "db">,
   principal: Principal,
   projectId: Id<"project">,
-  patch: { allowSharedAgentCredential?: boolean; notificationWebhookUrl?: string | null },
+  patch: {
+    allowSharedAgentCredential?: boolean;
+    notificationWebhookUrl?: string | null;
+    automationEnabled?: boolean;
+  },
 ): Promise<Project> {
   await requireProjectAdmin(deps, principal, projectId);
   if (patch.notificationWebhookUrl !== undefined && patch.notificationWebhookUrl !== null) {
@@ -205,24 +215,36 @@ export async function updateProjectSettings(
       ...(patch.notificationWebhookUrl !== undefined
         ? { notificationWebhookUrl: patch.notificationWebhookUrl }
         : {}),
+      ...(patch.automationEnabled !== undefined ? { automationEnabled: patch.automationEnabled } : {}),
     })
     .where(eq(projects.id, projectId))
     .returning();
+
+  const metadata: Record<string, unknown> = {};
+  if (patch.allowSharedAgentCredential !== undefined) {
+    metadata.allowSharedAgentCredential = patch.allowSharedAgentCredential;
+  }
+  if (patch.notificationWebhookUrl !== undefined) {
+    metadata.notificationWebhookConfigured = patch.notificationWebhookUrl !== null;
+  }
   await recordAuditEvent(deps, {
     actor: principal,
     projectId,
     action: "project.settings_updated",
     targetType: "project",
     targetId: projectId,
-    metadata: {
-      ...(patch.allowSharedAgentCredential !== undefined
-        ? { allowSharedAgentCredential: patch.allowSharedAgentCredential }
-        : {}),
-      ...(patch.notificationWebhookUrl !== undefined
-        ? { notificationWebhookConfigured: patch.notificationWebhookUrl !== null }
-        : {}),
-    },
+    metadata,
   });
+  if (patch.automationEnabled !== undefined) {
+    await recordAuditEvent(deps, {
+      actor: principal,
+      projectId,
+      action: "project.automation_enabled_updated",
+      targetType: "project",
+      targetId: projectId,
+      metadata: { automationEnabled: patch.automationEnabled },
+    });
+  }
   return updated!;
 }
 

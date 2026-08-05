@@ -10,6 +10,8 @@
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
     "generate:openapi": "pnpm --filter @factory/control-plane run generate:openapi",
-    "check:openapi": "pnpm --filter @factory/control-plane run check:openapi"
+    "check:openapi": "pnpm --filter @factory/control-plane run check:openapi",
+    "check:packaging": "sh deploy/check/invariants.sh",
+    "build:runner-tarball": "sh deploy/runner/build-runner-tarball.sh"
   }
 }

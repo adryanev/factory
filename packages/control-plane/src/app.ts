@@ -28,6 +28,7 @@ import { registerQuestionRoutes } from "./routes/questions.js";
 import { registerPipelineEditorRoutes } from "./routes/pipeline-editor.js";
 import { registerAutomationRoutes, GITHUB_WEBHOOK_PATH } from "./routes/automation.js";
 import { isRunnerProtocolPath } from "./routes/runner-protocol-paths.js";
+import { registerWebStatic } from "./static.js";
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024; // spec: "Batas ukuran: badan JSON 1 MiB semua endpoint" (Runner surface).
 
@@ -51,6 +52,16 @@ export function createApp(deps: AppDeps): OpenAPIHono<AppEnv> {
       return undefined;
     },
   });
+
+  // The single-image web surface. Registered FIRST: Hono runs matched
+  // middleware in registration order, so this must precede the routes to
+  // intercept browser navigations before the API route that shares the
+  // path answers. Only GET/HEAD with a text/html Accept is intercepted —
+  // everything else (API fetches, Runner protocol, webhook) passes through
+  // untouched. Skipped when no web bundle is configured (local dev).
+  if (deps.webDistDir) {
+    registerWebStatic(app, deps.webDistDir);
+  }
 
   const domain = createDomain(deps);
 

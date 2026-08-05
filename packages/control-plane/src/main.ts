@@ -7,6 +7,7 @@
  */
 import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createDeps } from "./deps.js";
 import { assertMigrationsApplied, MigrationGateError } from "./db/migration-gate.js";
 import { MIGRATIONS_FOLDER } from "./db/migrations-path.js";
@@ -22,6 +23,23 @@ function requiredEnv(name: string): string {
     throw new Error(`${name} is required`);
   }
   return value;
+}
+
+/**
+ * The GitHub App private key. Two-tier config (spec "Packaging self-host",
+ * decision 7): key material lives in a FILE, never in the environment —
+ * the path may ride `GITHUB_APP_PRIVATE_KEY_FILE`, the material never does
+ * (same rule as the master key, same CVE-2025-66032 reasoning; a PEM is
+ * multi-line, which makes it mechanically wrong for an env var anyway).
+ * The env-var form survives only for local dev, where a packaged
+ * `deploy/keys` directory does not exist.
+ */
+function githubAppPrivateKey(): string {
+  const pathEnv = process.env["GITHUB_APP_PRIVATE_KEY_FILE"];
+  if (pathEnv) {
+    return readFileSync(pathEnv, "utf-8");
+  }
+  return requiredEnv("GITHUB_APP_PRIVATE_KEY");
 }
 
 async function main(): Promise<void> {
@@ -48,7 +66,12 @@ async function main(): Promise<void> {
     },
     {
       appId: Number(requiredEnv("GITHUB_APP_ID")),
-      privateKey: requiredEnv("GITHUB_APP_PRIVATE_KEY"),
+      // Key material from a FILE, not an env var — the path may ride the
+      // env, the material never does (spec: "Master key dari file, bukan
+      // environment variable"; CVE-2025-66032, `/proc/self/environ`). Same
+      // rule for the GitHub App private key: `GITHUB_APP_PRIVATE_KEY_FILE`
+      // in the packaged image, env fallback only for local dev.
+      privateKey: githubAppPrivateKey(),
     },
     // Key material from a FILE, not an env var — the path may ride the env,
     // the material never does (spec: "Master key dari file, bukan environment
@@ -73,6 +96,10 @@ async function main(): Promise<void> {
     // The one GitHub App webhook secret (issue #18) — the HMAC the
     // `/webhook/github` endpoint verifies before touching a payload.
     requiredEnv("GITHUB_WEBHOOK_SECRET"),
+    // The single-image web surface: the Vite bundle directory, or null in
+    // local dev (spec "Packaging self-host" — web served by the control
+    // plane, no skew possible).
+    process.env["FACTORY_WEB_DIST_DIR"] ?? null,
   );
 
   // Idempotent — safe to run on every boot, including a config'd password

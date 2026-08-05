@@ -1,0 +1,19 @@
+{
+  "name": "factory",
+  "url": "__FACTORY_WEB_URL__",
+  "description": "factory control plane: automation triggers, Runner minted install tokens, PRs, and commit statuses (issue #21, manifest flow — this file is the single source of the App's permissions)",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "pull_requests": "write",
+    "statuses": "write",
+    "metadata": "read"
+  },
+  "default_events": ["push", "pull_request"],
+  "hook_attributes": {
+    "url": "__FACTORY_WEBHOOK_URL__",
+    "active": true
+  },
+  "redirect_url": "__FACTORY_MANIFEST_REDIRECT_URL__",
+  "callback_urls": ["__FACTORY_OAUTH_CALLBACK_URL__"]
+}

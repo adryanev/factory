@@ -136,6 +136,16 @@ export interface AppDeps {
    * and this caps how many can hang per instance.
    */
   liveTailLimiter: ClaimConnectionLimiter;
+  /**
+   * The Vite bundle directory the web surface is served from — the single
+   * web+control-plane image's static half (spec "Packaging self-host": web
+   * served by the control plane, so web↔API skew is structurally
+   * impossible). `null` in local dev, where vite serves its own bundle on
+   * its own port; set by the packaged image via `FACTORY_WEB_DIST_DIR`.
+   * See `static.ts` for what gets served. Optional so the test rigs and the
+   * OpenAPI generator can omit it.
+   */
+  webDistDir?: string | null;
 }
 
 export function createSystemClock(): Clock {
@@ -199,6 +209,7 @@ export function createDeps(
     runPageBaseUrl: "http://localhost:3000",
   },
   githubWebhookSecret: string = "unconfigured-webhook-secret",
+  webDistDir: string | null = null,
 ): AppDeps {
   const clock = createSystemClock();
   return {
@@ -219,6 +230,7 @@ export function createDeps(
     liveTailLimiter: createClaimConnectionLimiter(MAX_HANGING_LIVE_TAIL_CONNECTIONS),
     controlPlaneInstanceId: runtimeConfig.controlPlaneInstanceId,
     runPageBaseUrl: runtimeConfig.runPageBaseUrl,
+    webDistDir,
   };
 }
 

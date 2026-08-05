@@ -13,8 +13,13 @@ build/
 # Env & key material — never committed
 .env
 .env.*
+!.env.example
 *.pem
 *.key
+
+# Backup output + generated installer form (deploy/backup, deploy/github-app)
+backups/
+deploy/github-app/register.html
 
 # OS
 .DS_Store

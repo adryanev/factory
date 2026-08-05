@@ -1,5 +1,6 @@
 export { validatePipelineDefinition } from "./validate.js";
 export type { ValidationResult, ValidationIssue } from "./validate.js";
+export { serializePipeline } from "./serialize.js";
 
 export { pipelineSchema, stepSchema, branchSchema, outputRefSchema, joinPolicySchema, askSchema, resolveEffectiveStep } from "./schema.js";
 export type { Pipeline, Step, Branch, OutputRef, JoinPolicy } from "./types.js";

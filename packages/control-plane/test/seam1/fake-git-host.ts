@@ -14,6 +14,7 @@
  * adopt path; `failNext*` knobs force transient failures to prove retry.
  */
 import {
+  ContentConflictError,
   PullRequestConflictError,
   RefNotFoundError,
   type CommitStatusInput,
@@ -27,6 +28,8 @@ export interface MintRecord {
   repo: RepoRef;
   installationId: number;
   permissions: Record<string, string>;
+  /** The token the mint returned — lets a test assert the teardown revokes the exact token that was minted (issue #20, AC3). */
+  token: string;
 }
 
 export interface PushRecord {
@@ -57,6 +60,22 @@ export interface StatusRecord {
   token: string;
 }
 
+export interface ContentsWriteRecord {
+  repo: RepoRef;
+  path: string;
+  content: string;
+  branch: string;
+  message: string;
+  author: { name: string; email: string };
+  committer: { name: string; email: string };
+  token: string;
+  sha: string;
+}
+
+export interface RevocationRecord {
+  token: string;
+}
+
 export interface FindRecord {
   repo: RepoRef;
   head: string;
@@ -80,6 +99,10 @@ export interface FakeGitHost extends GitHost {
   statuses: StatusRecord[];
   /** Every `findOpenPullRequest` call, in order — proves the find-then-create idempotency order. */
   finds: FindRecord[];
+  /** Every Contents-API file write, in order (issue #20) — assert author/committer attribution and repo scope here. */
+  contents: ContentsWriteRecord[];
+  /** Every installation-token revocation, in order (issue #20, AC3) — assert the token is torn down after the operation. */
+  revocations: RevocationRecord[];
   /** Force the next N mints to fail — proves a claim whose minting fails un-leases the row. */
   failNextMints: number;
   /** Force the next N `createPullRequest` calls to throw a transient 5xx — proves the retry path. */
@@ -100,8 +123,10 @@ export function createFakeGitHost(): FakeGitHost {
   const refs = new Map<string, string>(); // "owner/name@ref" -> sha
   const files = new Map<string, string>(); // "owner/name@sha:path" -> content
   const openPrs = new Map<string, PullRequestRecord>(); // "owner/name|head|base" -> pr
+  const writtenBranches = new Set<string>(); // "owner/name|branch" -> has a Contents-API write (issue #20's 422-as-success signal)
   let mintCount = 0;
   let prCounter = 0;
+  let writeCounter = 0;
 
   return {
     minted: [],
@@ -109,6 +134,8 @@ export function createFakeGitHost(): FakeGitHost {
     pullRequests: [],
     statuses: [],
     finds: [],
+    contents: [],
+    revocations: [],
     failNextMints: 0,
     failNextCreates: 0,
     failNextStatuses: 0,
@@ -120,6 +147,8 @@ export function createFakeGitHost(): FakeGitHost {
       this.pullRequests.length = 0;
       this.statuses.length = 0;
       this.finds.length = 0;
+      this.contents.length = 0;
+      this.revocations.length = 0;
       this.failNextMints = 0;
       this.failNextCreates = 0;
       this.failNextStatuses = 0;
@@ -127,6 +156,7 @@ export function createFakeGitHost(): FakeGitHost {
       refs.clear();
       files.clear();
       openPrs.clear();
+      writtenBranches.clear();
     },
 
     registerRef(repo, ref, sha) {
@@ -167,10 +197,11 @@ export function createFakeGitHost(): FakeGitHost {
         throw new Error("github installation token mint failed: 503");
       }
       mintCount += 1;
-      this.minted.push({ repo, installationId, permissions });
+      const token = `fake-git-token-${mintCount}`;
+      this.minted.push({ repo, installationId, permissions, token });
       const expiresAt = new Date("2026-01-01T01:00:00.000Z"); // 1h after the rig's fixed clock.
       return {
-        token: `fake-git-token-${mintCount}`,
+        token,
         expiresAt,
         repositoryIds: [1000 + mintCount],
         permissions,
@@ -237,6 +268,23 @@ export function createFakeGitHost(): FakeGitHost {
         throw new Error("github commit status post failed: 503");
       }
       this.statuses.push({ repo, sha, status, token });
+    },
+    async writeFile(repo, input, token) {
+      // A branch that already has a Contents-API write answers 422, exactly
+      // like GitHub ("sha wasn't supplied") — the editor treats that as
+      // success-by-adoption and proceeds to find-or-create its PR.
+      const branchKey = `${repoKey(repo)}|${input.branch}`;
+      if (writtenBranches.has(branchKey)) {
+        throw new ContentConflictError(repo, input.branch, "sha wasn't supplied");
+      }
+      writtenBranches.add(branchKey);
+      writeCounter += 1;
+      const sha = `content-sha-${writeCounter}`;
+      this.contents.push({ repo, ...input, token, sha });
+      return { sha };
+    },
+    async revokeInstallationToken(token) {
+      this.revocations.push({ token });
     },
   };
 }

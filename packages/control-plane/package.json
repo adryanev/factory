@@ -11,7 +11,8 @@
     "db:generate": "tsx node_modules/drizzle-kit/bin.cjs generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "generate:openapi": "tsx src/openapi/generate.ts",
-    "check:openapi": "tsx src/openapi/check.ts"
+    "check:openapi": "tsx src/openapi/check.ts",
+    "probe:editor-verified": "tsx scripts/probe-editor-verified.ts"
   },
   "dependencies": {
     "@factory/shared": "workspace:*",

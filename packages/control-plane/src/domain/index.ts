@@ -43,6 +43,7 @@ import * as stepRunLogsDomain from "./step-run-logs.js";
 import * as stepRunArtifactsDomain from "./step-run-artifacts.js";
 import * as costsDomain from "./costs.js";
 import * as stepRunQuestionsDomain from "./step-run-questions.js";
+import * as pipelineEditorDomain from "./pipeline-editor.js";
 import type {
   AnswerQuestionResult,
   ArtifactEditUpload,
@@ -60,6 +61,7 @@ import type {
 import type { ArtifactHistoryMeta, ArtifactMeta, ArtifactRead } from "./step-run-artifacts.js";
 import type { AttemptCost, ProjectCost, ProjectCostPrincipal, RunCost, StepRunCost } from "./costs.js";
 import type { ServiceAccountInfo, StoredSecret, PutSecretInput } from "./secrets.js";
+import type { EditorPullRequestResult, EditorRepository, OpenEditorPullRequestInput } from "./pipeline-editor.js";
 
 export type { Principal } from "./principal.js";
 export type { Project, ProjectRole } from "./projects.js";
@@ -269,6 +271,16 @@ export interface Domain {
     /** Web surface, Project `member`: the Project's cost, explicitly a lower bound, by credential principal (AC2/AC9). */
     project: (principal: Principal, projectId: Id<"project">) => Promise<ProjectCost>;
   };
+  editor: {
+    /** Web surface, Project `member` (issue #20, AC1): the host-repo candidates the editor UI may lock onto — this Project's repositories, nothing else. */
+    listRepositories: (principal: Principal, projectId: Id<"project">) => Promise<EditorRepository[]>;
+    /** Web surface, Project `member` (issue #20, AC7): validates the definition with the shared Zod schema and opens a PR with the YAML in the host repo. Not an audit event (AC8) — the PR is itself the permanent attributed record. */
+    openPullRequest: (
+      principal: Principal,
+      projectId: Id<"project">,
+      input: OpenEditorPullRequestInput,
+    ) => Promise<EditorPullRequestResult>;
+  };
 }
 
 export function createDomain(deps: AppDeps): Domain {
@@ -372,6 +384,12 @@ export function createDomain(deps: AppDeps): Domain {
       stepRun: (principal, stepRunId) => costsDomain.getStepRunCost(deps, principal, stepRunId),
       run: (principal, projectId, runId) => costsDomain.getRunCost(deps, principal, projectId, runId),
       project: (principal, projectId) => costsDomain.getProjectCost(deps, principal, projectId),
+    },
+    editor: {
+      listRepositories: (principal, projectId) =>
+        pipelineEditorDomain.listProjectRepositories(deps, principal, projectId),
+      openPullRequest: (principal, projectId, input) =>
+        pipelineEditorDomain.openEditorPullRequest(deps, principal, projectId, input),
     },
   };
 }

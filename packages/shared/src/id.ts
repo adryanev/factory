@@ -45,6 +45,11 @@ export const ID_PREFIXES = [
   "jointoken",
   "audit",
   "session",
+  // Issue #20: the visual editor's per-submit idempotency key. It is not an
+  // entity row — it rides in the branch name of the PR the editor opens, and
+  // nothing is stored — but it is a client-generated id like every other
+  // prefix, and a table-less prefix is exactly as cheap.
+  "edit",
 ] as const;
 export type IdPrefix = (typeof ID_PREFIXES)[number];
 

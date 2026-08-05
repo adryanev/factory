@@ -24,6 +24,7 @@ export {
 
 export {
   validatePipelineDefinition,
+  serializePipeline,
   pipelineSchema,
   stepSchema,
   branchSchema,

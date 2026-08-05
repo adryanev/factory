@@ -99,6 +99,21 @@ export class PullRequestConflictError extends Error {
   }
 }
 
+/**
+ * Thrown by `writeFile` on GitHub's 422 — the branch (or the path, in a
+ * conflicting shape) already exists, and a Contents API write without the
+ * current file's `sha` is refused. The editor treats it the same way issue
+ * #17 treats a PR-create 422: as success-by-adoption, because the branch
+ * name **is** the editor's idempotency key — a retried request re-runs
+ * find-or-create and adopts whatever its branch already produced.
+ */
+export class ContentConflictError extends Error {
+  constructor(repo: RepoRef, branch: string, detail: string) {
+    super(`content write conflict on ${repo.owner}/${repo.name} ${branch}: ${detail}`);
+    this.name = "ContentConflictError";
+  }
+}
+
 /** The minimal shape of a GitHub pull request the control plane records. */
 export interface PullRequest {
   number: number;
@@ -163,6 +178,36 @@ export interface GitHost {
   ): Promise<PullRequest>;
   /** Posts a Commit Status to a commit SHA — the checks-area link back to the Run page (issue #17, AC7). Checks API rejected by design. */
   postCommitStatus(repo: RepoRef, sha: string, status: CommitStatusInput, token: string): Promise<void>;
+  /**
+   * The editor's single write (issue #20): writes one file through the
+   * Contents API — blob, tree, commit, and ref in one call, no local clone
+   * (ticket 27: "editor menulis satu file YAML, jadi tidak ada alasan
+   * menyiapkan worktree"). The commit's `author` and `committer` are
+   * distinct: git separates author from committer, GitHub attributes
+   * contributions to the author, so the author is the clicking User (via
+   * `users.noreply.github.com`) while the committer is the bot identity.
+   * Throws {@link ContentConflictError} on 422 — the branch already exists,
+   * which is the editor's retry-as-adoption signal.
+   */
+  writeFile(
+    repo: RepoRef,
+    input: {
+      path: string;
+      content: string;
+      branch: string;
+      message: string;
+      author: { name: string; email: string };
+      committer: { name: string; email: string };
+    },
+    token: string,
+  ): Promise<{ sha: string }>;
+  /**
+   * Editor teardown (issue #20, AC3: "dihapus setelah selesai"): revokes a
+   * minted installation token via `DELETE /installation/token`. The token
+   * itself authenticates the revocation — no App credential needed — the
+   * same mechanism the Runner's host-side teardown uses.
+   */
+  revokeInstallationToken(token: string): Promise<void>;
 }
 
 /** Credentials that let the control plane act as the GitHub App itself (minting installation tokens). `privateKey` is the app's PEM; never logged, never leaves the process. */
@@ -385,6 +430,60 @@ export function createGithubHost(config?: GithubAppConfig): GitHost {
       if (!response.ok) {
         throw new GithubRequestError(
           `github commit status post failed: ${response.status}`,
+          response.status,
+          retryAfterFrom(response),
+        );
+      }
+    },
+
+    async writeFile(repo, input, token) {
+      const response = await fetch(
+        `https://api.github.com/repos/${repo.owner}/${repo.name}/contents/${input.path}`,
+        {
+          method: "PUT",
+          headers: { ...GITHUB_ACCEPT, authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({
+            message: input.message,
+            content: Buffer.from(input.content, "utf-8").toString("base64"),
+            branch: input.branch,
+            author: input.author,
+            committer: input.committer,
+          }),
+        },
+      );
+      if (response.status === 422) {
+        // 422 = the branch already exists (a retried request — the editor's
+        // branch name is its idempotency key) or the path is in a conflicting
+        // shape. Either way the caller treats it as success-by-adoption: it
+        // proceeds to find-or-create the PR for the branch, exactly the
+        // issue #17 rule for a 422 on createPullRequest.
+        const detail = await response.text();
+        throw new ContentConflictError(repo, input.branch, detail);
+      }
+      if (!response.ok) {
+        throw new GithubRequestError(
+          `github content write failed: ${response.status}`,
+          response.status,
+          retryAfterFrom(response),
+        );
+      }
+      const body = (await response.json()) as { commit?: GithubCommitResponse };
+      if (!body.commit?.sha) {
+        throw new Error("github content write succeeded without a commit sha");
+      }
+      return { sha: body.commit.sha };
+    },
+
+    async revokeInstallationToken(token) {
+      // The token authenticates the DELETE — GitHub accepts the revocation
+      // with the installation token as the bearer, no App JWT needed.
+      const response = await fetch("https://api.github.com/installation/token", {
+        method: "DELETE",
+        headers: { ...GITHUB_ACCEPT, authorization: `Bearer ${token}` },
+      });
+      if (response.status !== 204 && response.status !== 200) {
+        throw new GithubRequestError(
+          `github installation token revocation failed: ${response.status}`,
           response.status,
           retryAfterFrom(response),
         );

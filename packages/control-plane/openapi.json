@@ -1793,6 +1793,52 @@
         "required": [
           "answer"
         ]
+      },
+      "EditorRepository": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "defaultBranch": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner",
+          "name",
+          "defaultBranch"
+        ]
+      },
+      "EditorPullRequest": {
+        "type": "object",
+        "properties": {
+          "prNumber": {
+            "type": "integer"
+          },
+          "prUrl": {
+            "type": "string"
+          },
+          "headBranch": {
+            "type": "string"
+          },
+          "commitSha": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "prNumber",
+          "prUrl",
+          "headBranch",
+          "commitSha"
+        ]
       }
     },
     "parameters": {}
@@ -7130,6 +7176,262 @@
                     "code",
                     "message",
                     "question"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{id}/repositories": {
+      "get": {
+        "summary": "The host-repo candidates the Pipeline editor may lock onto (issue #20, AC1: UI scope is this Project's repositories, nothing else). Project `member`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ok.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "repositories": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/EditorRepository"
+                      }
+                    }
+                  },
+                  "required": [
+                    "repositories"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a Project member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Project.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{id}/pipeline-editor": {
+      "post": {
+        "summary": "Validates the serialized Pipeline definition with the shared Zod schema and opens a PR containing the YAML in the host repository (issue #20). Project `member`; the PR is attributed to the clicking user via users.noreply.github.com with factory[bot] as committer. No draft mode, not an audit event.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repositoryId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The host repository of this Project."
+                  },
+                  "pipelinePath": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The file the YAML is written to, e.g. .factory/pipeline.yaml."
+                  },
+                  "yaml": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The serialized Pipeline definition."
+                  },
+                  "editId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Client-generated idempotency key (branch-safe, lowercase); rides in the branch name so a retried request adopts the same PR."
+                  }
+                },
+                "required": [
+                  "repositoryId",
+                  "pipelinePath",
+                  "yaml",
+                  "editId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "PR opened.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditorPullRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Definition invalid or identity not attributable (break-glass).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a Project member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Project or repository.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
                   ]
                 }
               }

@@ -125,8 +125,8 @@ function collectPromptFilePaths(pipeline: Pipeline): string[] {
   return [...paths];
 }
 
-/** Every issue already carries a line/column via `validatePipelineDefinition` — this just flattens them into the one-string `message` the error envelope has room for (spec: "pesan yang menunjuk baris"). */
-function formatValidationIssues(issues: ValidationIssue[]): string {
+/** Every issue already carries a line/column via `validatePipelineDefinition` — this just flattens them into the one-string `message` the error envelope has room for (spec: "pesan yang menunjuk baris"). Exported for `domain/pipeline-editor.ts` — validation failures answer the same way on every surface. */
+export function formatValidationIssues(issues: ValidationIssue[]): string {
   return issues
     .map((issue) => {
       const location = issue.line !== null ? `line ${issue.line}` : issue.path.join(".") || "(root)";

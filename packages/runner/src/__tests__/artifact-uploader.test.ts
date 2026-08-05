@@ -42,6 +42,12 @@ function fakeProtocol(records: { key: string; kind: string; sizeBytes?: number }
       async submitQuestion() {
         throw new Error("unused");
       },
+      async reportCapabilities() {
+        throw new Error("unused");
+      },
+      async drain() {
+        throw new Error("unused");
+      },
     },
     minted,
   };

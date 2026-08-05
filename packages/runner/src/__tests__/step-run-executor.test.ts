@@ -156,6 +156,8 @@ function fakeProtocol(overrides: {
       });
       return { questionId: `question_${questions.length}` };
     },
+    async reportCapabilities() {},
+    async drain() {},
   };
 }
 

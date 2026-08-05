@@ -90,6 +90,10 @@ export interface ArtifactWire {
 export interface ProtocolClient {
   claim(input: { tags: string[]; slots: number; protocolVersion: number }): Promise<ClaimedStepRun | null>;
   heartbeat(input: { leases: { stepRunId: string; leaseToken: string }[]; capsHash: string | null }): Promise<HeartbeatReply>;
+  /** Full capabilities report, sent when a heartbeat reply reports the control plane's copy is stale (`capsStale`). */
+  reportCapabilities(input: { capsHash: string; capabilities: unknown; releaseVersion?: string }): Promise<void>;
+  /** The Runner asking to stop taking new work while it finishes what it holds — the SIGTERM path. */
+  drain(): Promise<void>;
   reportResult(input: {
     stepRunId: string;
     leaseToken: string;
@@ -179,14 +183,46 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
     },
 
     async heartbeat({ leases, capsHash }) {
-      const { status, body } = await post<HeartbeatReply>("/heartbeat", {
+      const { status, body } = await post<{
+        desired_state: string;
+        cancel: string[];
+        unknown_leases: string[];
+        caps_stale: boolean;
+        latest_release: string;
+        protocol: { min: number; max: number };
+      }>("/heartbeat", {
         leases: leases.map((lease) => ({ step_run_id: lease.stepRunId, lease_token: lease.leaseToken })),
         caps_hash: capsHash,
       });
       if (!(status >= 200 && status < 300)) {
         throw new Error(`heartbeat failed: HTTP ${status}`);
       }
-      return body;
+      return {
+        desiredState: body.desired_state,
+        cancel: body.cancel,
+        unknownLeases: body.unknown_leases,
+        capsStale: body.caps_stale,
+        latestRelease: body.latest_release,
+        protocol: body.protocol,
+      };
+    },
+
+    async reportCapabilities({ capsHash, capabilities, releaseVersion }) {
+      const { status } = await post<{ ok: true }>("/runners/me/capabilities", {
+        caps_hash: capsHash,
+        capabilities,
+        ...(releaseVersion === undefined ? {} : { release_version: releaseVersion }),
+      });
+      if (!(status >= 200 && status < 300)) {
+        throw new Error(`capabilities report failed: HTTP ${status}`);
+      }
+    },
+
+    async drain() {
+      const { status } = await post<{ ok: true }>("/runners/me/drain", {});
+      if (!(status >= 200 && status < 300)) {
+        throw new Error(`drain failed: HTTP ${status}`);
+      }
     },
 
     async reportResult({ stepRunId, leaseToken, outcome, ref, outputData, reason, artifacts }) {

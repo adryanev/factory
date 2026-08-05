@@ -72,8 +72,10 @@ function defaultAgentProviderFor(name: string): AgentProvider {
 }
 
 /** The real system deps every production turn runs on. */
-export function createSystemTurnRuntimeDeps(): TurnRuntimeDeps {
-  const hostAgentUser = process.env["FACTORY_AGENT_USER"];
+export function createSystemTurnRuntimeDeps(overrides?: { hostAgentUser?: string }): TurnRuntimeDeps {
+  // The daemon passes the user recorded in the identity file at join; the env
+  // var stays for a hand-run Runner that never joined through the installer.
+  const hostAgentUser = overrides?.hostAgentUser ?? process.env["FACTORY_AGENT_USER"];
   return {
     createSandbox,
     docker: createDockerControl(),

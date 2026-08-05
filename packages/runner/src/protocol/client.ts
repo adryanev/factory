@@ -133,6 +133,22 @@ export interface ProtocolClient {
   }): Promise<{ questionId: string }>;
 }
 
+/**
+ * Any non-2xx from the control plane, carrying the status so the caller can
+ * consult `decideOnStatus` (the spec's error table) instead of parsing a
+ * message string. The one status that stops a Runner is 401; everything else
+ * is a backoff-and-retry, and that decision belongs to the caller.
+ */
+export class ProtocolError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ProtocolError";
+  }
+}
+
 export function createProtocolClient(baseUrl: string, secret: string): ProtocolClient {
   const post = async <T>(path: string, body: unknown): Promise<{ status: number; body: T }> => {
     const response = await fetch(`${baseUrl}${path}`, {
@@ -155,13 +171,13 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
         protocol_version: protocolVersion,
       });
       if (status === 426) {
-        throw new Error("claim refused: protocol version out of range");
+        throw new ProtocolError(status, "claim refused: protocol version out of range");
       }
       if (status === 401) {
-        throw new Error("claim refused: runner secret invalid or revoked");
+        throw new ProtocolError(status, "claim refused: runner secret invalid or revoked");
       }
       if (!(status >= 200 && status < 300)) {
-        throw new Error(`claim failed: HTTP ${status}`);
+        throw new ProtocolError(status, `claim failed: HTTP ${status}`);
       }
       const wire = body.step_run as (Omit<ClaimedStepRun, "session"> & {
         session?: { id: string; blob_key: string; get_url: string; expires_at: string } | null;
@@ -195,7 +211,7 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
         caps_hash: capsHash,
       });
       if (!(status >= 200 && status < 300)) {
-        throw new Error(`heartbeat failed: HTTP ${status}`);
+        throw new ProtocolError(status, `heartbeat failed: HTTP ${status}`);
       }
       return {
         desiredState: body.desired_state,
@@ -214,14 +230,14 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
         ...(releaseVersion === undefined ? {} : { release_version: releaseVersion }),
       });
       if (!(status >= 200 && status < 300)) {
-        throw new Error(`capabilities report failed: HTTP ${status}`);
+        throw new ProtocolError(status, `capabilities report failed: HTTP ${status}`);
       }
     },
 
     async drain() {
       const { status } = await post<{ ok: true }>("/runners/me/drain", {});
       if (!(status >= 200 && status < 300)) {
-        throw new Error(`drain failed: HTTP ${status}`);
+        throw new ProtocolError(status, `drain failed: HTTP ${status}`);
       }
     },
 
@@ -244,10 +260,10 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
           : {}),
       });
       if (status === 409) {
-        throw new Error("result refused: lease no longer valid");
+        throw new ProtocolError(status, "result refused: lease no longer valid");
       }
       if (!(status >= 200 && status < 300)) {
-        throw new Error(`result failed: HTTP ${status}`);
+        throw new ProtocolError(status, `result failed: HTTP ${status}`);
       }
       return body;
     },
@@ -257,10 +273,10 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
         grants: { key: string; blob_key: string; upload_url: string; expires_at: string }[];
       }>(`/step-runs/${stepRunId}/uploads`, { lease_token: leaseToken, requests });
       if (status === 409) {
-        throw new Error("uploads refused: lease no longer valid");
+        throw new ProtocolError(status, "uploads refused: lease no longer valid");
       }
       if (!(status >= 200 && status < 300)) {
-        throw new Error(`uploads failed: HTTP ${status}`);
+        throw new ProtocolError(status, `uploads failed: HTTP ${status}`);
       }
       return body.grants.map((grant) => ({
         key: grant.key,
@@ -282,10 +298,10 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
         })),
       });
       if (status === 409) {
-        throw new Error("log-chunks refused: lease no longer valid");
+        throw new ProtocolError(status, "log-chunks refused: lease no longer valid");
       }
       if (!(status >= 200 && status < 300)) {
-        throw new Error(`log-chunks failed: HTTP ${status}`);
+        throw new ProtocolError(status, `log-chunks failed: HTTP ${status}`);
       }
     },
 
@@ -307,10 +323,10 @@ export function createProtocolClient(baseUrl: string, secret: string): ProtocolC
         ...(sessionId !== undefined ? { session_id: sessionId } : {}),
       });
       if (status === 409) {
-        throw new Error("question refused: lease no longer valid");
+        throw new ProtocolError(status, "question refused: lease no longer valid");
       }
       if (!(status >= 200 && status < 300)) {
-        throw new Error(`question failed: HTTP ${status}`);
+        throw new ProtocolError(status, `question failed: HTTP ${status}`);
       }
       return { questionId: body.question_id };
     },

@@ -8,6 +8,7 @@
  * plus parallel CI) is not misread as a broken container.
  */
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { Pool } from "pg";
 
 export const CONTAINER_READY_BUDGET_MS = 240_000;
 
@@ -15,4 +16,19 @@ export async function startPostgresContainer(): Promise<StartedPostgreSqlContain
   return await new PostgreSqlContainer("postgres:16-alpine")
     .withStartupTimeout(CONTAINER_READY_BUDGET_MS)
     .start();
+}
+
+/**
+ * The rigs' one pool factory. node-postgres requires a pool-level error
+ * listener: without one, a connection-level error outside a query crashes
+ * the process (unhandled 'error'). In the rigs that error is routine — the
+ * container is killed by `container.stop()` while `pool.end()` is still
+ * closing clients, and the dying server sends 57P01 into the closing
+ * handshake. Query-level failures still surface through the awaited query
+ * promises; the listener only absorbs the expected teardown noise.
+ */
+export function createTestPool(connectionString: string): Pool {
+  const pool = new Pool({ connectionString });
+  pool.on("error", () => {});
+  return pool;
 }

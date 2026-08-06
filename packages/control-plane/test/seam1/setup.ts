@@ -14,6 +14,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 import { startPostgresContainer } from "../postgres-container.js";
+import { createTestPool } from "../postgres-container.js";
 import { createDatabase } from "../../src/db/client.js";
 import { MIGRATIONS_FOLDER } from "../../src/db/migrations-path.js";
 import {
@@ -104,7 +105,7 @@ export interface TestRigOptions {
 export async function startTestRig(options: TestRigOptions = {}): Promise<TestRig> {
   const container: StartedPostgreSqlContainer = await startPostgresContainer();
 
-  const pool = new Pool({ connectionString: container.getConnectionUri() });
+  const pool = createTestPool(container.getConnectionUri());
   await migrate(drizzle(pool), { migrationsFolder: MIGRATIONS_FOLDER });
 
   let currentTime = new Date("2026-01-01T00:00:00.000Z");

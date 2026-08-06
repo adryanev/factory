@@ -12,7 +12,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { generateId } from "@factory/shared";
 import { Pool } from "pg";
 import { MIGRATIONS_FOLDER } from "../../src/db/migrations-path.js";
-import { startPostgresContainer } from "../postgres-container.js";
+import { createTestPool, startPostgresContainer } from "../postgres-container.js";
 
 
 export interface SqlRig {
@@ -39,7 +39,7 @@ export async function resetDatabase(pool: Pool): Promise<void> {
 
 export async function startSqlRig(): Promise<SqlRig> {
   const container: StartedPostgreSqlContainer = await startPostgresContainer();
-  const pool = new Pool({ connectionString: container.getConnectionUri() });
+  const pool = createTestPool(container.getConnectionUri());
   await migrate(drizzle(pool), { migrationsFolder: MIGRATIONS_FOLDER });
 
   return {

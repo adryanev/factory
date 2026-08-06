@@ -11,7 +11,7 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertMigrationsApplied, MigrationGateError } from "../../src/db/migration-gate.js";
 import { MIGRATIONS_FOLDER } from "../../src/db/migrations-path.js";
-import { startPostgresContainer } from "../postgres-container.js";
+import { createTestPool, startPostgresContainer } from "../postgres-container.js";
 
 describe("assertMigrationsApplied", () => {
   let container: StartedPostgreSqlContainer;
@@ -19,7 +19,7 @@ describe("assertMigrationsApplied", () => {
 
   beforeAll(async () => {
     container = await startPostgresContainer();
-    pool = new Pool({ connectionString: container.getConnectionUri() });
+    pool = createTestPool(container.getConnectionUri());
   });
 
   afterAll(async () => {

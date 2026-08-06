@@ -18,6 +18,7 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { createTestPool } from "../postgres-container.js";
 import { Pool } from "pg";
 import { MIGRATIONS_FOLDER } from "../../src/db/migrations-path.js";
 import { runMigrations } from "../../src/db/migrate.js";
@@ -29,7 +30,7 @@ describe("advisory-locked migration runner", () => {
 
   async function freshPool(): Promise<Pool> {
     container = await startPostgresContainer();
-    const pool = new Pool({ connectionString: container.getConnectionUri() });
+    const pool = createTestPool(container.getConnectionUri());
     pools.push(pool);
     return pool;
   }

@@ -15,7 +15,9 @@
  *    and imports `@factory/shared`.
  */
 import { parseArgs } from "node:util";
+import { realpathSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { isValidId } from "@factory/shared";
 import { createSudoIsolationProbe } from "./isolation.js";
 import { joinRunner } from "./join.js";
@@ -24,6 +26,7 @@ import { startClaimLoop } from "./claim-loop.js";
 import { createProtocolClient } from "./protocol/client.js";
 import { createSystemGitOps } from "./git/ops.js";
 import { createSystemCapabilityProbeDeps, probeCapabilities } from "./capabilities.js";
+import { runEgressProxy } from "./agent-runtime/egress-proxy.js";
 import { createSystemTurnRuntimeDeps, createTurnRuntime } from "./agent-runtime/index.js";
 
 export function describeRunnerScaffold(): string {
@@ -37,6 +40,7 @@ function printUsage(): void {
       "  factory-runner join --control-plane <url> --token <join-token> --identity <file> --agent-user <user>",
       "  factory-runner run --identity <file> [--tags a,b] [--work-dir <dir>] [--sandbox-image <ref>]",
       "                     [--allow-unenforced-docker-egress]",
+      "  factory-runner egress-proxy --allowlist '<json>' [--port <port>]",
       "  factory-runner scaffold",
     ].join("\n"),
   );
@@ -108,9 +112,12 @@ async function runCommand(args: string[]): Promise<number> {
     .map((tag) => tag.trim())
     .filter((tag) => tag.length > 0);
 
-  // Off unless the operator says otherwise: `exec:docker` enforces no egress
-  // allowlist, so a Runner that has not been told to accept that refuses
-  // docker turns rather than running them unprotected (ADR 0005).
+  // Off unless the operator says otherwise — and now it means "turn egress
+  // enforcement off": by default `exec:docker` runs on an internal network
+  // with an allowlist-enforcing sidecar proxy as its only exit (issue #22,
+  // ADR 0005). Passing this flag restores the pre-enforcement shape: the
+  // sandbox joins an ordinary bridge network and reaches whatever the host
+  // reaches.
   const allowUnenforcedDockerEgress =
     values["allow-unenforced-docker-egress"] === true ||
     process.env["FACTORY_ALLOW_UNENFORCED_DOCKER_EGRESS"] === "1";
@@ -171,6 +178,11 @@ export async function cli(argv: string[]): Promise<number> {
       return joinCommand(rest);
     case "run":
       return runCommand(rest);
+    case "egress-proxy":
+      // Not an operator-facing command: the Runner deploys this inside the
+      // egress sidecar container (issue #22) by mounting its own bundle and
+      // running `node main.js egress-proxy --allowlist '…'`.
+      return runEgressProxy(rest);
     case "scaffold":
     case undefined:
       console.log(describeRunnerScaffold());
@@ -181,7 +193,17 @@ export async function cli(argv: string[]): Promise<number> {
   }
 }
 
-const isMain = import.meta.url === `file://${process.argv[1]}`;
+/**
+ * The main-module test. Compared against the entry's *realpath*: ESM resolves
+ * `import.meta.url` to the resolved real path, while `process.argv[1]` keeps
+ * the literal invocation path — a symlinked invocation (e.g. `/var/folders`
+ * on macOS, a `node_modules/.bin` link, a `/usr/local/bin` symlink) would
+ * silently no-op without this. The same comparison guards the `egress-proxy`
+ * subcommand, which runs the bundle from inside a docker mount.
+ */
+const isMain =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
 if (isMain) {
   cli(process.argv.slice(2))
     .then((code) => {

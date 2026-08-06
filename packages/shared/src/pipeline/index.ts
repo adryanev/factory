@@ -33,6 +33,7 @@ export {
   QUESTION_KINDS,
   questionSchemaByKind,
   renderAnswerForAgent,
+  renderHumanTimeoutForAgent,
   renderQuestionForHuman,
   type Question,
   type QuestionKind,

@@ -1,0 +1,2 @@
+ALTER TABLE "step_runs" ADD COLUMN "human_deadline" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "step_runs_human_timeout_idx" ON "step_runs" USING btree ("human_deadline") WHERE "step_runs"."outcome" = 'awaiting-human';

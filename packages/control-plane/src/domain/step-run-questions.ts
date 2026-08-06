@@ -310,7 +310,7 @@ export async function mintArtifactEditUpload(
 }
 
 /** Rebuilds the closed Question from its stored columns — the `renderAnswerForAgent` input. */
-function questionFromRow(question: typeof questions.$inferSelect): Question {
+export function questionFromRow(question: typeof questions.$inferSelect): Question {
   switch (question.kind) {
     case "choice":
       return {

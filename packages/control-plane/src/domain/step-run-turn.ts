@@ -20,6 +20,7 @@ import {
   generateId,
   isArtifactKind,
   normalizeArtifactKey,
+  parseDuration,
   type ArtifactKind,
   type Id,
   type UsageReport,
@@ -35,6 +36,23 @@ import { recordStepRunCost } from "./costs.js";
 import { queueQuestionNotification } from "./notifications.js";
 
 type StepRunRow = typeof stepRuns.$inferSelect;
+
+/**
+ * The recorded deadline an `awaiting-human` StepRun carries (issue #24): the
+ * instant the row enters `awaiting-human` plus the Step's `humanTimeout`,
+ * written once — never derived at sweep time. Null when the Step declares no
+ * timeout (`humanTimeout: none` or omitted). The same clock that stamps the
+ * transition stamps the deadline, so the pair is consistent by construction
+ * (the doctrine `unschedulableDeadline` in graph-advance.ts established for
+ * issue #25).
+ */
+export function humanTimeoutDeadline(
+  humanTimeout: string | undefined,
+  enteredAt: Date,
+): Date | null {
+  if (humanTimeout === undefined || humanTimeout === "none") return null;
+  return new Date(enteredAt.getTime() + parseDuration(humanTimeout));
+}
 
 /**
  * Fetches the StepRun and enforces the one rule every turn-ending write
@@ -302,13 +320,21 @@ export async function submitQuestion(
   }
 
   const [run] = await deps.db
-    .select({ projectId: runs.projectId })
+    .select({ projectId: runs.projectId, definition: runs.definition })
     .from(runs)
     .where(eq(runs.id, row.runId));
   if (!run) {
     throw new LeaseConflictError("step run references a missing run");
   }
   const now = deps.clock.now();
+
+  // The Step's own `humanTimeout:` (issue #24): the deadline is stamped the
+  // moment the row enters awaiting-human, from the same `now` that stamps
+  // the transition. A branch StepRun's `stepKey` is the fan-out Step's id —
+  // the HITL fields live on the Step, never on a Branch (branchSchema).
+  const pipeline = parsePipelineSnapshot(run.definition);
+  const step = pipeline?.steps[row.stepKey];
+  const humanDeadline = humanTimeoutDeadline(step?.humanTimeout, now);
 
   await deps.db.transaction(async (tx) => {
     await tx
@@ -332,6 +358,7 @@ export async function submitQuestion(
         outcome: "awaiting-human",
         leasedBy: null,
         leaseExpiresAt: null,
+        humanDeadline,
         outputRefBranch: input.ref.branch,
         outputRefSha: input.ref.sha,
         sessionBlobKey: input.sessionBlobKey ?? row.sessionBlobKey,

@@ -91,6 +91,15 @@ export const stepRuns = pgTable(
     // now`), dan sweep memindahkannya ke outcome 'unschedulable' yang
     // terlihat di UI.
     unschedulableAfter: timestamp("unschedulable_after", { withTimezone: true }),
+    // Batas waktu jawaban manusia dari `humanTimeout:` milik Step (issue
+    // #24): dihitung SEKALI saat StepRun masuk `awaiting-human` — `now +
+    // humanTimeout`, dari jam yang sama yang menstempel transisi itu — dan
+    // ditulis di baris, bukan diturunkan saat kueri (doktrin yang sama
+    // dengan `unschedulable_after`, issue #25). NULL = Step tidak
+    // mendeklarasikan batas (`humanTimeout: none` atau tidak ditulis);
+    // baris itu menunggu tanpa batas. Sweep memindahkan baris yang melewati
+    // batas sesuai `onHumanTimeout:`.
+    humanDeadline: timestamp("human_deadline", { withTimezone: true }),
     // Wall clock timeout dipegang control plane, bukan sandcastle (spec:
     // "jam wall-clock hanya satu dan dipegang control plane").
     startedAt: timestamp("started_at", { withTimezone: true }),
@@ -166,6 +175,13 @@ export const stepRuns = pgTable(
     index("step_runs_unschedulable_ready_idx")
       .on(table.unschedulableAfter)
       .where(sql`${table.outcome} = 'ready'`),
+    // Sweep human timeout (issue #24): baris `awaiting-human` yang melewati
+    // `human_deadline`. Partial index — baris yang sudah berpindah ke
+    // outcome lain tidak pernah discan, jadi scan menyusut sambil bekerja
+    // (spec: "Sweep adalah indexed scan yang menyusut sambil bekerja").
+    index("step_runs_human_timeout_idx")
+      .on(table.humanDeadline)
+      .where(sql`${table.outcome} = 'awaiting-human'`),
     // Containment tag `runner.tags @> requiredTags` butuh GIN.
     index("step_runs_required_tags_gin_idx").using("gin", table.requiredTags),
     // Sweep retensi session: baris yang belum di-purge dan bukan lagi

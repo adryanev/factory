@@ -4,14 +4,20 @@
  * touches Graph advancement or Run-level orchestration (issue #4's), only
  * this one row.
  */
-import { and, eq, isNotNull, lte, lt, sql } from "drizzle-orm";
-import type { Id } from "@factory/shared";
-import { runs, stepRuns } from "../db/schema.js";
+import { and, asc, eq, isNotNull, isNull, lte, lt, sql } from "drizzle-orm";
+import { generateId, renderHumanTimeoutForAgent, type Id } from "@factory/shared";
+import { questions, runs, stepRuns } from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
 import type { Principal } from "./principal.js";
 import { requireProjectMembership } from "./projects.js";
 import { DomainValidationError, NotFoundError } from "./errors.js";
-import { advanceGraph, finalizeRunIfDone, parsePipelineSnapshot } from "./graph-advance.js";
+import {
+  advanceGraph,
+  finalizeRunIfDone,
+  parsePipelineSnapshot,
+  unschedulableDeadline,
+} from "./graph-advance.js";
+import { questionFromRow } from "./step-run-questions.js";
 import { sweepPendingNotifications } from "./notifications.js";
 import { sweepAutomation } from "./automation/index.js";
 
@@ -136,6 +142,10 @@ export async function sweepExpiredLeases(
     // the same cadence — the claim query already refuses them, this is what
     // makes the state visible and advances the Graph from it.
     await sweepUnschedulable({ db: deps.db, clock: deps.clock });
+    // Issue #24: `awaiting-human` StepRuns past their recorded
+    // `human_deadline` move per the Step's `onHumanTimeout:` on the same
+    // cadence — this is what makes the declared `humanTimeout:` real.
+    await sweepHumanTimeouts({ db: deps.db, clock: deps.clock });
   }
   return rows.map((row) => row.id);
 }
@@ -189,6 +199,128 @@ export async function sweepUnschedulable(
       if (!pipeline) return true;
       await advanceGraph({ db: tx, now: deps.clock.now }, run, pipeline, updated.stepKey);
       await finalizeRunIfDone({ db: tx, now: deps.clock.now }, run.id, pipeline);
+      return true;
+    });
+    if (changed) transitioned.push(row.id);
+  }
+  return transitioned;
+}
+
+/**
+ * The human-timeout sweep (issue #24): every `awaiting-human` StepRun whose
+ * recorded `human_deadline` has passed — compared against the injected
+ * clock, the same clock that stamped the deadline the moment the row entered
+ * `awaiting-human` (`submitQuestion`'s `humanTimeoutDeadline`; the pair is
+ * consistent by construction, the same rule `sweepUnschedulable` documents
+ * for `unschedulable_after`). Each row moves per the Step's `onHumanTimeout:`
+ * (schema: `z.enum(["fail", "continue"])`):
+ *
+ *  - `fail`: the row becomes the terminal `failed` outcome with the recorded
+ *    reason `human-timeout`, and the Graph advances from it in the same
+ *    transaction — dependents become `skipped` and the Run ends with its
+ *    verdict when nothing is left in flight.
+ *  - `continue`: the unanswered turn ends (`succeeded`) and a new turn is
+ *    born at `turn + 1, attempt: 1`, `outcome: ready`, carrying the session
+ *    (blob + id), the ref the previous turn pushed, and a rendered "no one
+ *    answered" resume prompt — the conversation moves on without a human
+ *    answer, the way `answerQuestion` moves it on with one.
+ *
+ * The runtime default for an *omitted* `onHumanTimeout` is `continue` — the
+ * same lenient default `onReject` carries — applied here, at the single
+ * call site, the same way the schema's other no-default fields get theirs
+ * (`join ?? "all"`). The schema itself rejects `onHumanTimeout` without a
+ * non-`none` `humanTimeout`, so a row with a recorded deadline always has a
+ * well-defined policy.
+ *
+ * Indexed scan that shrinks while working (spec): the candidate SELECT walks
+ * the partial `step_runs_human_timeout_idx` (`human_deadline` WHERE
+ * `outcome = 'awaiting-human'`), and a transitioned row drops out of that
+ * index — the next round never rescans it. Two concurrent sweepers are safe
+ * the way the lease and unschedulable sweeps are: the UPDATE's
+ * `outcome = 'awaiting-human'` guard is re-evaluated after the other
+ * sweeper's commit, so the loser updates zero rows and the transition (and
+ * the turn birth, or the Graph advance) never runs twice for one row.
+ */
+export async function sweepHumanTimeouts(
+  deps: Pick<AppDeps, "db" | "clock">,
+): Promise<Id<"steprun">[]> {
+  const now = deps.clock.now();
+  const expired = await deps.db
+    .select()
+    .from(stepRuns)
+    .where(
+      and(
+        eq(stepRuns.outcome, "awaiting-human"),
+        isNotNull(stepRuns.humanDeadline),
+        lte(stepRuns.humanDeadline, now),
+      ),
+    );
+
+  const transitioned: Id<"steprun">[] = [];
+  for (const row of expired) {
+    const changed = await deps.db.transaction(async (tx) => {
+      const [run] = await tx.select().from(runs).where(eq(runs.id, row.runId));
+      if (!run) return false;
+      const pipeline = parsePipelineSnapshot(run.definition);
+      const step = pipeline?.steps[row.stepKey];
+      const continueTurn =
+        pipeline !== null && step !== undefined && step.onHumanTimeout !== "fail";
+
+      if (continueTurn) {
+        const [question] = await tx
+          .select()
+          .from(questions)
+          .where(and(eq(questions.stepRunId, row.id), isNull(questions.answeredAt)))
+          .orderBy(asc(questions.createdAt))
+          .limit(1);
+        if (question) {
+          const [updated] = await tx
+            .update(stepRuns)
+            .set({ outcome: "succeeded" })
+            .where(and(eq(stepRuns.id, row.id), eq(stepRuns.outcome, "awaiting-human")))
+            .returning({ id: stepRuns.id });
+          if (!updated) return false; // a concurrent sweeper transitioned it first.
+
+          // Birth the next turn, mirroring `answerQuestion`'s continue path —
+          // and carrying `unschedulable_after` the #25 doctrine demands of
+          // every freshly-`ready` row.
+          await tx.insert(stepRuns).values({
+            id: generateId("steprun"),
+            runId: row.runId,
+            repositoryId: row.repositoryId,
+            stepKey: row.stepKey,
+            branchKey: row.branchKey,
+            turn: row.turn + 1,
+            attempt: 1,
+            outcome: "ready",
+            kind: row.kind,
+            requiredTags: row.requiredTags,
+            readyAt: now,
+            unschedulableAfter: unschedulableDeadline(pipeline, now),
+            sessionBlobKey: row.sessionBlobKey,
+            sessionId: row.sessionId,
+            resumePrompt: renderHumanTimeoutForAgent(questionFromRow(question)),
+            outputRefBranch: row.outputRefBranch,
+            outputRefSha: row.outputRefSha,
+          });
+          return true;
+        }
+        // An awaiting-human row always carries one open Question
+        // (`submitQuestion` writes both in one transaction); when it is
+        // missing, the continue promise cannot be honored — fall through to
+        // `fail` rather than leave the row waiting forever (the original bug).
+      }
+
+      const [updated] = await tx
+        .update(stepRuns)
+        .set({ outcome: "failed", reason: "human-timeout" })
+        .where(and(eq(stepRuns.id, row.id), eq(stepRuns.outcome, "awaiting-human")))
+        .returning({ id: stepRuns.id });
+      if (!updated) return false; // a concurrent sweeper transitioned it first.
+      if (pipeline) {
+        await advanceGraph({ db: tx, now: deps.clock.now }, run, pipeline, row.stepKey);
+        await finalizeRunIfDone({ db: tx, now: deps.clock.now }, run.id, pipeline);
+      }
       return true;
     });
     if (changed) transitioned.push(row.id);

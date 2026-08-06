@@ -84,5 +84,6 @@ export {
   type Answer,
   answerSchema,
   renderAnswerForAgent,
+  renderHumanTimeoutForAgent,
   renderQuestionForHuman,
 } from "./pipeline/index.js";

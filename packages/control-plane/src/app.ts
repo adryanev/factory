@@ -87,7 +87,7 @@ export function createApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   // defend for those paths, and requiring the header there would just be
   // friction with no security value. Same for the GitHub App webhook
   // (`/webhook/github`): it authenticates by HMAC, not by cookie, and its
-  // real gate is the signature check inside `domain/automation.ts`.
+  // real gate is the signature check inside `domain/automation/webhook-ingest.ts`.
   app.use("*", async (c, next) => {
     const isMutating = !["GET", "HEAD", "OPTIONS"].includes(c.req.method);
     const exempt = isRunnerProtocolPath(c.req.path) || c.req.path === GITHUB_WEBHOOK_PATH;

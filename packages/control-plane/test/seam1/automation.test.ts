@@ -29,7 +29,7 @@ import { createHmac } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateId } from "@factory/shared";
 import { sweepExpiredLeases } from "../../src/domain/step-run-ops.js";
-import { sweepWebhookDeliveries, WEBHOOK_MAX_ATTEMPTS, webhookRetryBackoffMs } from "../../src/domain/automation.js";
+import { sweepWebhookDeliveries, WEBHOOK_MAX_ATTEMPTS, webhookRetryBackoffMs } from "../../src/domain/automation/index.js";
 import { runRetentionSweeps } from "../../src/domain/retention-sweeps.js";
 import type { GitHost } from "../../src/domain/git-host.js";
 import { startTestRig, type TestRig } from "./setup.js";

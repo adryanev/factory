@@ -22,7 +22,7 @@ import * as claimDomain from "./step-run-claim.js";
 import * as turnDomain from "./step-run-turn.js";
 import * as stepRunOpsDomain from "./step-run-ops.js";
 import * as secretsDomain from "./secrets.js";
-import * as automationDomain from "./automation.js";
+import * as automationDomain from "./automation/index.js";
 import * as egressDomain from "./egress.js";
 import type { Principal } from "./principal.js";
 import type { LoginResult } from "./auth.js";
@@ -265,7 +265,7 @@ export interface Domain {
     /**
      * The `/webhook/github` surface: verify the HMAC, drop the raw event
      * (layer-1 dedup), answer. All mapping happens on the sweep — see
-     * `domain/automation.ts`.
+     * `domain/automation/index.ts`.
      */
     ingestWebhook: (
       input: automationDomain.WebhookIngestInput,

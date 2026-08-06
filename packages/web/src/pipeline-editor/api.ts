@@ -4,7 +4,7 @@
  * nothing that could ever grow into a draft mode: the repository stays the
  * source of truth, the only write opens a PR.
  */
-import { CSRF_HEADER_NAME, CSRF_HEADER_VALUE } from "../questions/api";
+import { CSRF_HEADER_NAME, CSRF_HEADER_VALUE, fetchJson } from "../questions/api";
 
 export interface ProjectRecord {
   id: string;
@@ -23,12 +23,6 @@ export interface EditorPullRequest {
   prUrl: string;
   headBranch: string;
   commitSha: string;
-}
-
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<{ status: number; body: T }> {
-  const response = await fetch(url, init);
-  const text = await response.text();
-  return { status: response.status, body: (text ? JSON.parse(text) : undefined) as T };
 }
 
 /** The Projects the caller is a member of — the editor's scope starts here. */

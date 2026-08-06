@@ -136,5 +136,5 @@ export function serializePipeline(pipeline: Pipeline): string {
   for (const [key, step] of Object.entries(pipeline.steps)) {
     source.steps[key] = stepToPlain(step as unknown as StepSource);
   }
-  return `${stringify(source as unknown as Record<string, unknown>)}`;
+  return `${stringify(source)}`;
 }

@@ -112,7 +112,7 @@ describe("Runner protocol: the authoritative Output gate at /result", () => {
 
   it("AC7 — a run: Step with no output contract is never gated (no output_data to check)", async () => {
     const { secret, client } = await joinRunner(rig, ownerCookie);
-    const { stepRunId } = await seedReadyStepRun(rig.pool);
+    await seedReadyStepRun(rig.pool);
 
     const claimed = await client.claim(secret);
     const stepRun = (claimed.body as { step_run: { id: string; lease_token: string } }).step_run;

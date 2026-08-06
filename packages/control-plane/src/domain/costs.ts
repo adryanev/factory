@@ -271,7 +271,7 @@ export async function getProjectCost(
     .filter((row) => row.costUsd !== null)
     .map((row) => ({
       credentialPrincipalId: row.credentialPrincipalId,
-      costUsd: row.costUsd!,
+      costUsd: row.costUsd,
     }));
 
   const [total] = await deps.db

@@ -21,7 +21,8 @@ import { createS3ObjectStore, type ObjectStore, type S3ObjectStoreConfig } from 
 import { LIVE_TAIL_HOLD_MS } from "./domain/step-run-logs.js";
 
 export interface Clock {
-  now(): Date;
+  /** `this: void` — the clock is passed around unbound (`deps.clock.now`), so it must never read instance state. */
+  now(this: void): Date;
 }
 
 export interface RandomSource {

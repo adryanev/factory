@@ -13,7 +13,6 @@ import { createRoute, z, type OpenAPIHono } from "@hono/zod-openapi";
 import {
   answerSchema,
   errorResponseSchema,
-  type Answer,
   type Id,
 } from "@factory/shared";
 import type { AppEnv } from "../http-env.js";
@@ -214,7 +213,7 @@ export function registerQuestionRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDeps
     const principal = requirePrincipal(c);
     const { id } = c.req.valid("param");
     const { answer } = c.req.valid("json");
-    const result = await deps.domain.questions.answer(principal, id as Id<"question">, answer as Answer);
+    const result = await deps.domain.questions.answer(principal, id as Id<"question">, answer);
     if (result.status === "accepted") {
       return c.json({ status: "accepted" as const }, 200);
     }

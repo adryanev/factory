@@ -102,7 +102,7 @@ export async function listProjectRepositories(
     .from(repositories)
     .where(eq(repositories.projectId, projectId));
   return rows.map((row) => ({
-    id: row.id as Id<"repository">,
+    id: row.id,
     owner: row.owner,
     name: row.name,
     defaultBranch: row.defaultBranch,

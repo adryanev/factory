@@ -8,7 +8,7 @@ import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import { cronMatches, generateId, type Id } from "@factory/shared";
 import { cronSkips, pipelineDefinitionCache, projects, repositories, runs } from "../../db/schema.js";
 import type { AppDeps } from "../../deps.js";
-import type { AutomationDeps, AutomationSweepDeps } from "./deps.js";
+import type { AutomationSweepDeps } from "./deps.js";
 import type { Principal } from "../principal.js";
 import type { RepoRef } from "../git-host.js";
 import { requireProjectMembership } from "../projects.js";
@@ -107,5 +107,5 @@ export async function listCronSkips(
     .limit(limit + 1);
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
-  return { skips: page, nextCursor: hasMore ? (page[page.length - 1]!.id as string) : null };
+  return { skips: page, nextCursor: hasMore ? (page[page.length - 1]!.id) : null };
 }

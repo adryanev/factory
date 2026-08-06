@@ -12,7 +12,7 @@ import type { AutomationDeps } from "./deps.js";
 import type { Principal } from "../principal.js";
 import { recordAuditEvent } from "../audit.js";
 import type { RepoRef } from "../git-host.js";
-import { materializeRun, readPromptFiles, type MaterializeRunInput } from "../runs.js";
+import { materializeRun, readPromptFiles } from "../runs.js";
 import type { ReadDefinition } from "./definition-cache.js";
 
 /** The Project's ServiceAccount, deterministic — first by principal id. Null when the Project has none; automation cannot run without one (CONTEXT.md: Automation berjalan sebagai ServiceAccount milik Project-nya). */
@@ -171,6 +171,6 @@ export function isUniqueViolation(error: unknown): boolean {
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    (error as { code: unknown }).code === "23505"
+    (error).code === "23505"
   );
 }

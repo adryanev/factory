@@ -81,7 +81,7 @@ export async function joinRunner(
   if (status !== 200) {
     throw new Error(`join failed: ${status} ${JSON.stringify(body)}`);
   }
-  const { runner_id: runnerId, secret } = body as { runner_id: string; secret: string };
+  const { runner_id: runnerId, secret } = body;
   await setRunnerPolicy(rig, ownerCookie, runnerId, policy);
   return { runnerId, secret, client };
 }

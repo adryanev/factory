@@ -22,7 +22,7 @@ const exec: (file: string, args: string[], opts?: { cwd?: string }) => Promise<{
   file,
   args,
   opts,
-) => execFileAsync(file, args, opts).catch((error) => Promise.reject(error)) as never;
+) => execFileAsync(file, args, opts) as never;
 
 let baseSha = "";
 let origin = "";

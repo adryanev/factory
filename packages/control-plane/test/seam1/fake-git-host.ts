@@ -229,7 +229,7 @@ export function createFakeGitHost(): FakeGitHost {
       if (!record) return null;
       return { number: record.number, htmlUrl: record.htmlUrl, headSha: record.headSha, state: "open" };
     },
-    async createPullRequest(repo, input, token): Promise<PullRequest> {
+    async createPullRequest(repo, input): Promise<PullRequest> {
       if (this.failNextCreates > 0) {
         this.failNextCreates -= 1;
         throw new Error("github pull request create failed: 503");

@@ -28,7 +28,12 @@ function fakeProtocol(): Pick<ProtocolClient, "mintUploadGrants"> & { requests: 
 
 function fakeFetch(onRequest: (url: string, init?: RequestInit) => { ok: boolean; text?: string }) {
   return vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    const handled = onRequest(String(input), init);
+    // The storage layer always fetches string URLs; assert that invariant
+    // instead of stringifying whatever fetch handed us.
+    if (typeof input !== "string") {
+      throw new Error(`expected a string URL, got ${input.constructor.name}`);
+    }
+    const handled = onRequest(input, init);
     return {
       ok: handled.ok,
       status: handled.ok ? 200 : 500,

@@ -21,7 +21,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { generateId } from "@factory/shared";
 import { runControlPlaneStepCycle } from "../../src/domain/control-plane-steps.js";
-import type { AppDeps } from "../../src/deps.js";
 import { startTestRig, type TestRig } from "./setup.js";
 import { joinRunner } from "./runner-test-helpers.js";
 
@@ -180,8 +179,8 @@ describe("control-plane pull-request Step (issue #17)", () => {
   it("opens no PR for a fan-out branch that failed — that branch's kind: StepRun is skipped", async () => {
     const project = await createProject(rig, ownerCookie, "pr-branch-fail");
     const infra = await createRepository(rig, project.id, "infra");
-    const frontend = await createRepository(rig, project.id, "frontend");
-    const backend = await createRepository(rig, project.id, "backend");
+    await createRepository(rig, project.id, "frontend");
+    await createRepository(rig, project.id, "backend");
 
     const runId = await triggerRun(
       rig,
@@ -241,8 +240,8 @@ describe("control-plane pull-request Step (issue #17)", () => {
   it("opens one PR per fan-out branch in that branch's repo, posts the Commit Status, and records the PR on the StepRun rows", async () => {
     const project = await createProject(rig, ownerCookie, "pr-per-branch");
     const infra = await createRepository(rig, project.id, "infra");
-    const frontend = await createRepository(rig, project.id, "frontend");
-    const backend = await createRepository(rig, project.id, "backend");
+    await createRepository(rig, project.id, "frontend");
+    await createRepository(rig, project.id, "backend");
 
     const runId = await triggerRun(
       rig,

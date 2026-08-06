@@ -29,9 +29,9 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDockerControl } from "./docker-control.js";
-import { createDockerEgressControl, type DockerEgressControl } from "./egress-docker.js";
+import { createDockerEgressControl } from "./egress-docker.js";
 import { createHostProcessControl } from "./host-process.js";
-import { createPfEgressControl, type EgressControl } from "./egress.js";
+import { createPfEgressControl } from "./egress.js";
 import { createTurnRuntime } from "./runtime.js";
 import type {
   AgentTurnSpec,

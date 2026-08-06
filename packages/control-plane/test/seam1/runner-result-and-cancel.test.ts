@@ -30,7 +30,7 @@ describe("Runner protocol: /result idempotency and cancel authority", () => {
 
   it("the same lease_token replays the recorded outcome at 200; a different one is fenced with 409", async () => {
     const { secret, client } = await joinRunner(rig, ownerCookie);
-    const { stepRunId } = await seedReadyStepRun(rig.pool);
+    await seedReadyStepRun(rig.pool);
 
     const claimed = await client.claim(secret);
     const stepRun = (claimed.body as { step_run: { id: string; lease_token: string } }).step_run;

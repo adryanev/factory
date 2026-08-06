@@ -42,7 +42,7 @@ export async function setProjectEgressAllowlist(
     projectId: projectId as never,
     action: "project.egress_allowlist_updated",
     targetType: "project",
-    targetId: projectId as never,
+    targetId: projectId,
     metadata: { allowlist },
   });
   return allowlist;

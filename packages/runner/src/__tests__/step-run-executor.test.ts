@@ -15,7 +15,7 @@ import {
   type JoinManifestEntry,
 } from "@factory/shared";
 import type { GitOps } from "../git/ops.js";
-import type { ClaimedStepRun, HeartbeatReply, LogChunkWire, ProtocolClient, ResultReply } from "../protocol/client.js";
+import type { ClaimedStepRun, HeartbeatReply, LogChunkWire, ProtocolClient } from "../protocol/client.js";
 import {
   classifyAgentOutput,
   deriveMaxRetries,
@@ -162,7 +162,7 @@ function fakeProtocol(overrides: {
   };
 }
 
-function fakeTurn(result?: Partial<TurnResult>, error?: unknown, hold = false): Turn & { cancelled: boolean } {
+function fakeTurn(result?: Partial<TurnResult>, error?: Error, hold = false): Turn & { cancelled: boolean } {
   let cancelled = false;
   let rejectDone: ((reason: unknown) => void) | null = null;
   const resolved = {
@@ -218,7 +218,7 @@ function makeDeps(overrides: {
   const protocol = overrides.protocol ?? fakeProtocol();
   const artifactUploader = overrides.artifactUploader ?? fakeArtifactUploader();
   const sessionStorage = overrides.sessionStorage ?? fakeSessionStorage();
-  let startTurnCalls: TurnSpec[] = [];
+  const startTurnCalls: TurnSpec[] = [];
   const deps = {
     protocol,
     git,
@@ -525,7 +525,7 @@ describe("step-run executor: the commit point", () => {
       },
     };
 
-    await executeClaimedTurn(deps as never, claimed);
+    await executeClaimedTurn(deps, claimed);
 
     // The final flush ran before /result — the archive is complete while the
     // lease is still valid, and the token was redacted before upload.
@@ -774,7 +774,7 @@ describe("agent Steps: the executor flow", () => {
       turn: {
         done: Promise.reject(new OutputInvalidError(new Error("structured output failed") as never)),
         cancel: () => {},
-      } as Turn,
+      },
     });
 
     await executeClaimedTurn(deps.deps, agentClaim());
@@ -952,12 +952,12 @@ steps:
       x: { type: string }
 `;
     const base = { definition, definitionFiles: {}, runId: "run_1", id: "steprun_1" };
-    const codexBranch = resolveStep({ ...base, stepKey: "implement", branchKey: "agent-a" } as never);
+    const codexBranch = resolveStep({ ...base, stepKey: "implement", branchKey: "agent-a" });
     expect(codexBranch).toMatchObject({ kind: "agent", agent: "codex" });
-    const claudeBranch = resolveStep({ ...base, stepKey: "implement", branchKey: "agent-b" } as never);
+    const claudeBranch = resolveStep({ ...base, stepKey: "implement", branchKey: "agent-b" });
     expect(claudeBranch).toMatchObject({ kind: "agent", agent: "claude" });
     // The parent Step's fields are the whole story for a branchesFrom branch.
-    const plain = resolveStep({ ...base, stepKey: "implement", branchKey: null } as never);
+    const plain = resolveStep({ ...base, stepKey: "implement", branchKey: null });
     expect(plain).toMatchObject({ kind: "agent" });
   });
 

@@ -1,10 +1,7 @@
 import { z } from "zod";
 import { KEY_PATTERN, KEY_PATTERN_DESCRIPTION } from "./key.js";
 import {
-  QUESTION_KINDS,
-  questionSchema,
   questionSchemaByKind,
-  type Question,
   type QuestionKind,
 } from "../question.js";
 

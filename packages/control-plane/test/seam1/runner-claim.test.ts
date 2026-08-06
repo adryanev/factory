@@ -53,7 +53,7 @@ describe("Runner protocol: /claim", () => {
     const { secret, client } = await joinRunner(rig, ownerCookie);
     const { status, body } = await client.claim(secret, { tags: ["nothing-matches-this"] });
     expect(status).toBe(200);
-    expect((body as { step_run: unknown }).step_run).toBeNull();
+    expect((body).step_run).toBeNull();
   });
 
   it("a herd of Runners arriving together gets spread across the hold window, not all released at the exact same instant", async () => {
@@ -84,7 +84,7 @@ describe("Runner protocol: /claim", () => {
   });
 
   it("/heartbeat is always 200 even for a Runner reporting an out-of-range protocol version, and reports the supported range", async () => {
-    const { secret, client } = await joinRunner(rig, ownerCookie);
+    const { secret } = await joinRunner(rig, ownerCookie);
     const response = await fetch(`${rig.baseUrl}/heartbeat`, {
       method: "POST",
       headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" },
@@ -100,12 +100,12 @@ describe("Runner protocol: /claim", () => {
    * Times out with the count it actually saw, so a genuine regression reads
    * as "the connections never registered" instead of as a wrong status code.
    */
-  async function waitForHangingClaims(rig: TestRig, count: number): Promise<void> {
+  async function waitForHangingClaims(testRig: TestRig, count: number): Promise<void> {
     const deadline = Date.now() + 5000;
-    while (rig.deps.claimLimiter.inUse() < count) {
+    while (testRig.deps.claimLimiter.inUse() < count) {
       if (Date.now() > deadline) {
         throw new Error(
-          `timed out waiting for ${count} hanging /claim connections; saw ${rig.deps.claimLimiter.inUse()}`,
+          `timed out waiting for ${count} hanging /claim connections; saw ${testRig.deps.claimLimiter.inUse()}`,
         );
       }
       await new Promise((resolve) => setTimeout(resolve, 5));

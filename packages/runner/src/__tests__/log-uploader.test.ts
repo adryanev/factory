@@ -68,7 +68,12 @@ describe("createProtocolLogChunkUploader", () => {
     const putBodies: string[] = [];
     globalThis.fetch = async (url: string | URL | Request, init?: RequestInit) => {
       if (init?.method === "PUT") {
-        putBodies.push(String(init.body));
+        // The uploader PUTs a text body; assert that invariant instead of
+        // stringifying whatever fetch handed us.
+        if (typeof init.body !== "string") {
+          throw new Error("expected a string PUT body");
+        }
+        putBodies.push(init.body);
         return new Response(null, { status: 200 });
       }
       return new Response(null, { status: 404 });

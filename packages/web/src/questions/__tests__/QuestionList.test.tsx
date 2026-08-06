@@ -31,9 +31,13 @@ function question(id: string, overrides: Partial<Record<string, unknown>> = {}) 
   };
 }
 
+function urlOf(input: RequestInfo | URL): string {
+  return typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+}
+
 function mockFetchWaiting(questions: unknown[]): ReturnType<typeof vi.fn> {
   const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
-    const url = String(input);
+    const url = urlOf(input);
     if (url.endsWith("/questions/waiting")) {
       return {
         ok: true,
@@ -91,7 +95,7 @@ describe("QuestionList", () => {
 
     await waitFor(() => expect(screen.getAllByText("Approve this plan?")).toHaveLength(2));
     expect(onWaitingCountChange).toHaveBeenLastCalledWith(2);
-    expect(fetchImpl.mock.calls.every(([input]) => String(input).endsWith("/questions/waiting"))).toBe(true);
+    expect(fetchImpl.mock.calls.every(([input]) => urlOf(input).endsWith("/questions/waiting"))).toBe(true);
   });
 
   it("uses one slow refresh for a non-Run tab", async () => {
@@ -124,7 +128,7 @@ describe("QuestionList", () => {
   it("an accepted answer refreshes the list", async () => {
     const fetchImpl = vi
       .fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
+        const url = urlOf(input);
         if (url.endsWith("/questions/waiting")) {
           return {
             ok: true,
@@ -144,7 +148,7 @@ describe("QuestionList", () => {
 
     // A second /questions/waiting fetch proves the answer triggered a refresh.
     await waitFor(() => {
-      const waitingCalls = fetchImpl.mock.calls.filter(([input]) => String(input).endsWith("/questions/waiting"));
+      const waitingCalls = fetchImpl.mock.calls.filter(([input]) => urlOf(input).endsWith("/questions/waiting"));
       expect(waitingCalls.length).toBeGreaterThanOrEqual(2);
     });
   });

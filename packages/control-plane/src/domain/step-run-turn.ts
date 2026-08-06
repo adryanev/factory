@@ -31,7 +31,7 @@ import type { Database } from "../db/client.js";
 import type { AppDeps } from "../deps.js";
 import { DomainValidationError, LeaseConflictError } from "./errors.js";
 import type { RunnerIdentity } from "./runners.js";
-import { advanceGraph, finalizeRunIfDone, parsePipelineSnapshot, type RunRow } from "./graph-advance.js";
+import { advanceGraph, finalizeRunIfDone, parsePipelineSnapshot } from "./graph-advance.js";
 import { recordStepRunCost } from "./costs.js";
 import { queueQuestionNotification } from "./notifications.js";
 
@@ -535,7 +535,7 @@ async function recordArtifacts(
       );
     }
     if (!isArtifactKind(artifact.kind)) {
-      throw new DomainValidationError("artifact_kind_invalid", `artifact '${key}' has unknown kind '${artifact.kind}'`);
+      throw new DomainValidationError("artifact_kind_invalid", `artifact '${key}' has unknown kind '${String(artifact.kind)}'`);
     }
     batchTotal += artifact.sizeBytes;
     if (batchTotal > MAX_STEPRUN_ARTIFACT_BYTES) {

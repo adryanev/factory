@@ -31,7 +31,8 @@
  * metadata chunk, tidak pernah menerima byte"). One per StepRun+attempt.
  */
 export interface LogChunkUploader {
-  upload(chunk: LogChunk): Promise<void>;
+  /** `this: void` — the uploader is handed to `LogBuffer.flush` unbound, so `upload` must never read instance state. */
+  upload(this: void, chunk: LogChunk): Promise<void>;
 }
 
 export type ChunkMarker = "ring" | "cap";

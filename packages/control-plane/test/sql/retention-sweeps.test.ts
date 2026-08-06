@@ -49,7 +49,6 @@ describe("retention_sweeps.sql", () => {
     artifact_candidate: artifactSelect,
     artifact_mark: artifactUpdate,
     log_candidate: logSelect,
-    log_mark: logUpdate,
     branch_candidate: branchSelect,
     branch_mark: branchUpdate,
     session_candidate: sessionSelect,

@@ -26,7 +26,7 @@ import { ProtocolVersionError } from "./errors.js";
 import type { InstallationToken, RepoRef } from "./git-host.js";
 import type { RunnerIdentity } from "./runners.js";
 import { resolveSecretsForPrincipal } from "./secrets.js";
-import { buildJoinManifest, type RunRow } from "./graph-advance.js";
+import { buildJoinManifest } from "./graph-advance.js";
 
 const CLAIM_QUERY = loadSqlStatement("claim_step_run.sql");
 const POLL_INTERVAL_MS = 1000; // spec: "poll kueri klaim tiap 1 detik per koneksi menggantung"
@@ -201,7 +201,7 @@ async function hydrateClaimedRow(
     const validation =
       typeof run.definition === "string" ? validatePipelineDefinition(run.definition) : null;
     if (validation?.valid) {
-      joinManifest = (await buildJoinManifest(deps.db, run as RunRow, validation.pipeline, step)) ?? [];
+      joinManifest = (await buildJoinManifest(deps.db, run, validation.pipeline, step)) ?? [];
     }
   }
 
@@ -350,7 +350,7 @@ export async function claimStepRun(
       if (row) {
         try {
           return await hydrateClaimedRow(deps, row);
-        } catch (error) {
+        } catch {
           // Minting failed (GitHub transient) — the row is already leased, so
           // put it back on the queue rather than leaving it stuck running,
           // and keep polling: the next iteration (or a later claim) mints

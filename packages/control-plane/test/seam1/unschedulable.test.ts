@@ -170,7 +170,7 @@ describe("unschedulableAfter", () => {
     rig.setClock(new Date("2026-01-01T02:01:00.000Z"));
     const after = await client.claim(secret);
     expect(after.status).toBe(200);
-    expect((after.body as { step_run: unknown }).step_run).toBeNull();
+    expect((after.body).step_run).toBeNull();
 
     // Take the row out of the queue so the next test's claim is deterministic.
     await rig.pool.query(`update step_runs set outcome = 'succeeded' where id = $1`, [

@@ -13,7 +13,7 @@ function recordingUploader(failTimes = 0): LogChunkUploader & { chunks: LogChunk
   let remainingFailures = failTimes;
   return {
     chunks,
-    async upload(chunk) {
+    async upload(this: void, chunk) {
       if (remainingFailures > 0) {
         remainingFailures -= 1;
         throw new Error(`upload refused for seq ${chunk.seq}`);
@@ -58,7 +58,7 @@ describe("LogBuffer", () => {
     sink.write("line-two\n");
     sink.start();
     await new Promise((resolve) => setTimeout(resolve, 70));
-    sink.stop();
+    await sink.stop();
 
     expect(uploader.chunks.length).toBeGreaterThanOrEqual(1);
     expect(uploader.chunks[0]!.text).toBe("line-one\nline-two\n");
@@ -84,7 +84,7 @@ describe("LogBuffer", () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     const uploader: LogChunkUploader = {
-      async upload(chunk) {
+      async upload(this: void, chunk) {
         await gate;
         uploaded.push(chunk);
       },

@@ -24,7 +24,7 @@ export interface QuestionState {
   createdAt: string;
   answeredAt: string | null;
   answeredByPrincipalId: string | null;
-  answer: unknown | null;
+  answer: unknown;
   stepRunOutcome: string;
   stepKey: string;
   branchKey: string | null;

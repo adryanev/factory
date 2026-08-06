@@ -20,6 +20,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GenericContainer, Wait } from "testcontainers";
 import { createS3ObjectStore, type S3ObjectStoreConfig } from "../../src/object-store.js";
+import { CONTAINER_READY_BUDGET_MS } from "../postgres-container.js";
 
 const GARAGE_IMAGE = "dxflrs/garage:v2.3.0";
 const ACCESS_KEY = "contract-access-key";
@@ -65,6 +66,11 @@ describe("Garage contract: presigned PUT/GET round trip", () => {
       .withTmpFs({ "/tmp": "rw" })
       .withExposedPorts(3900)
       .withWaitStrategy(Wait.forLogMessage(/S3 API server listening/))
+      // The log-based readiness gets the same budget as the Postgres rigs
+      // (issue #31): on a loaded machine a container can take far longer
+      // than the library's 60s default to print its ready log, and the
+      // failure would be a flake, not a real signal.
+      .withStartupTimeout(CONTAINER_READY_BUDGET_MS)
       .start();
 
     endpoint = `http://127.0.0.1:${container.getMappedPort(3900)}`;

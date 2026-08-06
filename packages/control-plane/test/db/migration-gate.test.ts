@@ -4,20 +4,21 @@
  * bila skema tidak cocok" (control plane refuses to start with a clear
  * message when the schema doesn't match).
  */
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertMigrationsApplied, MigrationGateError } from "../../src/db/migration-gate.js";
 import { MIGRATIONS_FOLDER } from "../../src/db/migrations-path.js";
+import { startPostgresContainer } from "../postgres-container.js";
 
 describe("assertMigrationsApplied", () => {
   let container: StartedPostgreSqlContainer;
   let pool: Pool;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer("postgres:16-alpine").start();
+    container = await startPostgresContainer();
     pool = new Pool({ connectionString: container.getConnectionUri() });
   });
 

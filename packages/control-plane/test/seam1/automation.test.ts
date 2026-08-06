@@ -26,9 +26,12 @@
  *  - comment triggers do not exist (test 15).
  */
 import { createHmac } from "node:crypto";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateId } from "@factory/shared";
 import { sweepExpiredLeases } from "../../src/domain/step-run-ops.js";
+import { sweepWebhookDeliveries, WEBHOOK_MAX_ATTEMPTS, webhookRetryBackoffMs } from "../../src/domain/automation.js";
+import { runRetentionSweeps } from "../../src/domain/retention-sweeps.js";
+import type { GitHost } from "../../src/domain/git-host.js";
 import { startTestRig, type TestRig } from "./setup.js";
 import { joinRunner } from "./runner-test-helpers.js";
 
@@ -194,6 +197,54 @@ async function stepOutcomeOf(
     [runId, stepKey],
   );
   return rows;
+}
+
+interface WebhookDeliveryRow {
+  processed_at: Date | null;
+  attempts: number;
+  next_attempt_at: Date;
+}
+
+async function deliveryRow(rig: TestRig, deliveryId: string): Promise<WebhookDeliveryRow> {
+  const { rows } = await rig.pool.query<WebhookDeliveryRow>(
+    "select processed_at, attempts, next_attempt_at from webhook_deliveries where delivery_id = $1",
+    [deliveryId],
+  );
+  const row = rows[0];
+  if (!row) throw new Error(`no webhook_deliveries row for ${deliveryId}`);
+  return row;
+}
+
+/**
+ * Wraps a real `GitHost` so `readFile` throws `failTimes` times before
+ * falling through to `base` — the deterministic stand-in for a transient
+ * GitHub read failure (the real cause `sweepWebhookDeliveries`'s retry
+ * exists for). Every other call passes straight through, unmodified — no
+ * spread, so the fake's own test-inspection fields (`minted`, `pushed`, ...)
+ * never leak into what is typed as a plain `GitHost`.
+ */
+function withFailingReadFile(base: GitHost, failTimes: number): GitHost {
+  let remaining = failTimes;
+  return {
+    resolveRef: (repo, ref) => base.resolveRef(repo, ref),
+    readFile: async (repo, sha, path) => {
+      if (remaining > 0) {
+        remaining -= 1;
+        throw new Error("fake github read failed: 503");
+      }
+      return base.readFile(repo, sha, path);
+    },
+    mintInstallationToken: (repo, installationId, permissions) =>
+      base.mintInstallationToken(repo, installationId, permissions),
+    push: (repo, branch, sha, token) => base.push(repo, branch, sha, token),
+    findOpenPullRequest: (repo, head, baseRef, token) => base.findOpenPullRequest(repo, head, baseRef, token),
+    createPullRequest: (repo, input, token) => base.createPullRequest(repo, input, token),
+    postCommitStatus: (repo, sha, status, token) => base.postCommitStatus(repo, sha, status, token),
+    writeFile: (repo, input, token) => base.writeFile(repo, input, token),
+    revokeInstallationToken: (token) => base.revokeInstallationToken(token),
+    listRefsByPrefix: (repo, prefix, token) => base.listRefsByPrefix(repo, prefix, token),
+    deleteRef: (repo, branch, token) => base.deleteRef(repo, branch, token),
+  };
 }
 
 describe("Automation (issue #18)", () => {
@@ -417,25 +468,158 @@ describe("Automation (issue #18)", () => {
     expect(runs[0]!.cancel_requested_at).toBeNull();
   });
 
-  it("the 24h layer-1 window prunes deliveries older than a day, whatever their state", async () => {
+  it("a delivery older than 24h is not deleted by the automation sweep — the retention marker sweep owns that window instead", async () => {
     const project = await createProject(rig, ownerCookie, "dedup-window");
     const repo = await createRepository(rig, project.id, "app");
     await createServiceAccount(rig, project.id);
 
-    // The rig clock is fixed at 2026-01-01T00:00:00Z — an event 25 hours
-    // before that is past the redelivery window the moment the sweep runs.
+    // received_at (and next_attempt_at, so it's immediately due) 25h before
+    // the rig's fixed clock — past the old hard-delete's window, and also
+    // in the past relative to the real Postgres now() the retention SQL
+    // compares against.
     await rig.pool.query(
-      "insert into webhook_deliveries (delivery_id, received_at, event_type, payload) values ($1, '2025-12-30T23:00:00Z', 'push', $2)",
+      "insert into webhook_deliveries (delivery_id, received_at, next_attempt_at, event_type, payload) values ($1, '2025-12-30T23:00:00Z', '2025-12-30T23:00:00Z', 'push', $2)",
       ["delivery-stale", JSON.stringify(pushPayload(repo, "main", "sha-stale"))],
     );
     await sweep(rig);
 
-    const { rows } = await rig.pool.query(
-      "select count(*)::int as n from webhook_deliveries where delivery_id = 'delivery-stale'",
-    );
-    expect((rows[0] as { n: number }).n).toBe(0);
+    // Dispatched (no Pipeline registered, so it's a no-op success) — but the
+    // row itself is still there. This sweep never deletes.
+    const afterAutomationSweep = await deliveryRow(rig, "delivery-stale");
+    expect(afterAutomationSweep.processed_at).not.toBeNull();
     expect(await runsOf(rig, project.id)).toHaveLength(0);
+
+    const counts = await runRetentionSweeps(
+      { db: rig.deps.db, pool: rig.pool, objectStore: rig.objectStore, gitHost: rig.gitHost },
+      { batch: 100 },
+    );
+    expect(counts.webhookDeliveries).toBe(1);
+
+    const { rows } = await rig.pool.query<{ n: number; purged_at: Date | null }>(
+      "select count(*)::int as n, max(purged_at) as purged_at from webhook_deliveries where delivery_id = 'delivery-stale'",
+    );
+    expect(rows[0]!.n).toBe(1); // still exists — the marker sweep marks, it does not delete.
+    expect(rows[0]!.purged_at).not.toBeNull();
   });
+
+  it("a delivery whose dispatch throws is not marked processed, and is retried on a later sweep", async () => {
+    const project = await createProject(rig, ownerCookie, "webhook-retry");
+    const repo = await createRepository(rig, project.id, "app");
+    await createServiceAccount(rig, project.id);
+
+    const response = await webhook(rig, "push", "delivery-retry-1", pushPayload(repo, "main", "sha-retry-1"));
+    expect(response.status).toBe(202);
+
+    const t0 = new Date("2026-02-01T00:00:00.000Z");
+    const failingDeps = { db: rig.deps.db, clock: { now: () => t0 }, gitHost: withFailingReadFile(rig.gitHost, 1) };
+    const firstProcessed = await sweepWebhookDeliveries(failingDeps);
+    expect(firstProcessed).toBe(1); // one row visited, even though its dispatch failed.
+
+    const afterFailure = await deliveryRow(rig, "delivery-retry-1");
+    expect(afterFailure.processed_at).toBeNull(); // not dropped — still eligible for a later sweep.
+    expect(afterFailure.attempts).toBe(1);
+    expect(afterFailure.next_attempt_at.getTime()).toBe(t0.getTime() + webhookRetryBackoffMs(1));
+
+    // A later sweep, past the backoff, with the transient failure gone.
+    const t1 = new Date(t0.getTime() + webhookRetryBackoffMs(1) + 1);
+    const succeedingDeps = { db: rig.deps.db, clock: { now: () => t1 }, gitHost: rig.gitHost };
+    const secondProcessed = await sweepWebhookDeliveries(succeedingDeps);
+    expect(secondProcessed).toBe(1);
+
+    const afterRetry = await deliveryRow(rig, "delivery-retry-1");
+    expect(afterRetry.processed_at?.getTime()).toBe(t1.getTime());
+    expect(afterRetry.attempts).toBe(1); // a success does not touch the attempt counter.
+  });
+
+  it("a retry does not happen before next_attempt_at — a sweep running too early skips it", async () => {
+    const project = await createProject(rig, ownerCookie, "webhook-retry-early");
+    const repo = await createRepository(rig, project.id, "app");
+    await createServiceAccount(rig, project.id);
+    await webhook(rig, "push", "delivery-retry-early", pushPayload(repo, "main", "sha-retry-early"));
+
+    const t0 = new Date("2026-02-02T00:00:00.000Z");
+    await sweepWebhookDeliveries({ db: rig.deps.db, clock: { now: () => t0 }, gitHost: withFailingReadFile(rig.gitHost, 1) });
+    const afterFailure = await deliveryRow(rig, "delivery-retry-early");
+    expect(afterFailure.attempts).toBe(1);
+
+    // Still inside the 30s backoff window — even with a healthy gitHost,
+    // nothing is due, so nothing is selected.
+    const tooEarly = new Date(t0.getTime() + webhookRetryBackoffMs(1) - 1);
+    const processed = await sweepWebhookDeliveries({ db: rig.deps.db, clock: { now: () => tooEarly }, gitHost: rig.gitHost });
+    expect(processed).toBe(0);
+
+    const stillPending = await deliveryRow(rig, "delivery-retry-early");
+    expect(stillPending.processed_at).toBeNull();
+    expect(stillPending.attempts).toBe(1);
+
+    // Consume the row so it does not linger as a leftover "due" row for
+    // later tests sharing this rig's database.
+    const due = new Date(tooEarly.getTime() + 1);
+    await sweepWebhookDeliveries({ db: rig.deps.db, clock: { now: () => due }, gitHost: rig.gitHost });
+    expect((await deliveryRow(rig, "delivery-retry-early")).processed_at).not.toBeNull();
+  });
+
+  it(`a delivery dead-letters after ${WEBHOOK_MAX_ATTEMPTS} failed attempts — marked processed, and logged distinctly from an ordinary retry`, async () => {
+    const project = await createProject(rig, ownerCookie, "webhook-dead-letter");
+    const repo = await createRepository(rig, project.id, "app");
+    await createServiceAccount(rig, project.id);
+    await webhook(rig, "push", "delivery-dead-letter", pushPayload(repo, "main", "sha-dead-letter"));
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    let now = new Date("2026-02-03T00:00:00.000Z");
+    const alwaysFailingGitHost = withFailingReadFile(rig.gitHost, WEBHOOK_MAX_ATTEMPTS);
+
+    for (let attempt = 1; attempt <= WEBHOOK_MAX_ATTEMPTS; attempt++) {
+      const processed = await sweepWebhookDeliveries({ db: rig.deps.db, clock: { now: () => now }, gitHost: alwaysFailingGitHost });
+      expect(processed).toBe(1);
+      now = new Date(now.getTime() + webhookRetryBackoffMs(attempt) + 1);
+    }
+
+    const deadLettered = await deliveryRow(rig, "delivery-dead-letter");
+    expect(deadLettered.attempts).toBe(WEBHOOK_MAX_ATTEMPTS);
+    expect(deadLettered.processed_at).not.toBeNull(); // marked processed — dead-lettered, not succeeded.
+
+    const dropLog = errorSpy.mock.calls.find((call) => String(call[0]).includes("dead-lettered"));
+    expect(dropLog).toBeDefined();
+
+    // Stops being selected — a healthy sweep afterward finds nothing.
+    const afterDeadLetter = await sweepWebhookDeliveries({ db: rig.deps.db, clock: { now: () => now }, gitHost: rig.gitHost });
+    expect(afterDeadLetter).toBe(0);
+
+    errorSpy.mockRestore();
+  });
+
+  it(
+    "a permanently-failing delivery does not hang the sweep — the regression that matters most",
+    async () => {
+      const project = await createProject(rig, ownerCookie, "webhook-no-hang");
+      const repo = await createRepository(rig, project.id, "app");
+      await createServiceAccount(rig, project.id);
+      await webhook(rig, "push", "delivery-no-hang", pushPayload(repo, "main", "sha-no-hang"));
+
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const now = new Date("2026-02-04T00:00:00.000Z");
+      // Fails every single call, forever — if the sweep's loop can re-select
+      // an unprocessed row whose schedule never moves, this call never
+      // resolves and the test fails by hitting its own timeout below rather
+      // than hanging the whole suite.
+      const alwaysFailingGitHost = withFailingReadFile(rig.gitHost, Number.MAX_SAFE_INTEGER);
+      const processed = await sweepWebhookDeliveries({
+        db: rig.deps.db,
+        clock: { now: () => now },
+        gitHost: alwaysFailingGitHost,
+      });
+      expect(processed).toBe(1); // the one row, visited exactly once this sweep.
+
+      const row = await deliveryRow(rig, "delivery-no-hang");
+      expect(row.processed_at).toBeNull();
+      expect(row.attempts).toBe(1);
+      expect(row.next_attempt_at.getTime()).toBeGreaterThan(now.getTime());
+
+      errorSpy.mockRestore();
+    },
+    5000,
+  );
 
   it("the natural key is a partial unique index: manual triggers and rewind run over the same (Pipeline, SHA)", async () => {
     const project = await createProject(rig, ownerCookie, "partial-index");

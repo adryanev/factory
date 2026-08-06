@@ -213,6 +213,22 @@ Mint the one-time token in the UI (org owner). Updates are manual: install
 the new tarball and re-run — the Runner's version shows in the UI, and
 outdated Runners are marked there.
 
+### `exec:docker` needs an explicit opt-in
+
+The Project egress allowlist is enforced only in `exec:host`, where the
+Runner installs `pf` rules scoped to `_factoryjob`. `exec:docker` applies no
+egress rules at all, so a Runner **refuses docker turns** and fails those
+Step Runs with a reason naming the flag. Two ways forward:
+
+- run those Steps with `runs_on: [exec:host]`, which is the enforced path; or
+- install with `--allow-unenforced-docker-egress`, accepting that every
+  docker turn on that machine reaches whatever the host reaches.
+
+The opt-in has to be an installer flag: `launchd` gives the daemon no shell
+environment, so `FACTORY_ALLOW_UNENFORCED_DOCKER_EGRESS` only works for a
+hand-run Runner. Changing your mind means re-running the installer.
+`docs/adr/0005-sandbox-egress.md` records why the default refuses.
+
 ## Explicitly unsupported
 
 These are not accidents; they are declared boundaries (spec decision 9).

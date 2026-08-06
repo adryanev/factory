@@ -92,14 +92,14 @@ function fakeProtocol(overrides: {
   heartbeatCancel?: string[];
   resultError?: boolean;
 } = {}): ProtocolClient & {
-  results: { outcome: string; ref: { branch: string; sha: string } | null; outputData: unknown; artifacts?: unknown }[];
+  results: { outcome: string; ref: { branch: string; sha: string } | null; outputData: unknown; reason?: string; artifacts?: unknown }[];
   heartbeats: number;
   logChunks: LogChunkWire[];
   uploadGrants: number;
   questions: { id: string; groupId: string; kind: string; body: string; ref: { branch: string; sha: string } }[];
   questionSessions: { blobKey?: string; sessionId?: string }[];
 } {
-  const results: { outcome: string; ref: { branch: string; sha: string } | null; outputData: unknown; artifacts?: unknown }[] = [];
+  const results: { outcome: string; ref: { branch: string; sha: string } | null; outputData: unknown; reason?: string; artifacts?: unknown }[] = [];
   const logChunks: LogChunkWire[] = [];
   const questions: { id: string; groupId: string; kind: string; body: string; ref: { branch: string; sha: string } }[] = [];
   const questionSessions: { blobKey?: string; sessionId?: string }[] = [];
@@ -131,6 +131,7 @@ function fakeProtocol(overrides: {
         outcome: input.outcome,
         ref: input.ref ?? null,
         outputData: input.outputData,
+        ...(input.reason !== undefined ? { reason: input.reason } : {}),
         ...(input.artifacts !== undefined ? { artifacts: input.artifacts } : {}),
       });
       if (overrides.resultError) throw new Error("result refused: lease no longer valid");
@@ -373,9 +374,8 @@ describe("step-run executor: the commit point", () => {
     await executeClaimedTurn(deps, claimFixture());
 
     expect(protocol.results).toEqual([
-      { outcome: "failed", ref: null, outputData: undefined },
+      { outcome: "failed", ref: null, outputData: undefined, reason: "run: command exited 3" },
     ]);
-    expect(protocol.results[0]).toMatchObject({ outcome: "failed" });
     expect(git.calls.some((call) => call.startsWith("push"))).toBe(false);
     expect(git.calls.some((call) => call.startsWith("commit"))).toBe(false);
     expect(git.calls.filter((call) => call.startsWith("revoke"))).toHaveLength(2);
@@ -417,6 +417,29 @@ describe("step-run executor: the commit point", () => {
     const { deps, protocol } = makeDeps({ turn: fakeTurn({}, new Error("docker unavailable")) });
     await executeClaimedTurn(deps, claimFixture());
     expect(protocol.results[0]).toMatchObject({ outcome: "failed" });
+  });
+
+  it("a turn that refuses to start is reported failed, not thrown at the claim loop", async () => {
+    // The egress gate refuses synchronously, before any promise exists. If that
+    // escaped, the row would stay leased until the sweep and the loop would
+    // read it as a transport failure and re-claim the same doomed Step.
+    const { deps, protocol, git } = makeDeps();
+    const refusing = {
+      ...deps,
+      startTurn(): Turn {
+        throw new Error("exec:docker applies no egress rules");
+      },
+    };
+
+    await expect(executeClaimedTurn(refusing, claimFixture())).resolves.toBeUndefined();
+
+    expect(protocol.results).toHaveLength(1);
+    expect(protocol.results[0]).toMatchObject({
+      outcome: "failed",
+      reason: "turn fault: exec:docker applies no egress rules",
+    });
+    // The lease is released the normal way, and the minted tokens still die.
+    expect(git.calls.filter((call) => call.startsWith("revoke"))).toHaveLength(2);
   });
 
   it("runOneCycle returns false when nothing was claimable, and executes when a StepRun is claimed", async () => {
@@ -755,7 +778,9 @@ describe("agent Steps: the executor flow", () => {
     });
 
     await executeClaimedTurn(deps.deps, agentClaim());
-    expect(protocol.results).toEqual([{ outcome: "failed", ref: null, outputData: undefined }]);
+    expect(protocol.results).toEqual([
+      { outcome: "failed", ref: null, outputData: undefined, reason: "output-invalid" },
+    ]);
   });
 
   it("a question Output uploads the session, then pushes the branch, then POSTs the Question with the ref and the session (spec: 'push branch → unggah session ke blob → POST Question')", async () => {

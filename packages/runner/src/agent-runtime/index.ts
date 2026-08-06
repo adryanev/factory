@@ -38,7 +38,13 @@ import type {
 export type { RunsOn, ShellTurnSpec, AgentTurnSpec, Turn, TurnResult, TurnRuntimeDeps, DockerControl, HostProcessControl };
 export type { TurnSpec };
 export type { EgressControl } from "./egress.js";
-export { DOCKER_STOP_GRACE_SECONDS, OutputInvalidError, TurnCancelledError, shellEnvPrefix } from "./runtime.js";
+export {
+  DOCKER_STOP_GRACE_SECONDS,
+  OutputInvalidError,
+  TurnCancelledError,
+  UnenforcedEgressError,
+  shellEnvPrefix,
+} from "./runtime.js";
 export { createFactoryHostProvider } from "./host-provider.js";
 export { createDockerControl } from "./docker-control.js";
 export { createHostProcessControl } from "./host-process.js";
@@ -72,7 +78,10 @@ function defaultAgentProviderFor(name: string): AgentProvider {
 }
 
 /** The real system deps every production turn runs on. */
-export function createSystemTurnRuntimeDeps(overrides?: { hostAgentUser?: string }): TurnRuntimeDeps {
+export function createSystemTurnRuntimeDeps(overrides?: {
+  hostAgentUser?: string;
+  allowUnenforcedDockerEgress?: boolean;
+}): TurnRuntimeDeps {
   // The daemon passes the user recorded in the identity file at join; the env
   // var stays for a hand-run Runner that never joined through the installer.
   const hostAgentUser = overrides?.hostAgentUser ?? process.env["FACTORY_AGENT_USER"];
@@ -85,6 +94,7 @@ export function createSystemTurnRuntimeDeps(overrides?: { hostAgentUser?: string
     ...(hostAgentUser === undefined ? {} : { hostAgentUser }),
     // AC6: default-deny egress enforcement for the agent user (pf on macOS).
     egress: createPfEgressControl(),
+    allowUnenforcedDockerEgress: overrides?.allowUnenforcedDockerEgress ?? false,
     agentProviderFor: defaultAgentProviderFor,
   };
 }

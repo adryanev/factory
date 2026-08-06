@@ -205,6 +205,14 @@ export interface TurnRuntimeDeps {
   /** Egress enforcement (AC6) — when present, `exec:host` installs default-deny allowlist rules for the agent user. */
   egress?: import("./egress.js").EgressControl;
   /**
+   * Lets `exec:docker` turns run even though no egress rule is applied to
+   * them. Off by default, which makes the Runner refuse docker turns
+   * outright: AC6 promises a default-deny allowlist, and docker mode delivers
+   * none — the sandbox joins an ordinary bridge network and reaches whatever
+   * the host reaches. See `docs/adr/0005-sandbox-egress.md`.
+   */
+  allowUnenforcedDockerEgress?: boolean;
+  /**
    * Builds the sandcastle `AgentProvider` for an agent CLI name (issue 9's
    * agent turns). Injectable so tests can substitute a provider without
    * dialing a real agent CLI; the production default maps the known CLIs to

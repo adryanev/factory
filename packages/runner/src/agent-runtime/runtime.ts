@@ -65,6 +65,24 @@ export class OutputInvalidError extends Error {
   }
 }
 
+/**
+ * Thrown when a turn asked for `exec:docker` on a Runner that has not been
+ * told to accept unenforced egress. Docker mode applies no egress rule at all
+ * — `egressAllowlist` reaches this file and is then only ever read by the host
+ * provider — so running one silently would break the default-deny promise in
+ * `docs/SECURITY.md`. Refusing is the fail-closed reading; the operator opts
+ * back in per Runner. See `docs/adr/0005-sandbox-egress.md`.
+ */
+export class UnenforcedEgressError extends Error {
+  constructor() {
+    super(
+      "exec:docker applies no egress rules: the sandbox joins an ordinary bridge network and can reach anything this host can. " +
+        "Run the Step with `runs_on: [exec:host]`, or start the Runner with --allow-unenforced-docker-egress to accept that.",
+    );
+    this.name = "UnenforcedEgressError";
+  }
+}
+
 /** Single-quotes a value for `/bin/sh` assignment; the only escaping `sh` needs inside single quotes is the quote itself. */
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -80,6 +98,10 @@ export function shellEnvPrefix(secrets: Record<string, string>): string {
 export function createTurnRuntime(deps: TurnRuntimeDeps) {
   return {
     startTurn(spec: TurnSpec): Turn {
+      // Both kinds of turn pass here, so the egress gate is checked once.
+      if (spec.runsOn === "docker" && deps.allowUnenforcedDockerEgress !== true) {
+        throw new UnenforcedEgressError();
+      }
       if (spec.kind === "agent") {
         return startAgentTurn(deps, spec);
       }

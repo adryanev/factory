@@ -409,9 +409,25 @@ export async function executeClaimedTurn(deps: StepRunExecutorDeps, claimed: Cla
         : {};
 
     logSink.start();
-    const turn = deps.startTurn(
-      turnSpecFor(deps, claimed, step, branch, (line) => logSink.write(`${line}\n`), resume),
-    );
+    let turn: Turn;
+    try {
+      turn = deps.startTurn(
+        turnSpecFor(deps, claimed, step, branch, (line) => logSink.write(`${line}\n`), resume),
+      );
+    } catch (error) {
+      // A turn that refuses to start still holds a lease and an open log. That
+      // refusal is a result the control plane has to hear — letting it escape
+      // would leave the row leased until the sweep, and the claim loop would
+      // read it as a transport failure and retry the same doomed Step.
+      await stopLogging();
+      await deps.protocol.reportResult({
+        stepRunId: claimed.id,
+        leaseToken: claimed.leaseToken,
+        outcome: "failed",
+        reason: `turn fault: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      return;
+    }
 
     const cancelWatch = startCancelWatch(deps, claimed, () => turn.cancel());
 

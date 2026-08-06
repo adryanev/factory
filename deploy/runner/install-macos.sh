@@ -41,6 +41,11 @@
 #     [--install-dir /usr/local/factory/runner]
 #     [--identity /usr/local/factory/runner/runner.secret]
 #     [--control-plane <url>]   # optional: prints the ready-to-paste join command
+#     [--allow-unenforced-docker-egress]
+#         exec:docker applies no egress allowlist (only exec:host does), so
+#         the Runner refuses docker turns unless this is passed. Passing it
+#         accepts unprotected egress for every docker turn on this machine.
+#         See docs/adr/0005-sandbox-egress.md.
 set -euo pipefail
 
 TARBALL=""
@@ -50,6 +55,7 @@ AGENT_USER="_factoryjob"
 INSTALL_DIR="/usr/local/factory/runner"
 IDENTITY_FILE="/usr/local/factory/runner/runner.secret"
 CONTROL_PLANE_URL=""
+ALLOW_UNENFORCED_DOCKER_EGRESS="no"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -60,6 +66,7 @@ while [ "$#" -gt 0 ]; do
     --install-dir) INSTALL_DIR="${2:-}"; shift 2 ;;
     --identity) IDENTITY_FILE="${2:-}"; shift 2 ;;
     --control-plane) CONTROL_PLANE_URL="${2:-}"; shift 2 ;;
+    --allow-unenforced-docker-egress) ALLOW_UNENFORCED_DOCKER_EGRESS="yes"; shift 1 ;;
     *) echo "install-macos: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -139,6 +146,14 @@ chmod 600 "$IDENTITY_FILE"
 echo "install-macos: launchd daemon (KeepAlive, runs as $RUNNER_USER)..."
 NODE_BIN="$(command -v node)"
 PLIST="/Library/LaunchDaemons/com.factory.runner.plist"
+# launchd gives the daemon no shell environment, so the egress opt-in has to
+# be an argument in the plist — there is no env var an operator could export.
+EGRESS_PLIST_ARG=""
+if [ "$ALLOW_UNENFORCED_DOCKER_EGRESS" = "yes" ]; then
+  EGRESS_PLIST_ARG="
+    <string>--allow-unenforced-docker-egress</string>"
+  echo "install-macos: WARNING — exec:docker turns will run with NO egress allowlist on this machine."
+fi
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -151,7 +166,7 @@ cat > "$PLIST" <<EOF
     <string>$INSTALL_DIR/dist/main.js</string>
     <string>run</string>
     <string>--identity</string>
-    <string>$IDENTITY_FILE</string>
+    <string>$IDENTITY_FILE</string>$EGRESS_PLIST_ARG
   </array>
   <key>UserName</key><string>$RUNNER_USER</string>
   <key>RunAtLoad</key><true/>

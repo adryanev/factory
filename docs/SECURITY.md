@@ -30,8 +30,14 @@ from defending against that, and only that.
   `exec:host`**, where the Runner installs pf rules for the agent's OS user.
   In `exec:docker` the allowlist reaches the Runner on the `/claim` payload
   but is not yet applied at the network layer: the sandbox joins an ordinary
-  bridge network and can reach anything the host can. Treat docker-mode
-  egress as unprotected until that lands.
+  bridge network and can reach anything the host can. Because of that, a
+  Runner **refuses `exec:docker` turns** unless it was started with
+  `--allow-unenforced-docker-egress` (or
+  `FACTORY_ALLOW_UNENFORCED_DOCKER_EGRESS=1`) — the refusal is reported as a
+  failed Step Run naming the flag. An operator who passes it is accepting
+  unprotected egress for every docker turn on that Runner. Enforcement is
+  macOS-only either way, since the rules are `pf`; a Linux Runner has no
+  enforced mode. See `docs/adr/0005-sandbox-egress.md`.
 - **`exec:host` runs the agent as a separate OS user** from the Runner, so
   that user cannot read the Runner's secret files (mode `0600`).
 

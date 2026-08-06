@@ -36,6 +36,7 @@ function printUsage(): void {
       "usage:",
       "  factory-runner join --control-plane <url> --token <join-token> --identity <file> --agent-user <user>",
       "  factory-runner run --identity <file> [--tags a,b] [--work-dir <dir>] [--sandbox-image <ref>]",
+      "                     [--allow-unenforced-docker-egress]",
       "  factory-runner scaffold",
     ].join("\n"),
   );
@@ -86,6 +87,7 @@ async function runCommand(args: string[]): Promise<number> {
       tags: { type: "string" },
       "work-dir": { type: "string" },
       "sandbox-image": { type: "string" },
+      "allow-unenforced-docker-egress": { type: "boolean" },
     },
     strict: true,
   });
@@ -106,8 +108,17 @@ async function runCommand(args: string[]): Promise<number> {
     .map((tag) => tag.trim())
     .filter((tag) => tag.length > 0);
 
+  // Off unless the operator says otherwise: `exec:docker` enforces no egress
+  // allowlist, so a Runner that has not been told to accept that refuses
+  // docker turns rather than running them unprotected (ADR 0005).
+  const allowUnenforcedDockerEgress =
+    values["allow-unenforced-docker-egress"] === true ||
+    process.env["FACTORY_ALLOW_UNENFORCED_DOCKER_EGRESS"] === "1";
+
   const capabilities = await probeCapabilities(createSystemCapabilityProbeDeps());
-  const runtime = createTurnRuntime(createSystemTurnRuntimeDeps({ hostAgentUser: identity.agentUser }));
+  const runtime = createTurnRuntime(
+    createSystemTurnRuntimeDeps({ hostAgentUser: identity.agentUser, allowUnenforcedDockerEgress }),
+  );
 
   const protocol = createProtocolClient(identity.baseUrl, identity.secret);
   const loop = startClaimLoop({

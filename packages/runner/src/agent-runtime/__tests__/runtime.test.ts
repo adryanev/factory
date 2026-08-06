@@ -16,8 +16,8 @@ import type { AgentProvider, Sandbox, SandboxProvider } from "@ai-hero/sandcastl
 import type { EgressControl } from "../egress.js";
 import { createFactoryHostProvider } from "../host-provider.js";
 import { createHostProcessControl } from "../host-process.js";
-import { createTurnRuntime, OutputInvalidError, TurnCancelledError } from "../runtime.js";
-import type { DockerControl, HostProcessControl, TurnRuntimeDeps } from "../types.js";
+import { createTurnRuntime, OutputInvalidError, TurnCancelledError, UnenforcedEgressError } from "../runtime.js";
+import type { DockerControl, HostProcessControl, TurnRuntimeDeps, TurnSpec } from "../types.js";
 
 function fakeSandbox(overrides: {
   worktreePath?: string;
@@ -143,6 +143,7 @@ function makeDeps(overrides: {
   hostProcess?: ReturnType<typeof fakeHostProcess>;
   hostAgentUser?: string;
   egress?: ReturnType<typeof fakeEgress>;
+  allowUnenforcedDockerEgress?: boolean;
   agentProviderFor?: TurnRuntimeDeps["agentProviderFor"];
 } = {}): TurnRuntimeDeps & {
   createdProviders: SandboxProvider[];
@@ -167,6 +168,9 @@ function makeDeps(overrides: {
     }),
     ...(overrides.hostAgentUser !== undefined ? { hostAgentUser: overrides.hostAgentUser } : {}),
     ...(overrides.egress !== undefined ? { egress: overrides.egress } : {}),
+    // Left at the production default (off) unless a test opts in, so every
+    // docker-mode test has to say out loud that it is running unprotected.
+    allowUnenforcedDockerEgress: overrides.allowUnenforcedDockerEgress ?? false,
     async createSandbox(options) {
       createdProviders.push(options.sandbox);
       // Host mode: exercise the *real* host provider (tag "bind-mount") with
@@ -197,9 +201,65 @@ const shellSpec = {
   network: "factory-steprun-1",
 };
 
+describe("agent-runtime: the exec:docker egress gate", () => {
+  it("refuses a docker turn by default — docker mode enforces no allowlist, and SECURITY.md promises default-deny", () => {
+    const deps = makeDeps();
+    const runtime = createTurnRuntime(deps);
+
+    expect(() => runtime.startTurn({ ...shellSpec, runsOn: "docker" })).toThrow(UnenforcedEgressError);
+    // Refused before anything was built: no network, no sandbox, no container.
+    expect(deps.docker.calls).toHaveLength(0);
+    expect(deps.createdProviders).toHaveLength(0);
+  });
+
+  it("refuses an agent turn on docker too — the gate is not a shell-turn detail", () => {
+    const runtime = createTurnRuntime(makeDeps());
+
+    expect(() =>
+      runtime.startTurn({
+        ...shellSpec,
+        kind: "agent",
+        runsOn: "docker",
+        agent: "claude",
+        prompt: "do the thing",
+        outputContract: compileStepOutputContract({ outputs: { summary: { type: "string" } } }),
+        maxRetries: 0,
+      } as unknown as TurnSpec),
+    ).toThrow(UnenforcedEgressError);
+  });
+
+  it("never gates host mode — that is the one path where the allowlist is actually applied", async () => {
+    const deps = makeDeps({ hostAgentUser: "_factoryjob" });
+    const runtime = createTurnRuntime(deps);
+
+    const result = await runtime.startTurn({ ...shellSpec, egressAllowlist: ["api.github.com"] }).done;
+
+    expect(result.exitCode).toBe(0);
+    expect(deps.egress?.applied).toEqual([{ user: "_factoryjob", allowlist: ["api.github.com"] }]);
+  });
+
+  it("runs the docker turn once the operator has accepted unenforced egress", async () => {
+    const deps = makeDeps({ allowUnenforcedDockerEgress: true });
+    const runtime = createTurnRuntime(deps);
+
+    const result = await runtime.startTurn({ ...shellSpec, runsOn: "docker" }).done;
+
+    expect(result.exitCode).toBe(0);
+  });
+
+  it("names the way out in the message — an operator hitting this must not have to read the source", () => {
+    const runtime = createTurnRuntime(makeDeps());
+
+    expect(() => runtime.startTurn({ ...shellSpec, runsOn: "docker" })).toThrow(/exec:host/);
+    expect(() => runtime.startTurn({ ...shellSpec, runsOn: "docker" })).toThrow(
+      /--allow-unenforced-docker-egress/,
+    );
+  });
+});
+
 describe("agent-runtime: shell turn", () => {
   it("AC1 — docker mode uses sandcastle's built-in docker provider as-is, attached to the per-StepRun network", async () => {
-    const deps = makeDeps();
+    const deps = makeDeps({ allowUnenforcedDockerEgress: true });
     const runtime = createTurnRuntime(deps);
     const turn = runtime.startTurn({ ...shellSpec, runsOn: "docker" });
 
@@ -262,7 +322,7 @@ describe("agent-runtime: shell turn", () => {
 
   it("AC6 — docker cancel stops every container on the per-StepRun network with a 30-second grace", async () => {
     const sandbox = fakeSandbox({ execDelayMs: 5000 });
-    const deps = makeDeps({ sandbox });
+    const deps = makeDeps({ sandbox, allowUnenforcedDockerEgress: true });
     const runtime = createTurnRuntime(deps);
     const turn = runtime.startTurn({ ...shellSpec, runsOn: "docker" });
 
@@ -303,7 +363,7 @@ describe("agent-runtime: shell turn", () => {
   });
 
   it("AC5 — docker mode inlines the secrets as shell env assignments in the command, never a file", async () => {
-    const deps = makeDeps();
+    const deps = makeDeps({ allowUnenforcedDockerEgress: true });
     const runtime = createTurnRuntime(deps);
     const turn = runtime.startTurn({
       ...shellSpec,

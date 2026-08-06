@@ -17,17 +17,18 @@
  * closes the race the no-lock call has.
  */
 import { afterAll, describe, expect, it } from "vitest";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { Pool } from "pg";
 import { MIGRATIONS_FOLDER } from "../../src/db/migrations-path.js";
 import { runMigrations } from "../../src/db/migrate.js";
+import { startPostgresContainer } from "../postgres-container.js";
 
 describe("advisory-locked migration runner", () => {
   let container: StartedPostgreSqlContainer | null = null;
   const pools: Pool[] = [];
 
   async function freshPool(): Promise<Pool> {
-    container = await new PostgreSqlContainer("postgres:16-alpine").start();
+    container = await startPostgresContainer();
     const pool = new Pool({ connectionString: container.getConnectionUri() });
     pools.push(pool);
     return pool;

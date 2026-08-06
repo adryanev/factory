@@ -8,12 +8,13 @@
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { generateId } from "@factory/shared";
 import { Pool } from "pg";
 import { MIGRATIONS_FOLDER } from "../../src/db/migrations-path.js";
+import { startPostgresContainer } from "../postgres-container.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -40,9 +41,7 @@ export async function resetDatabase(pool: Pool): Promise<void> {
 }
 
 export async function startSqlRig(): Promise<SqlRig> {
-  const container: StartedPostgreSqlContainer = await new PostgreSqlContainer(
-    "postgres:16-alpine",
-  ).start();
+  const container: StartedPostgreSqlContainer = await startPostgresContainer();
   const pool = new Pool({ connectionString: container.getConnectionUri() });
   await migrate(drizzle(pool), { migrationsFolder: MIGRATIONS_FOLDER });
 

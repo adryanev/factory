@@ -9,10 +9,11 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
+import { startPostgresContainer } from "../postgres-container.js";
 import { createDatabase } from "../../src/db/client.js";
 import { MIGRATIONS_FOLDER } from "../../src/db/migrations-path.js";
 import {
@@ -101,9 +102,7 @@ export interface TestRigOptions {
 }
 
 export async function startTestRig(options: TestRigOptions = {}): Promise<TestRig> {
-  const container: StartedPostgreSqlContainer = await new PostgreSqlContainer(
-    "postgres:16-alpine",
-  ).start();
+  const container: StartedPostgreSqlContainer = await startPostgresContainer();
 
   const pool = new Pool({ connectionString: container.getConnectionUri() });
   await migrate(drizzle(pool), { migrationsFolder: MIGRATIONS_FOLDER });

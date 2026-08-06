@@ -9,10 +9,11 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { MIGRATIONS_FOLDER } from "../../src/db/migrations-path.js";
+import { startPostgresContainer } from "../postgres-container.js";
 import { createClaimConnectionLimiter, type AppDeps } from "../../src/deps.js";
 import { createDatabase } from "../../src/db/client.js";
 import { bootstrapBreakGlassAccount } from "../../src/domain/auth.js";
@@ -153,7 +154,7 @@ describe("Runner protocol: heartbeat, lease renewal, and the lease sweep", () =>
   });
 
   it("runs the lease sweep before the HTTP listener opens at startup", async () => {
-    const container: StartedPostgreSqlContainer = await new PostgreSqlContainer("postgres:16-alpine").start();
+    const container: StartedPostgreSqlContainer = await startPostgresContainer();
     const pool = new Pool({ connectionString: container.getConnectionUri() });
     await migrate(drizzle(pool), { migrationsFolder: MIGRATIONS_FOLDER });
 

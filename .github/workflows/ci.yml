@@ -27,6 +27,9 @@ jobs:
       - name: OpenAPI drift check
         run: pnpm run check:openapi
 
+      - name: Packaging invariants check
+        run: pnpm run check:packaging
+
       # Docker is preinstalled on GitHub-hosted ubuntu runners; the seam-1
       # rig (packages/control-plane) boots its own throwaway Postgres via
       # testcontainers, so no `services:` container is declared here.

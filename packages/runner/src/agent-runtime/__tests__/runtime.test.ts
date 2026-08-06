@@ -13,10 +13,11 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { compileStepOutputContract, FACTORY_OUTPUT_TAG } from "@factory/shared";
 import type { AgentProvider, Sandbox, SandboxProvider } from "@ai-hero/sandcastle";
+import type { DockerEgressControl } from "../egress-docker.js";
 import type { EgressControl } from "../egress.js";
 import { createFactoryHostProvider } from "../host-provider.js";
 import { createHostProcessControl } from "../host-process.js";
-import { createTurnRuntime, OutputInvalidError, TurnCancelledError, UnenforcedEgressError } from "../runtime.js";
+import { createTurnRuntime, OutputInvalidError, TurnCancelledError } from "../runtime.js";
 import type { DockerControl, HostProcessControl, TurnRuntimeDeps, TurnSpec } from "../types.js";
 
 function fakeSandbox(overrides: {
@@ -25,6 +26,7 @@ function fakeSandbox(overrides: {
   exitCode?: number;
   preservedWorktreePath?: string | null;
   execDelayMs?: number;
+  execError?: Error;
 } = {}): Sandbox & { execCalls: { command: string }[]; abort: (error: unknown) => void } {
   const calls: { command: string }[] = [];
   let rejectExec: ((error: unknown) => void) | null = null;
@@ -39,6 +41,9 @@ function fakeSandbox(overrides: {
     },
     async exec(command: string) {
       calls.push({ command });
+      if (overrides.execError) {
+        throw overrides.execError;
+      }
       if (overrides.execDelayMs) {
         // Mimics a real container/process: the command keeps running until
         // cancel kills it — abort() is what the test calls when cancel lands.
@@ -65,15 +70,20 @@ function fakeSandbox(overrides: {
   }) as unknown as Sandbox & { execCalls: { command: string }[]; abort: (error: unknown) => void };
 }
 
-function fakeDocker(): DockerControl & { calls: string[] } {
+function fakeDocker(overrides: { networkInternal?: boolean; createNetworkError?: Error } = {}): DockerControl & { calls: string[] } {
   const calls: string[] = [];
   return {
     calls,
-    async createNetwork(name) {
-      calls.push(`create-network ${name}`);
+    async createNetwork(name, options) {
+      if (overrides.createNetworkError) throw overrides.createNetworkError;
+      calls.push(`create-network ${name}${options?.internal === true ? " internal" : ""}`);
     },
     async removeNetwork(name) {
       calls.push(`remove-network ${name}`);
+    },
+    async networkInternal(name) {
+      calls.push(`network-internal ${name}`);
+      return overrides.networkInternal ?? true;
     },
     async containerIdsOnNetwork(name) {
       calls.push(`ps ${name}`);
@@ -81,6 +91,26 @@ function fakeDocker(): DockerControl & { calls: string[] } {
     },
     async stop(ids, graceSeconds) {
       calls.push(`stop ${ids.join(",")} grace=${graceSeconds}`);
+    },
+  };
+}
+
+function fakeDockerEgress(overrides: { proxyUrl?: string; deployError?: Error } = {}): DockerEgressControl & {
+  deployed: { name: string; perRunNetwork: string; upstreamNetwork: string; allowlist: string[] }[];
+  removed: string[];
+} {
+  const deployed: { name: string; perRunNetwork: string; upstreamNetwork: string; allowlist: string[] }[] = [];
+  const removed: string[] = [];
+  return {
+    deployed,
+    removed,
+    async deploy(options) {
+      if (overrides.deployError) throw overrides.deployError;
+      deployed.push(options);
+      return { proxyUrl: overrides.proxyUrl ?? `http://${options.name}:8080` };
+    },
+    async remove(name) {
+      removed.push(name);
     },
   };
 }
@@ -140,6 +170,7 @@ function fakeEgress(): EgressControl & { applied: { user: string; allowlist: str
 function makeDeps(overrides: {
   sandbox?: ReturnType<typeof fakeSandbox>;
   docker?: ReturnType<typeof fakeDocker>;
+  dockerEgress?: ReturnType<typeof fakeDockerEgress>;
   hostProcess?: ReturnType<typeof fakeHostProcess>;
   hostAgentUser?: string;
   egress?: ReturnType<typeof fakeEgress>;
@@ -149,11 +180,13 @@ function makeDeps(overrides: {
   createdProviders: SandboxProvider[];
   sandbox: ReturnType<typeof fakeSandbox>;
   docker: ReturnType<typeof fakeDocker>;
+  dockerEgress: ReturnType<typeof fakeDockerEgress>;
   hostProcess: ReturnType<typeof fakeHostProcess>;
   egress: ReturnType<typeof fakeEgress> | undefined;
 } {
   const sandbox = overrides.sandbox ?? fakeSandbox();
   const docker = overrides.docker ?? fakeDocker();
+  const dockerEgress = overrides.dockerEgress ?? fakeDockerEgress();
   const hostProcess = overrides.hostProcess ?? fakeHostProcess();
   const egress = overrides.egress ?? fakeEgress();
   const createdProviders: SandboxProvider[] = [];
@@ -161,6 +194,7 @@ function makeDeps(overrides: {
     createdProviders,
     sandbox,
     docker,
+    dockerEgress,
     hostProcess,
     egress,
     agentProviderFor: overrides.agentProviderFor ?? (() => {
@@ -168,8 +202,9 @@ function makeDeps(overrides: {
     }),
     ...(overrides.hostAgentUser !== undefined ? { hostAgentUser: overrides.hostAgentUser } : {}),
     ...(overrides.egress !== undefined ? { egress: overrides.egress } : {}),
-    // Left at the production default (off) unless a test opts in, so every
-    // docker-mode test has to say out loud that it is running unprotected.
+    // Left at the production default (off) unless a test opts in — docker
+    // egress enforcement is on by default (issue #22); a test that passes
+    // true is saying out loud that it runs the unprotected shape.
     allowUnenforcedDockerEgress: overrides.allowUnenforcedDockerEgress ?? false,
     async createSandbox(options) {
       createdProviders.push(options.sandbox);
@@ -201,59 +236,173 @@ const shellSpec = {
   network: "factory-steprun-1",
 };
 
-describe("agent-runtime: the exec:docker egress gate", () => {
-  it("refuses a docker turn by default — docker mode enforces no allowlist, and SECURITY.md promises default-deny", () => {
+describe("agent-runtime: the exec:docker egress enforcement (issue #22)", () => {
+  it("enforces by default: internal per-StepRun network, upstream network, and a sidecar with the spec allowlist deployed before the sandbox", async () => {
+    const deps = makeDeps();
+    const runtime = createTurnRuntime(deps);
+    const turn = runtime.startTurn({
+      ...shellSpec,
+      runsOn: "docker",
+      egressAllowlist: ["github.com", "*.github.com"],
+    });
+
+    const result = await turn.done;
+    expect(result.exitCode).toBe(0);
+
+    // The per-StepRun network is created internal, then the upstream network.
+    expect(deps.docker.calls[0]).toBe("create-network factory-steprun-1 internal");
+    expect(deps.docker.calls).toContain("create-network factory-steprun-1-upstream");
+    // The sidecar gets exactly the spec's allowlist — undefined means [] (deny all).
+    expect(deps.dockerEgress.deployed).toEqual([
+      {
+        name: "factory-steprun-1-egress",
+        perRunNetwork: "factory-steprun-1",
+        upstreamNetwork: "factory-steprun-1-upstream",
+        allowlist: ["github.com", "*.github.com"],
+      },
+    ]);
+    // The step container provider routes every protocol through the sidecar.
+    const provider = deps.createdProviders[0] as { env?: Record<string, string> };
+    expect(provider.env).toMatchObject({
+      HTTP_PROXY: "http://factory-steprun-1-egress:8080",
+      HTTPS_PROXY: "http://factory-steprun-1-egress:8080",
+      ALL_PROXY: "http://factory-steprun-1-egress:8080",
+      NO_PROXY: "",
+    });
+    // Teardown: sidecar first (a network can't be removed while attached),
+    // then both networks.
+    expect(deps.dockerEgress.removed).toEqual(["factory-steprun-1-egress"]);
+    expect(deps.docker.calls).toContain("remove-network factory-steprun-1");
+    expect(deps.docker.calls).toContain("remove-network factory-steprun-1-upstream");
+  });
+
+  it("an absent allowlist means deny-all — the sidecar is deployed with an empty list, like renderEgressRules", async () => {
     const deps = makeDeps();
     const runtime = createTurnRuntime(deps);
 
-    expect(() => runtime.startTurn({ ...shellSpec, runsOn: "docker" })).toThrow(UnenforcedEgressError);
-    // Refused before anything was built: no network, no sandbox, no container.
-    expect(deps.docker.calls).toHaveLength(0);
-    expect(deps.createdProviders).toHaveLength(0);
+    await runtime.startTurn({ ...shellSpec, runsOn: "docker" }).done;
+
+    expect(deps.dockerEgress.deployed[0]?.allowlist).toEqual([]);
   });
 
-  it("refuses an agent turn on docker too — the gate is not a shell-turn detail", () => {
-    const runtime = createTurnRuntime(makeDeps());
-
-    expect(() =>
-      runtime.startTurn({
+  it("an agent turn on docker gets the same enforcement, not just shell turns", async () => {
+    // The turn drives real sandcastle `run()` with a tag-emitting fake agent
+    // (like the agent-turn tests below); the docker provider fails its image
+    // preflight for a never-existing image, so the turn rejects — but only
+    // AFTER enforcement was provisioned in front of it, which is the contract.
+    const repoDir = await makeTempGitRepo();
+    try {
+      const contract = compileStepOutputContract({ outputs: { summary: { type: "string" } } });
+      const deps = makeDeps();
+      const runtime = createTurnRuntime(deps);
+      const turn = runtime.startTurn({
         ...shellSpec,
         kind: "agent",
         runsOn: "docker",
-        agent: "claude",
+        agent: "fake",
         prompt: "do the thing",
-        outputContract: compileStepOutputContract({ outputs: { summary: { type: "string" } } }),
+        outputContract: contract,
         maxRetries: 0,
-      } as unknown as TurnSpec),
-    ).toThrow(UnenforcedEgressError);
+        workingDirectory: repoDir,
+        egressAllowlist: ["example.com"],
+      } as unknown as TurnSpec);
+      deps.agentProviderFor = () => tagEmittingProvider('{"kind":"done","outputs":{"summary":"ok"}}');
+
+      await expect(turn.done).rejects.toThrow();
+      expect(deps.dockerEgress.deployed).toEqual([
+        {
+          name: "factory-steprun-1-egress",
+          perRunNetwork: "factory-steprun-1",
+          upstreamNetwork: "factory-steprun-1-upstream",
+          allowlist: ["example.com"],
+        },
+      ]);
+      expect(deps.dockerEgress.removed).toEqual(["factory-steprun-1-egress"]);
+    } finally {
+      await rm(repoDir, { recursive: true, force: true });
+    }
   });
 
-  it("never gates host mode — that is the one path where the allowlist is actually applied", async () => {
-    const deps = makeDeps({ hostAgentUser: "_factoryjob" });
+  it("the sidecar and both networks are torn down when the turn fails, too", async () => {
+    const deps = makeDeps({ sandbox: fakeSandbox({ execError: new Error("boom") }) });
     const runtime = createTurnRuntime(deps);
 
-    const result = await runtime.startTurn({ ...shellSpec, egressAllowlist: ["api.github.com"] }).done;
+    await expect(runtime.startTurn({ ...shellSpec, runsOn: "docker" }).done).rejects.toThrow("boom");
 
-    expect(result.exitCode).toBe(0);
-    expect(deps.egress?.applied).toEqual([{ user: "_factoryjob", allowlist: ["api.github.com"] }]);
+    expect(deps.dockerEgress.removed).toEqual(["factory-steprun-1-egress"]);
+    expect(deps.docker.calls).toContain("remove-network factory-steprun-1");
+    expect(deps.docker.calls).toContain("remove-network factory-steprun-1-upstream");
   });
 
-  it("runs the docker turn once the operator has accepted unenforced egress", async () => {
+  it("the sidecar and both networks are torn down when the turn is cancelled", async () => {
+    const sandbox = fakeSandbox({ execDelayMs: 5000 });
+    const deps = makeDeps({ sandbox });
+    const runtime = createTurnRuntime(deps);
+    const turn = runtime.startTurn({ ...shellSpec, runsOn: "docker" });
+
+    const donePromise = turn.done;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    turn.cancel();
+    sandbox.abort(new Error("container stopped"));
+    await expect(donePromise).rejects.toThrow(TurnCancelledError);
+
+    expect(deps.dockerEgress.removed).toEqual(["factory-steprun-1-egress"]);
+    expect(deps.docker.calls).toContain("remove-network factory-steprun-1");
+    expect(deps.docker.calls).toContain("remove-network factory-steprun-1-upstream");
+  });
+
+  it("a re-claimed turn whose network already exists but is NOT internal fails closed", async () => {
+    // The internal create fails because the network pre-exists, and the
+    // pre-existing network is external → the turn must not run.
+    const docker = fakeDocker({ networkInternal: false, createNetworkError: new Error("already exists") });
+    const deps = makeDeps({ docker });
+    const runtime = createTurnRuntime(deps);
+
+    const turn = runtime.startTurn({ ...shellSpec, runsOn: "docker" });
+
+    await expect(turn.done).rejects.toThrow(/already exists and is not internal/);
+    // Nothing untrusted ever ran: no sandbox was created, no sidecar deployed.
+    expect(deps.createdProviders).toHaveLength(0);
+    expect(deps.dockerEgress.deployed).toHaveLength(0);
+  });
+
+  it("an undeployable sidecar fails the turn — enforcement never silently downgrades", async () => {
+    const deps = makeDeps({
+      dockerEgress: fakeDockerEgress({ deployError: new Error("image pull failed") }),
+    });
+    const runtime = createTurnRuntime(deps);
+
+    await expect(runtime.startTurn({ ...shellSpec, runsOn: "docker" }).done).rejects.toThrow(
+      "image pull failed",
+    );
+    expect(deps.createdProviders).toHaveLength(0);
+  });
+
+  it("--allow-unenforced-docker-egress keeps working: plain bridge, no sidecar, no proxy env", async () => {
     const deps = makeDeps({ allowUnenforcedDockerEgress: true });
     const runtime = createTurnRuntime(deps);
 
     const result = await runtime.startTurn({ ...shellSpec, runsOn: "docker" }).done;
 
     expect(result.exitCode).toBe(0);
+    expect(deps.docker.calls[0]).toBe("create-network factory-steprun-1");
+    expect(deps.docker.calls).not.toContain("create-network factory-steprun-1 internal");
+    expect(deps.dockerEgress.deployed).toHaveLength(0);
+    const provider = deps.createdProviders[0] as { env?: Record<string, string> };
+    expect(provider.env).toEqual({});
+    expect(deps.docker.calls).not.toContain("remove-network factory-steprun-1-upstream");
   });
 
-  it("names the way out in the message — an operator hitting this must not have to read the source", () => {
-    const runtime = createTurnRuntime(makeDeps());
+  it("never enforces host mode — no docker network, no sidecar", async () => {
+    const deps = makeDeps({ hostAgentUser: "_factoryjob" });
+    const runtime = createTurnRuntime(deps);
 
-    expect(() => runtime.startTurn({ ...shellSpec, runsOn: "docker" })).toThrow(/exec:host/);
-    expect(() => runtime.startTurn({ ...shellSpec, runsOn: "docker" })).toThrow(
-      /--allow-unenforced-docker-egress/,
-    );
+    const result = await runtime.startTurn({ ...shellSpec, egressAllowlist: ["api.github.com"] }).done;
+
+    expect(result.exitCode).toBe(0);
+    expect(deps.docker.calls).toHaveLength(0);
+    expect(deps.dockerEgress.deployed).toHaveLength(0);
+    expect(deps.egress?.applied).toEqual([{ user: "_factoryjob", allowlist: ["api.github.com"] }]);
   });
 });
 
@@ -451,6 +600,7 @@ describe("agent-runtime: agent turn (issue 9)", () => {
       });
       const deps: TurnRuntimeDeps = {
         docker: fakeDocker(),
+        dockerEgress: fakeDockerEgress(),
         hostProcess: createHostProcessControl(),
         createSandbox: async () => {
           throw new Error("agent turns use run(), never createSandbox");
@@ -491,6 +641,7 @@ describe("agent-runtime: agent turn (issue 9)", () => {
       const contract = compileStepOutputContract({ outputs: { summary: { type: "string" } } });
       const deps: TurnRuntimeDeps = {
         docker: fakeDocker(),
+        dockerEgress: fakeDockerEgress(),
         hostProcess: createHostProcessControl(),
         createSandbox: async () => {
           throw new Error("agent turns use run(), never createSandbox");

@@ -213,21 +213,22 @@ Mint the one-time token in the UI (org owner). Updates are manual: install
 the new tarball and re-run — the Runner's version shows in the UI, and
 outdated Runners are marked there.
 
-### `exec:docker` needs an explicit opt-in
+### `exec:docker` egress is enforced out of the box
 
-The Project egress allowlist is enforced only in `exec:host`, where the
-Runner installs `pf` rules scoped to `_factoryjob`. `exec:docker` applies no
-egress rules at all, so a Runner **refuses docker turns** and fails those
-Step Runs with a reason naming the flag. Two ways forward:
+The Project egress allowlist is enforced in both execution modes. `exec:host`
+installs `pf` rules scoped to `_factoryjob`; `exec:docker` runs the step
+container on an internal per-StepRun network whose only exit is an
+allowlist-enforcing sidecar proxy the Runner deploys alongside each turn — a
+host outside the allowlist is unreachable, and an empty allowlist denies
+everything. See `docs/adr/0005-sandbox-egress.md`.
 
-- run those Steps with `runs_on: [exec:host]`, which is the enforced path; or
-- install with `--allow-unenforced-docker-egress`, accepting that every
-  docker turn on that machine reaches whatever the host reaches.
-
-The opt-in has to be an installer flag: `launchd` gives the daemon no shell
-environment, so `FACTORY_ALLOW_UNENFORCED_DOCKER_EGRESS` only works for a
-hand-run Runner. Changing your mind means re-running the installer.
-`docs/adr/0005-sandbox-egress.md` records why the default refuses.
+The one deliberate exception: install with
+`--allow-unenforced-docker-egress` to opt a Runner back into the unprotected
+shape — docker turns join an ordinary bridge network and reach whatever the
+host reaches. The opt-in has to be an installer flag: `launchd` gives the
+daemon no shell environment, so `FACTORY_ALLOW_UNENFORCED_DOCKER_EGRESS` only
+works for a hand-run Runner. Changing your mind means re-running the
+installer.
 
 ## Explicitly unsupported
 

@@ -12,11 +12,21 @@ const execFileAsync = promisify(execFile);
 
 export function createDockerControl(): DockerControl {
   return {
-    async createNetwork(name) {
-      await execFileAsync("docker", ["network", "create", name]);
+    async createNetwork(name, options) {
+      await execFileAsync("docker", [
+        "network", "create",
+        ...(options?.internal === true ? ["--internal"] : []),
+        name,
+      ]);
     },
     async removeNetwork(name) {
       await execFileAsync("docker", ["network", "rm", name]);
+    },
+    async networkInternal(name) {
+      const { stdout } = await execFileAsync("docker", [
+        "network", "inspect", name, "--format", "{{.Internal}}",
+      ]);
+      return stdout.trim() === "true";
     },
     async containerIdsOnNetwork(name) {
       const { stdout } = await execFileAsync("docker", ["ps", "-q", "--filter", `network=${name}`]);

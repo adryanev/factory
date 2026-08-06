@@ -17,9 +17,19 @@
  * validated with the one shared schema, self-correction runs through
  * `maxRetries` (derived from capabilities, AC8), and a rejected Output
  * surfaces as `OutputInvalidError`, never a seam fault.
+ *
+ * Issue #22 makes `exec:docker` egress enforced by default: the per-StepRun
+ * network goes `--internal` and an allowlist-enforcing sidecar proxy (the
+ * runner's own `egress-proxy` subcommand, mounted into a pinned Node image)
+ * is the step container's only path off it. `--allow-unenforced-docker-egress`
+ * is the explicit operator opt-out that restores the old unprotected shape.
  */
 import { claudeCode, codex, createSandbox, cursor, type AgentProvider } from "@ai-hero/sandcastle";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createDockerControl } from "./docker-control.js";
+import { createDockerEgressControl, type DockerEgressControl } from "./egress-docker.js";
 import { createHostProcessControl } from "./host-process.js";
 import { createPfEgressControl, type EgressControl } from "./egress.js";
 import { createTurnRuntime } from "./runtime.js";
@@ -38,18 +48,20 @@ import type {
 export type { RunsOn, ShellTurnSpec, AgentTurnSpec, Turn, TurnResult, TurnRuntimeDeps, DockerControl, HostProcessControl };
 export type { TurnSpec };
 export type { EgressControl } from "./egress.js";
+export type { DockerEgressControl, DeploySidecarOptions } from "./egress-docker.js";
 export {
   DOCKER_STOP_GRACE_SECONDS,
   OutputInvalidError,
   TurnCancelledError,
-  UnenforcedEgressError,
   shellEnvPrefix,
 } from "./runtime.js";
 export { createFactoryHostProvider } from "./host-provider.js";
 export { createDockerControl } from "./docker-control.js";
+export { createDockerEgressControl } from "./egress-docker.js";
 export { createHostProcessControl } from "./host-process.js";
 export { createTurnRuntime } from "./runtime.js";
 export { renderEgressRules, createPfEgressControl } from "./egress.js";
+export { matchAllowlist, normalizeHost, createEgressProxyServer, runEgressProxy } from "./egress-proxy.js";
 
 /**
  * The model each agent CLI runs with. Model selection is genuinely a Runner
@@ -77,6 +89,26 @@ function defaultAgentProviderFor(name: string): AgentProvider {
   }
 }
 
+/**
+ * The runner's own entry — the file the egress sidecar mounts and runs as
+ * `node main.js egress-proxy …` (issue #22). Two layouts exist: the tsc
+ * build (`dist/main.js` beside `dist/agent-runtime/`) and the release
+ * bundle (`main.js` beside nothing else). Resolving the first candidate that
+ * exists keeps both working; a missing entry is a packaging fault surfaced
+ * at deploy time with a clear message, never a silently unenforced turn.
+ */
+function resolveRunnerEntry(): string {
+  const dir = dirname(fileURLToPath(import.meta.url));
+  for (const candidate of [join(dir, "main.js"), join(dir, "..", "main.js")]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  throw new Error(
+    `cannot locate the runner entry (main.js) next to ${dir} — ` +
+      "the egress sidecar deploys by mounting the runner's own bundle. " +
+      "Run `pnpm --filter @factory/runner build` once, or set FACTORY_EGRESS_PROXY_ENTRY to its path",
+  );
+}
+
 /** The real system deps every production turn runs on. */
 export function createSystemTurnRuntimeDeps(overrides?: {
   hostAgentUser?: string;
@@ -85,6 +117,8 @@ export function createSystemTurnRuntimeDeps(overrides?: {
   // The daemon passes the user recorded in the identity file at join; the env
   // var stays for a hand-run Runner that never joined through the installer.
   const hostAgentUser = overrides?.hostAgentUser ?? process.env["FACTORY_AGENT_USER"];
+  const runnerEntry =
+    process.env["FACTORY_EGRESS_PROXY_ENTRY"] ?? resolveRunnerEntry();
   return {
     createSandbox,
     docker: createDockerControl(),
@@ -94,7 +128,10 @@ export function createSystemTurnRuntimeDeps(overrides?: {
     ...(hostAgentUser === undefined ? {} : { hostAgentUser }),
     // AC6: default-deny egress enforcement for the agent user (pf on macOS).
     egress: createPfEgressControl(),
+    // Issue #22: `exec:docker` egress enforcement is the default; the flag
+    // is the operator's explicit opt-out back to the unprotected shape.
     allowUnenforcedDockerEgress: overrides?.allowUnenforcedDockerEgress ?? false,
+    dockerEgress: createDockerEgressControl({ runnerDir: dirname(runnerEntry) }),
     agentProviderFor: defaultAgentProviderFor,
   };
 }

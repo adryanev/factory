@@ -62,6 +62,7 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import {
   generateId,
+  parseDuration,
   stepRunBranchName,
   validatePipelineDefinition,
   type Id,
@@ -84,7 +85,18 @@ export type RunRow = typeof runs.$inferSelect;
 
 type StepRunOutcome = StepRunRow["outcome"];
 const NON_TERMINAL: Array<"ready" | "running" | "awaiting-human"> = ["ready", "running", "awaiting-human"];
-const TERMINAL_NON_SUCCESS: StepRunOutcome[] = ["failed", "cancelled", "skipped"];
+const TERMINAL_NON_SUCCESS: StepRunOutcome[] = ["failed", "cancelled", "skipped", "unschedulable"];
+
+/**
+ * The recorded claim deadline of a freshly-`ready` StepRun (issue #25): the
+ * materialization instant plus the Pipeline's `unschedulableAfter`, written
+ * to the row once — never derived at claim time. Null when the Pipeline
+ * declares no `unschedulableAfter:`; such rows stay claimable forever.
+ */
+export function unschedulableDeadline(pipeline: Pick<Pipeline, "unschedulableAfter">, readyAt: Date): Date | null {
+  if (pipeline.unschedulableAfter === undefined) return null;
+  return new Date(readyAt.getTime() + parseDuration(pipeline.unschedulableAfter));
+}
 
 /** A Step is a fan-out source iff it fans out at all — constants or a dynamic list. Exactly one of the two is enforced by the schema. */
 export function isFanOutStep(step: Step): boolean {
@@ -421,6 +433,7 @@ export async function materializeFanOut(
         kind: null,
         requiredTags: branch.requiredTags,
         readyAt,
+        unschedulableAfter: unschedulableDeadline(pipeline, readyAt),
       });
   }
   return "ok";
@@ -466,6 +479,7 @@ async function insertPlainDecision(
   const repoName = step.repo ?? pipeline.repo;
   const repo = await findRepositoryByName(deps.db, run.projectId, repoName);
   if (!repo) return; // an unresolvable `repo:` is a trigger-time concern for roots; a downstream one simply never materializes.
+  const readyAt = deps.now();
   await deps.db
     .insert(stepRuns)
     .values({
@@ -480,7 +494,10 @@ async function insertPlainDecision(
       reason,
       kind: step.kind ?? null,
       requiredTags: step.runsOn ?? [],
-      readyAt: deps.now(),
+      readyAt,
+      // Only a `ready` row can be claimed — the deadline is what the claim
+      // query and the unschedulable sweep read (issue #25).
+      unschedulableAfter: outcome === "ready" ? unschedulableDeadline(pipeline, readyAt) : null,
     })
     .onConflictDoNothing();
 }
@@ -494,12 +511,14 @@ async function insertPlainDecision(
 async function insertKindDecision(
   deps: GraphDeps,
   run: RunRow,
+  pipeline: Pipeline,
   stepId: string,
   outcome: "ready" | "skipped",
   reason: string | null,
   branchKey: string | null,
   repositoryId: Id<"repository">,
 ): Promise<void> {
+  const readyAt = deps.now();
   await deps.db
     .insert(stepRuns)
     .values({
@@ -514,7 +533,10 @@ async function insertKindDecision(
       reason,
       kind: "pull-request",
       requiredTags: [],
-      readyAt: deps.now(),
+      readyAt,
+      // Pipeline-level `unschedulableAfter:` covers every StepRun of the
+      // Run, control-plane Steps included (issue #25).
+      unschedulableAfter: outcome === "ready" ? unschedulableDeadline(pipeline, readyAt) : null,
     })
     .onConflictDoNothing();
 }
@@ -549,6 +571,7 @@ async function materializeKindStep(
       await insertKindDecision(
         deps,
         run,
+        pipeline,
         stepId,
         "skipped",
         "upstream-not-runnable",
@@ -559,9 +582,9 @@ async function materializeKindStep(
     }
     for (const branch of branches) {
       if (branch.outcome === "succeeded") {
-        await insertKindDecision(deps, run, stepId, "ready", null, branch.branchKey, branch.repositoryId);
+        await insertKindDecision(deps, run, pipeline, stepId, "ready", null, branch.branchKey, branch.repositoryId);
       } else if (TERMINAL_NON_SUCCESS.includes(branch.outcome)) {
-        await insertKindDecision(deps, run, stepId, "skipped", "upstream-not-runnable", branch.branchKey, branch.repositoryId);
+        await insertKindDecision(deps, run, pipeline, stepId, "skipped", "upstream-not-runnable", branch.branchKey, branch.repositoryId);
       }
       // A branch still in flight has no PR row yet — it is born when it succeeds.
     }
@@ -572,9 +595,9 @@ async function materializeKindStep(
   const depRow = await latestPlainRow(deps.db, run.id, depKey);
   if (!depRow) return; // not materialized yet — wait.
   if (depRow.outcome === "succeeded") {
-    await insertKindDecision(deps, run, stepId, "ready", null, null, depRow.repositoryId);
+    await insertKindDecision(deps, run, pipeline, stepId, "ready", null, null, depRow.repositoryId);
   } else if (TERMINAL_NON_SUCCESS.includes(depRow.outcome)) {
-    await insertKindDecision(deps, run, stepId, "skipped", "upstream-not-runnable", null, depRow.repositoryId);
+    await insertKindDecision(deps, run, pipeline, stepId, "skipped", "upstream-not-runnable", null, depRow.repositoryId);
   }
 }
 

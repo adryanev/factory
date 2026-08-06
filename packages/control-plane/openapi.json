@@ -264,7 +264,8 @@
               "succeeded",
               "failed",
               "skipped",
-              "cancelled"
+              "cancelled",
+              "unschedulable"
             ]
           },
           "reason": {
@@ -705,7 +706,8 @@
                         "succeeded",
                         "failed",
                         "skipped",
-                        "cancelled"
+                        "cancelled",
+                        "unschedulable"
                       ]
                     },
                     "outputs": {

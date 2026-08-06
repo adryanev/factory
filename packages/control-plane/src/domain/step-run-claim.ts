@@ -127,14 +127,15 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Runs `claim_step_run.sql` once. `wantedKind: null` — this is the Runner side of the shared query; the control-plane side (lessee = a control-plane instance, `wantedKind: 'pull-request'`) lives in `domain/control-plane-steps.ts` (issue #17). */
-async function tryClaimOnce(deps: Pick<AppDeps, "pool">, runner: RunnerIdentity, input: ClaimInput): Promise<ClaimedRow | undefined> {
+/** Runs `claim_step_run.sql` once. `wantedKind: null` — this is the Runner side of the shared query; the control-plane side (lessee = a control-plane instance, `wantedKind: 'pull-request'`) lives in `domain/control-plane-steps.ts` (issue #17). `$6` is the injected clock — the same clock that stamped `unschedulable_after` at materialization (issue #25). */
+async function tryClaimOnce(deps: Pick<AppDeps, "pool" | "clock">, runner: RunnerIdentity, input: ClaimInput): Promise<ClaimedRow | undefined> {
   const result = await deps.pool.query<ClaimedRow>(CLAIM_QUERY, [
     runner.id,
     input.tags,
     input.slots,
     30, // spec: "Lease 30 detik" for ordinary StepRuns (60s is `kind: pull-request` only — `domain/control-plane-steps.ts`).
     null,
+    deps.clock.now(),
   ]);
   return result.rows[0];
 }
@@ -322,7 +323,7 @@ async function unleaseStepRun(deps: Pick<AppDeps, "db">, stepRunId: Id<"steprun"
  * distinctly from `/heartbeat`, which never does this).
  */
 export async function claimStepRun(
-  deps: Pick<AppDeps, "pool" | "db" | "random" | "claimHoldRangeMs" | "claimLimiter" | "gitHost" | "keyring" | "objectStore">,
+  deps: Pick<AppDeps, "pool" | "db" | "clock" | "random" | "claimHoldRangeMs" | "claimLimiter" | "gitHost" | "keyring" | "objectStore">,
   runner: RunnerIdentity,
   input: ClaimInput,
 ): Promise<ClaimedStepRun | null> {

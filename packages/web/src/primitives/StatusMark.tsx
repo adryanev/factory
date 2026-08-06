@@ -19,6 +19,11 @@ import type { StepRunStatus } from "../tokens/status";
  * glyph here rather than filled, so it doesn't read as heavier or more
  * severe than `failed`) is this extraction's own addition, not lifted from
  * either prototype. Flagged in the handoff.
+ *
+ * `unschedulable` (issue #25) is this extraction's second addition: an
+ * hourglass — the deadline ran out, the work is stale, and nothing broke.
+ * Distinct from `skipped` (the Graph decided) and `failed` (something
+ * failed) in both shape and semantics.
  */
 
 const DEFAULT_LABEL: Record<StepRunStatus, string> = {
@@ -29,6 +34,7 @@ const DEFAULT_LABEL: Record<StepRunStatus, string> = {
   failed: "Failed",
   skipped: "Skipped",
   cancelled: "Cancelled",
+  unschedulable: "Unschedulable",
 };
 
 /** Ring style carries no meaning on its own — glyph is what must be unique. */
@@ -38,7 +44,7 @@ const DASHED_RING: ReadonlySet<StepRunStatus> = new Set([
   "cancelled",
 ]);
 
-type Shape = "none" | "arc" | "bars" | "check" | "cross" | "slash" | "square";
+type Shape = "none" | "arc" | "bars" | "check" | "cross" | "slash" | "square" | "hourglass";
 
 const SHAPE_BY_STATUS: Record<StepRunStatus, Shape> = {
   ready: "none",
@@ -48,6 +54,7 @@ const SHAPE_BY_STATUS: Record<StepRunStatus, Shape> = {
   failed: "cross",
   skipped: "slash",
   cancelled: "square",
+  unschedulable: "hourglass",
 };
 
 function Glyph({ shape }: { shape: Shape }): JSX.Element | null {
@@ -71,6 +78,8 @@ function Glyph({ shape }: { shape: Shape }): JSX.Element | null {
       return <path d="M4.8 11.2l6.4-6.4" />;
     case "square":
       return <rect x="5.6" y="5.6" width="4.8" height="4.8" rx="1" />;
+    case "hourglass":
+      return <path d="M6 4.5h4M6 11.5h4M6 4.5l4 7M10 4.5l-4 7" />;
   }
 }
 

@@ -62,6 +62,7 @@ export const stepRuns = pgTable(
         | "failed"
         | "skipped"
         | "cancelled"
+        | "unschedulable"
       >(),
     // Satu penghitung `attempt` untuk semua sebab kegagalan (termasuk lease
     // hilang dan output-invalid), dengan `reason` dicatat terpisah (spec:
@@ -81,6 +82,15 @@ export const stepRuns = pgTable(
     // Menggerakkan `ORDER BY ready_at` di kueri klaim — FIFO murni, tanpa
     // prioritas (spec: "Runner: siklus hidup dan penjadwalan").
     readyAt: timestamp("ready_at", { withTimezone: true }).notNull(),
+    // Batas waktu claim dari `unschedulableAfter:` milik Pipeline (issue
+    // #25): dihitung SEKALI saat StepRun dimaterialisasi — `ready_at +
+    // unschedulableAfter`, dari jam yang sama yang menstempel `ready_at` —
+    // dan ditulis di baris, bukan diturunkan saat kueri. NULL = Pipeline
+    // tidak mendeklarasikan batas; baris itu tetap bisa diklaim tanpa batas.
+    // Kueri klaim menolak baris yang melewati batas (`unschedulable_after >
+    // now`), dan sweep memindahkannya ke outcome 'unschedulable' yang
+    // terlihat di UI.
+    unschedulableAfter: timestamp("unschedulable_after", { withTimezone: true }),
     // Wall clock timeout dipegang control plane, bukan sandcastle (spec:
     // "jam wall-clock hanya satu dan dipegang control plane").
     startedAt: timestamp("started_at", { withTimezone: true }),
@@ -139,7 +149,7 @@ export const stepRuns = pgTable(
     ),
     check(
       "step_runs_outcome_check",
-      sql`${table.outcome} in ('ready', 'running', 'awaiting-human', 'succeeded', 'failed', 'skipped', 'cancelled')`,
+      sql`${table.outcome} in ('ready', 'running', 'awaiting-human', 'succeeded', 'failed', 'skipped', 'cancelled', 'unschedulable')`,
     ),
     check("step_runs_kind_check", sql`${table.kind} is null or ${table.kind} = 'pull-request'`),
     // Kueri klaim terpanas sistem ini: `WHERE outcome = 'ready' ... ORDER BY
@@ -147,6 +157,14 @@ export const stepRuns = pgTable(
     // `ready` yang pernah discan olehnya.
     index("step_runs_ready_claim_idx")
       .on(table.readyAt)
+      .where(sql`${table.outcome} = 'ready'`),
+    // Sweep unschedulable (issue #25): baris `ready` yang melewati
+    // `unschedulable_after`. Partial index — baris yang sudah berpindah ke
+    // outcome terminal tidak pernah discan, jadi scan menyusut sambil
+    // bekerja (spec: "Sweep adalah indexed scan yang menyusut sambil
+    // bekerja").
+    index("step_runs_unschedulable_ready_idx")
+      .on(table.unschedulableAfter)
       .where(sql`${table.outcome} = 'ready'`),
     // Containment tag `runner.tags @> requiredTags` butuh GIN.
     index("step_runs_required_tags_gin_idx").using("gin", table.requiredTags),

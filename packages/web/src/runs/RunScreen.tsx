@@ -36,6 +36,7 @@ const STATUS_LABEL: Record<StepRunStatus, string> = {
   failed: "Failed",
   skipped: "Skipped",
   cancelled: "Cancelled",
+  unschedulable: "Unschedulable",
 };
 
 type InspectorTab = "log" | "output" | "artifact" | "info";

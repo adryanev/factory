@@ -49,6 +49,7 @@ export {
   DURATION_PATTERN,
   durationSchema,
   humanTimeoutSchema,
+  parseDuration,
   stepRunBranchName,
   type StepRunBranchInput,
   joinManifestSchema,

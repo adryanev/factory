@@ -113,7 +113,8 @@ export type StepRunOutcome =
   | "succeeded"
   | "failed"
   | "skipped"
-  | "cancelled";
+  | "cancelled"
+  | "unschedulable";
 
 export interface StepRunFixtureInput {
   runId: Id<"run">;
@@ -124,6 +125,7 @@ export interface StepRunFixtureInput {
   outcome?: StepRunOutcome;
   requiredTags?: string[];
   readyAt?: Date;
+  unschedulableAfter?: Date | null;
   kind?: "pull-request" | null;
   leasedBy?: string | null;
   leaseExpiresAt?: Date | null;
@@ -148,6 +150,7 @@ export async function seedStepRun(
     outcome: input.outcome ?? "ready",
     requiredTags: input.requiredTags ?? [],
     readyAt: input.readyAt ?? new Date(),
+    unschedulableAfter: input.unschedulableAfter ?? null,
     kind: input.kind ?? null,
     leasedBy: input.leasedBy ?? null,
     leaseExpiresAt: input.leaseExpiresAt ?? null,

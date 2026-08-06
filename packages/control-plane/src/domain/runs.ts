@@ -57,7 +57,7 @@ import { requireProjectMembership } from "./projects.js";
 import { recordAuditEvent } from "./audit.js";
 import { DomainValidationError, NotFoundError } from "./errors.js";
 import { RefNotFoundError, type RepoRef } from "./git-host.js";
-import { materializeFanOut, isFanOutStep } from "./graph-advance.js";
+import { materializeFanOut, isFanOutStep, parsePipelineSnapshot, unschedulableDeadline } from "./graph-advance.js";
 
 export type Run = typeof runs.$inferSelect;
 export type StepRun = typeof stepRuns.$inferSelect;
@@ -357,6 +357,9 @@ export async function materializeRun(
         kind: step.kind ?? null,
         requiredTags: step.runsOn ?? [],
         readyAt,
+        // Issue #25: the claim deadline is recorded at materialization, from
+        // the same clock that stamped `readyAt` — never derived at claim time.
+        unschedulableAfter: unschedulableDeadline(pipeline, readyAt),
       })
       .returning();
     createdStepRuns.push(stepRun!);
@@ -657,6 +660,13 @@ export async function rewindRun(
             kind: row.kind,
             requiredTags: row.requiredTags,
             readyAt: isTarget ? now : row.readyAt,
+            // Issue #25: the deadline stays consistent with the row's own
+            // readyAt — a copied row keeps its recorded deadline, a reset
+            // target (fresh readyAt = now) gets a fresh one from the Run's
+            // Pipeline snapshot.
+            unschedulableAfter: isTarget
+              ? unschedulableDeadline(parsePipelineSnapshot(sourceRun.definition) ?? {}, now)
+              : row.unschedulableAfter,
             startedAt: isTarget ? null : row.startedAt,
             leasedBy: null,
             leaseToken: null,

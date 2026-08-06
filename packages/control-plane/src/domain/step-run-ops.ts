@@ -4,7 +4,7 @@
  * touches Graph advancement or Run-level orchestration (issue #4's), only
  * this one row.
  */
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, isNotNull, lte, lt, sql } from "drizzle-orm";
 import type { Id } from "@factory/shared";
 import { runs, stepRuns } from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
@@ -15,7 +15,7 @@ import { advanceGraph, finalizeRunIfDone, parsePipelineSnapshot } from "./graph-
 import { sweepPendingNotifications } from "./notifications.js";
 import { sweepAutomation } from "./automation.js";
 
-const TERMINAL_OUTCOMES = new Set(["succeeded", "failed", "cancelled", "skipped"]);
+const TERMINAL_OUTCOMES = new Set(["succeeded", "failed", "cancelled", "skipped", "unschedulable"]);
 
 /**
  * Operator cancel: the row goes `cancelled` immediately so the UI changes at
@@ -130,5 +130,68 @@ export async function sweepExpiredLeases(
       scheduleWatermark: deps.automationScheduleWatermark,
     });
   }
+  if (deps.clock) {
+    // Issue #25: stale `ready` StepRuns past their recorded
+    // `unschedulable_after` move to the terminal `unschedulable` outcome on
+    // the same cadence — the claim query already refuses them, this is what
+    // makes the state visible and advances the Graph from it.
+    await sweepUnschedulable({ db: deps.db, clock: deps.clock });
+  }
   return rows.map((row) => row.id);
+}
+
+/**
+ * The unschedulable sweep (issue #25): every `ready` StepRun whose recorded
+ * `unschedulable_after` has passed — compared against the injected clock,
+ * the same clock that stamped the deadline at materialization (the pair is
+ * consistent by construction; `automation.ts`'s `ingestWebhook` documents
+ * the same rule for `next_attempt_at`). Each row transitions to the terminal
+ * `unschedulable` outcome with a recorded reason, and the Graph advances
+ * from it in the same transaction — dependents become `skipped` (the Join
+ * policy reads `unschedulable` as a terminal non-success) and the Run ends
+ * with its verdict when nothing is left in flight.
+ *
+ * Indexed scan that shrinks while working (spec): the candidate SELECT walks
+ * the partial `step_runs_unschedulable_ready_idx` (`unschedulable_after`
+ * WHERE `outcome = 'ready'`), and a transitioned row drops out of that
+ * index — the next round never rescans it. Two concurrent sweepers are safe
+ * the way the lease sweep is: the UPDATE's `outcome = 'ready'` guard is
+ * re-evaluated after the other sweeper's commit, so the loser updates zero
+ * rows and the advance never runs twice for one row.
+ */
+export async function sweepUnschedulable(
+  deps: Pick<AppDeps, "db" | "clock">,
+): Promise<Id<"steprun">[]> {
+  const now = deps.clock.now();
+  const expired = await deps.db
+    .select()
+    .from(stepRuns)
+    .where(
+      and(
+        eq(stepRuns.outcome, "ready"),
+        isNotNull(stepRuns.unschedulableAfter),
+        lte(stepRuns.unschedulableAfter, now),
+      ),
+    );
+
+  const transitioned: Id<"steprun">[] = [];
+  for (const row of expired) {
+    const changed = await deps.db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(stepRuns)
+        .set({ outcome: "unschedulable", reason: "unschedulable-after-elapsed" })
+        .where(and(eq(stepRuns.id, row.id), eq(stepRuns.outcome, "ready")))
+        .returning({ stepKey: stepRuns.stepKey, runId: stepRuns.runId });
+      if (!updated) return false; // a concurrent sweeper transitioned it first.
+      const [run] = await tx.select().from(runs).where(eq(runs.id, updated.runId));
+      if (!run) return true;
+      const pipeline = parsePipelineSnapshot(run.definition);
+      if (!pipeline) return true;
+      await advanceGraph({ db: tx, now: deps.clock.now }, run, pipeline, updated.stepKey);
+      await finalizeRunIfDone({ db: tx, now: deps.clock.now }, run.id, pipeline);
+      return true;
+    });
+    if (changed) transitioned.push(row.id);
+  }
+  return transitioned;
 }

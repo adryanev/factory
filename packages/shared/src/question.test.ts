@@ -10,6 +10,7 @@ import {
   answerSchema,
   questionSchema,
   renderAnswerForAgent,
+  renderHumanTimeoutForAgent,
   type Answer,
   type Question,
 } from "./index.js";
@@ -92,5 +93,13 @@ describe("renderAnswerForAgent (issue 13, AC5)", () => {
     });
     expect(rendered).toContain("edited the artifact");
     expect(rendered).toContain("# Revised PRD");
+  });
+});
+
+describe("renderHumanTimeoutForAgent (issue #24)", () => {
+  it("renders the no-answer notice with the Question body, so the agent continues from the same conversation", () => {
+    const rendered = renderHumanTimeoutForAgent(question("approval"));
+    expect(rendered).toContain("No one answered");
+    expect(rendered).toContain("Approve this plan?");
   });
 });

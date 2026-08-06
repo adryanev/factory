@@ -125,6 +125,18 @@ export function renderAnswerForAgent(question: Question, answer: Answer): string
 }
 
 /**
+ * Renders the "nobody answered in time" notice as the text of the next
+ * turn's prompt (issue #24): when an `awaiting-human` StepRun's
+ * `humanTimeout` passes with `onHumanTimeout: continue`, the conversation
+ * moves on without a human answer — the control plane stores this block as
+ * the next turn's resume prompt, exactly like a rendered Answer.
+ */
+export function renderHumanTimeoutForAgent(question: Question): string {
+  const body = question.body.trim();
+  return `No one answered your question within the time limit set by humanTimeout:\n${body}\nContinue without a human answer.`;
+}
+
+/**
  * Renders a Question the way a human reader should see it — the answer form
  * the web UI builds on. Each kind gets its own presentation (a free-text
  * field, a pick list, an approve/reject choice).

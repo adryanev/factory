@@ -82,7 +82,7 @@ export async function fetchArtifactContent(artifactId: string): Promise<string> 
   return response.text();
 }
 
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<{ status: number; body: T }> {
+export async function fetchJson<T>(url: string, init?: RequestInit): Promise<{ status: number; body: T }> {
   const response = await fetch(url, init);
   const text = await response.text();
   return { status: response.status, body: (text ? JSON.parse(text) : undefined) as T };

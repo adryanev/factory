@@ -130,12 +130,23 @@ WHERE id = ANY($1::text[])
 --    pun — tidak ada prefix bucket yang dihapus di antara SELECT dan
 --    UPDATE; satu-satunya kerja aplikasi adalah menulis penandanya.
 --    Ambang `received_at`, bukan `ended_at`: tabel ini tidak punya Run.
+--    Issue #23: penanda `purged_at` juga berarti payload-nya sudah
+--    dikosongkan. `delivery_id` adalah lapis pertama dedup (primary key;
+--    ingest memakai ON CONFLICT DO NOTHING), jadi barisnya tidak pernah
+--    dihapus — yang dibuang hanyalah `payload`, isi event mentah yang
+--    tidak pernah dibaca lagi setelah `processed_at` terisi (satu-satunya
+--    pembacanya adalah dispatch di event-mapping.ts, yang hanya menjamah
+--    baris `processed_at IS NULL`). Karena itu kandidat mewajibkan
+--    `processed_at IS NOT NULL`: delivery yang masih menunggu pemetaan
+--    mempertahankan payload-nya sampai pemetaan selesai, meskipun sudah
+--    lewat 24 jam.
 -- =====================================================================
 
 -- name: webhook_candidate
 SELECT delivery_id
 FROM webhook_deliveries
 WHERE received_at < now() - interval '24 hours'
+  AND processed_at IS NOT NULL
   AND purged_at IS NULL
 ORDER BY received_at
 LIMIT $1
@@ -143,6 +154,6 @@ FOR UPDATE SKIP LOCKED;
 
 -- name: webhook_mark
 UPDATE webhook_deliveries
-SET purged_at = now()
+SET purged_at = now(), payload = NULL
 WHERE delivery_id = ANY($1::text[])
   AND purged_at IS NULL;

@@ -160,15 +160,23 @@ export async function seedStepRun(
   return id;
 }
 
+/**
+ * Seeds a `webhook_deliveries` row the retention sweep considers a
+ * candidate: old enough, `processed_at` set (issue #23 — the webhook
+ * candidate demands `processed_at IS NOT NULL`: only a mapped delivery may
+ * lose its payload), marker NULL. `processedAt` overrides let a test prove
+ * an unprocessed delivery is NOT a candidate.
+ */
 export async function seedWebhookDelivery(
   pool: Pool,
   deliveryId: string,
   receivedAt: Date,
   purgedAt: Date | null = null,
+  processedAt: Date | null = new Date(),
 ): Promise<string> {
   await pool.query(
-    `insert into webhook_deliveries (delivery_id, received_at, event_type, payload, purged_at) values ($1, $2, $3, $4, $5)`,
-    [deliveryId, receivedAt, "push", { action: "test" }, purgedAt],
+    `insert into webhook_deliveries (delivery_id, received_at, event_type, payload, purged_at, processed_at) values ($1, $2, $3, $4, $5, $6)`,
+    [deliveryId, receivedAt, "push", { action: "test" }, purgedAt, processedAt],
   );
   return deliveryId;
 }

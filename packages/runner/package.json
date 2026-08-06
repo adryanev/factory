@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx src/main.ts"
+    "dev": "tsx src/main.ts",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@ai-hero/sandcastle": "0.12.0",

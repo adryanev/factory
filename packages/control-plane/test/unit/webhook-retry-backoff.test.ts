@@ -1,9 +1,9 @@
 /**
- * Pure-function test for the webhook-delivery sweep's retry schedule (issue
- * #18's `sweepWebhookDeliveries`): 30s, doubling per failed attempt, capped
- * at an hour. The sweep's selection/dead-letter behavior that consumes this
- * schedule is proven end-to-end in test/seam1/automation.test.ts; this pins
- * the one decision that is pure — how long to wait before the next attempt.
+ * The webhook-delivery sweep's retry schedule: 30s, doubling per failed
+ * attempt, capped at an hour. The selection and dead-letter behaviour that
+ * consumes this schedule is proven end-to-end in test/seam1/automation.test.ts;
+ * this pins the one decision that is pure — how long to wait before the next
+ * attempt — so it can be checked without a database or a clock.
  */
 import { describe, expect, it } from "vitest";
 import { webhookRetryBackoffMs } from "../../src/domain/automation.js";

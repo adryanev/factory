@@ -154,7 +154,7 @@ export async function sweepExpiredLeases(
  * The unschedulable sweep (issue #25): every `ready` StepRun whose recorded
  * `unschedulable_after` has passed — compared against the injected clock,
  * the same clock that stamped the deadline at materialization (the pair is
- * consistent by construction; `automation.ts`'s `ingestWebhook` documents
+ * consistent by construction; `automation/webhook-ingest.ts` documents
  * the same rule for `next_attempt_at`). Each row transitions to the terminal
  * `unschedulable` outcome with a recorded reason, and the Graph advances
  * from it in the same transaction — dependents become `skipped` (the Join

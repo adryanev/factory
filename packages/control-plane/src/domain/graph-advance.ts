@@ -309,7 +309,7 @@ interface ResolvedBranch {
 /** The structured Output map a branch/Step produced — unwraps the `{ kind: 'done', outputs }` envelope the /result gate stores. Shared with the control-plane Step executor (issue #17) to resolve `title:`/`body:` references. */
 export function structuredOutputs(outputData: unknown): unknown {
   if (typeof outputData === "object" && outputData !== null && "outputs" in outputData) {
-    return (outputData).outputs;
+    return outputData.outputs;
   }
   return outputData;
 }

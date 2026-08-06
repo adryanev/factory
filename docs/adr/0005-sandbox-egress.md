@@ -68,9 +68,14 @@ the enforcement rides that lifecycle:
 - An **undeployable sidecar fails the turn closed**: the step container must
   never start before its only exit exists.
 
-The proxy's allowlist semantics are shared with host mode's `renderEgressRules`
-by construction — both answer "is this host on the Project allowlist" with the
-same matcher, so the two modes cannot drift apart.
+The proxy's allowlist semantics mirror host mode's `renderEgressRules`: both
+answer "is this host on the Project allowlist" with default-deny, both derive
+from the same `TurnSpec.egressAllowlist`, and the docker-mode matcher
+(`matchAllowlist` in `agent-runtime/egress-proxy.ts`) is pinned to that
+semantics by unit tests at the seam. They are not the same code — host mode
+renders pf rules and lets pf do the matching, docker mode matches hostnames in
+the proxy — so a semantic change to one mode must update the other's tests
+explicitly.
 
 ### `--allow-unenforced-docker-egress` becomes an explicit opt-out, not the door
 

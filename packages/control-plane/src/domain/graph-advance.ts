@@ -1,10 +1,8 @@
 /**
- * The advance mechanism issue #4 deliberately left unbuilt: "'Hilir
- * dijadwalkan' ... belum punya pemanggil sampai `/result` ada" (its own
- * module doc, and `.scratch/distributed-software-factory/acceptance-index.md`
- * under Issue 4, deviation 3). `/result` (`step-run-turn.ts`) is that
- * caller, and this file is what it calls the instant a StepRun reaches a
- * terminal state.
+ * Scheduling downstream Steps was deliberately left without a caller until
+ * `/result` existed: "'Hilir dijadwalkan' ... belum punya pemanggil sampai
+ * `/result` ada". `/result` (`step-run-turn.ts`) is that caller, and this
+ * file is what it calls the instant a StepRun reaches a terminal state.
  *
  * Issue #11 ("Fan-out dan Join") turns it into the one place a Run's Graph
  * moves, per ticket 06-dag-execution-semantics.md:

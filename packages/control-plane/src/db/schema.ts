@@ -4,11 +4,9 @@
  * scaffold-only table below and the full domain schema in `db/schema/` —
  * has to be reachable from here.
  *
- * This file also documents the conventions every later table follows —
- * issue #2 exists to establish them, not to build the full 22-table schema
- * from the spec (`.scratch/distributed-software-factory/spec.md`,
- * "Skema database"). Each later issue owns and adds its own tables in
- * `db/schema/`.
+ * This file also documents the conventions every later table follows. It
+ * establishes them rather than building the spec's full 22-table schema
+ * ("Skema database") in one go; each table lives in `db/schema/`.
  *
  * Conventions:
  *

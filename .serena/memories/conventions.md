@@ -7,4 +7,7 @@
 - Blob flows are presigned and metadata-only through control plane: upload first, then record metadata. Never put secret/blob bytes in Postgres or URLs.
 - Pipeline/output/question schemas live in `@factory/shared` and are reused as runner feedback gates and control-plane authoritative gates.
 - Use migrations for schema changes and regenerate committed OpenAPI after route/schema changes. Keep generated artifacts synchronized.
-- Use ASCII by default; comments should explain non-obvious invariants only. Do not commit credentials or local env files.
+- Prose is not restricted to ASCII: doc comments quote the Indonesian spec verbatim and use em dashes and typographic quotes throughout. Do not "fix" that. Identifiers stay ASCII.
+- Comments explain why — a constraint, an invariant, a hazard, a non-obvious ordering. They never restate what the code does, and never reference a ticket, an issue number, a PR, or a scratch transcript: that context belongs in the commit message, which survives the code it describes.
+- Commit messages are written in Indonesian.
+- Never commit credentials or a real `.env`. A committed `.env.example` is a template with empty values and is expected; secret material never rides an environment variable, only the *path* to a file does (`*_FILE`).

@@ -1,9 +1,8 @@
 /**
- * Not one of issue #5's 13 acceptance criteria by itself, but the mechanism
- * `/result` needs to exist for the *system* to move at all: issue #4 only
- * materializes root Steps (`.scratch/.../acceptance-index.md`, Issue 4
- * deviation 3) and left "advance the Graph when a Step finishes" for this
- * issue's `/result` to trigger. This proves the smallest version of that
+ * The mechanism `/result` needs for the *system* to move at all. Root Steps
+ * are materialized when a Run starts; "advance the Graph when a Step
+ * finishes" is triggered by `/result`. This proves the smallest version of
+ * that
  * (`domain/graph-advance.ts`, shape (a) — see that file's header): a
  * two-Step linear chain, `a` then `b` after `a`, where `b` is unclaimable
  * until `a`'s `/result` commits `succeeded`.

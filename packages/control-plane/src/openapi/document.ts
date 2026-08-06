@@ -10,7 +10,7 @@ export const OPENAPI_CONFIG = {
     title: "Factory Control Plane API",
     version: "0.0.0",
     description:
-      "REST surface: web <-> control plane. Domain terms follow CONTEXT.md; the full contract is in .scratch/distributed-software-factory/spec.md.",
+      "REST surface: web <-> control plane. Domain terms follow CONTEXT.md.",
   },
 } as const;
 

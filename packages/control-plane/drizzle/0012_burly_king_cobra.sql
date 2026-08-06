@@ -1,0 +1,2 @@
+ALTER TABLE "webhook_deliveries" ADD COLUMN "purged_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "webhook_deliveries_retention_idx" ON "webhook_deliveries" USING btree ("received_at") WHERE "webhook_deliveries"."purged_at" is null;

@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "egress_allowlist" jsonb DEFAULT '["github.com","api.github.com","objects.githubusercontent.com","codeload.github.com","registry.npmjs.org","registry.yarnpkg.com","pypi.org","files.pythonhosted.org","crates.io","static.crates.io","developer.apple.com","*.apple.com","cdn.cocoapods.org"]'::jsonb NOT NULL;

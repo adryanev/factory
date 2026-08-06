@@ -1,0 +1,42 @@
+# Copied verbatim from
+# .scratch/distributed-software-factory/prototypes/pipeline-format/d-verdict/03-cross-repo.yaml
+
+version: 1
+name: Ubah kontrak API, implement di dua repo
+repo: infra # repo config Project — tuan rumah definisi ini
+
+steps:
+  contract:
+    promptFile: prompts/api-contract.md
+    timeout: 30m
+    outputs:
+      spec: { type: string } # path file OpenAPI di dalam ref-nya
+
+  implement:
+    after: [contract]
+    branches:
+      - key: frontend # Key = nama repo, terbaca di Branch, log, dan UI
+        repo: frontend
+      - key: backend
+        repo: backend
+    minBranches: 1
+    promptFile: prompts/implement-from-contract.md
+    runsOn: [exec:docker]
+    timeout: 45m
+    outputs:
+      prTitle: { type: string }
+      prBody: { type: string }
+
+  open-pr:
+    after: [implement]
+    kind: pull-request # Step control-plane; tak pernah diklaim Runner (16, 24)
+    base: main # bawaan: default branch repo cabangnya
+    title: { step: implement, output: prTitle }
+    body: { step: implement, output: prBody }
+
+  report:
+    after: [implement]
+    join: all
+    repo: infra # WAJIB eksplisit — Join di hilir fan-out ber-repo (ticket 21)
+    promptFile: prompts/report.md
+    timeout: 10m

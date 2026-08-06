@@ -1,0 +1,20 @@
+# Copied verbatim from
+# .scratch/distributed-software-factory/prototypes/pipeline-format/d-verdict/02-linear.yaml
+
+version: 1
+name: Lint, build, test
+repo: frontend
+
+steps:
+  lint:
+    run: pnpm lint
+
+  build:
+    after: [lint]
+    run: pnpm build
+    timeout: 15m
+
+  test:
+    after: [build]
+    run: pnpm test
+    timeout: 20m

@@ -1,0 +1,19 @@
+# Rule: `branches:` XOR `branchesFrom:` — a Step must not write both.
+version: 1
+name: Branches and branchesFrom together
+repo: backend
+steps:
+  plan:
+    promptFile: .factory/prompts/plan.md
+    outputs:
+      variants:
+        type: array
+        items: { key: string, brief: string }
+
+  implement:
+    after: [plan]
+    branches:
+      - key: agent-a
+        agent: claude
+    branchesFrom: { step: plan, output: variants }
+    promptFile: .factory/prompts/implement.md

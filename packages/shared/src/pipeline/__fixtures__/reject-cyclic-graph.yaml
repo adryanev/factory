@@ -1,0 +1,11 @@
+# Rule: the Graph is acyclic.
+version: 1
+name: Cyclic graph
+repo: backend
+steps:
+  a:
+    after: [b]
+    run: echo a
+  b:
+    after: [a]
+    run: echo b

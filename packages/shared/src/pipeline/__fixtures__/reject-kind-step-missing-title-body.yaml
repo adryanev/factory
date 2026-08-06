@@ -1,0 +1,16 @@
+# Rule: a kind: Step must declare title: and body: — they are never inferred
+# from after: (that would be ambiguous on a Join).
+version: 1
+name: Kind Step missing title and body
+repo: backend
+steps:
+  review:
+    promptFile: .factory/prompts/review.md
+    outputs:
+      prTitle: { type: string }
+      prBody: { type: string }
+
+  open-pr:
+    after: [review]
+    kind: pull-request
+    base: main

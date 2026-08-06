@@ -1,0 +1,215 @@
+/**
+ * Design tokens — the organisation's Corpus design system
+ * (~/Code/lexicon/frontend/packages/design-system), as adopted for factory
+ * by prototype 17 (grilling-ui/index.html, lines 15-73) and locked in
+ * spec.md "Bahasa visual": primary teal, Primer neutral scale, radius and
+ * shadow/type scale from Figma, light and dark both.
+ *
+ * Prototype 13 (monitoring-ui/index.html) predates this adoption and ships
+ * its own dark-only blue/purple palette (--acc, --ok, --fail, --hold, --warn,
+ * --skip). Issue 17's own answer text says that palette is now superseded:
+ * "prototype 13 sekarang memakai palet yang usang ... surface produk
+ * berikutnya mengikuti Corpus, bukan prototype 13." Only the Corpus tokens
+ * below are carried forward. Prototype 13's *shapes* (status marks, fan-out
+ * summary rule, turn notation) survive — its colours do not.
+ *
+ * Do not add a second theme, a theme-provider abstraction, or per-project
+ * overrides here. There is exactly one theme pair: light and dark.
+ */
+
+:root {
+  /* ---- raw Primer-derived scale — grilling-ui/index.html:16-24 ---- */
+  --neutral-0: #ffffff;
+  --neutral-1: #f6f8fa;
+  --neutral-2: #eff2f5;
+  --neutral-3: #e6eaef;
+  --neutral-6: #d1d9e0;
+  --neutral-7: #c8d1da;
+  --neutral-8: #818b98;
+  --neutral-9: #59636e;
+  --neutral-10: #454c54;
+  --neutral-11: #393f46;
+  --neutral-12: #25292e;
+  --neutral-13: #1f2328;
+  --blue-1: #b6e3ff;
+  --blue-3: #54aeff;
+  --blue-5: #0969da;
+  --blue-8: #0a3069;
+  --green-3: #4ac26b;
+  --green-5: #1a7f37;
+  --red-0: #ffebe9;
+  --red-4: #fa4549;
+  --red-5: #cb0b19;
+  --red-8: #660018;
+  --yellow-3: #fec511;
+  --yellow-5: #cd8401;
+  --purple-0: #fbefff;
+  --purple-2: #d8b9ff;
+  --purple-4: #a475f9;
+  --purple-5: #8250df;
+  --purple-8: #3e1f79;
+  --teal-4: #2fe0e1;
+  --teal-7: #0097ac;
+  --teal-9: #003d46;
+
+  /* ---- radius / shadow scale, from Figma via Corpus — grilling-ui:26-30 ---- */
+  --radius: 0.875rem;
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+
+  /* ---- type scale — grilling-ui:32-34 ---- */
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.875rem;
+  --fs-base: 1rem;
+  --fs-lg: 1.125rem;
+  --fs-xl: 1.25rem;
+  --fs-2xl: 1.5rem;
+  --tracking-tight: -0.025em;
+  --tracking-tighter: -0.05em;
+
+  /* ---- fonts / motion — grilling-ui:36-40 ----
+     Rethink Sans is the heading font in the prototype; loading the webfont
+     itself is an application concern, not this token layer's job. --display
+     falls back cleanly to the system stack when it isn't loaded. */
+  --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", sans-serif;
+  --display: "Rethink Sans", var(--sans);
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  --ease: cubic-bezier(0.16, 0.84, 0.44, 1);
+  --dur: 0.18s;
+}
+
+/* ---- semantic tokens: light (Corpus :root) — grilling-ui:43-57 ----
+   Bare :root carries the light values as the default so consumers that
+   never set data-theme still render correctly. */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f8fafc;
+  --paper: #ffffff;
+  --panel: #ffffff;
+  --sunk: #f1f5f9;
+  --fg: #020618;
+  --fg-2: #45525f;
+  --fg-3: #64748b;
+  --border: #e2e8f0;
+  --border-2: #cbd5e1;
+  --primary: #009689;
+  --primary-fg: #f8fafc;
+  --ring: #009689;
+  --info: var(--blue-5);
+  --info-wash: #eef6ff;
+  --info-line: #b6e3ff;
+  /* Deliberately narrowed — see the block below. Do not read this value
+     anywhere except tokens/colors.ts's humanWrittenInArtifact accessor and
+     primitives/HumanAuthoredMark. */
+  --attention: var(--purple-5);
+  --attention-wash: #faf2ff;
+  --attention-line: #d8b9ff;
+  --success: var(--green-5);
+  --warning: var(--yellow-5);
+  --destructive: #e7000b;
+  --destructive-wash: #fff5f4;
+  --destructive-line: #ffcecb;
+  --shadow-xs: 0 1px 2px 0 rgb(2 6 24 / 0.05);
+  --shadow-sm: 0 1px 3px 0 rgb(2 6 24 / 0.09), 0 1px 2px -1px rgb(2 6 24 / 0.07);
+  --shadow-md: 0 4px 6px -1px rgb(2 6 24 / 0.08), 0 2px 4px -2px rgb(2 6 24 / 0.06);
+  --shadow-lg: 0 10px 15px -3px rgb(2 6 24 / 0.1), 0 4px 6px -4px rgb(2 6 24 / 0.08);
+}
+
+/* ---- semantic tokens: dark (Corpus .dark) — grilling-ui:59-73 ----
+   Honour the OS preference before any explicit toggle exists, same as the
+   light block above being the unconditional :root default. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #1f2328;
+    --paper: #25292e;
+    --panel: #25292e;
+    --sunk: #1a1d21;
+    --fg: #f6f8fa;
+    --fg-2: #c8d1da;
+    --fg-3: #97a1ad;
+    --border: #454c54;
+    --border-2: #5a626b;
+    --primary: #2fe0e1;
+    --primary-fg: #003d46;
+    --ring: #2fe0e1;
+    --info: var(--blue-3);
+    --info-wash: #16263a;
+    --info-line: #284b73;
+    --attention: var(--purple-4);
+    --attention-wash: #241c37;
+    --attention-line: #4a3a75;
+    --success: var(--green-3);
+    --warning: var(--yellow-3);
+    --destructive: #fa4549;
+    --destructive-wash: #341a1c;
+    --destructive-line: #68282c;
+    --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+    --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.35);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.45), 0 2px 4px -2px rgb(0 0 0 / 0.35);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.55), 0 4px 6px -4px rgb(0 0 0 / 0.4);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1f2328;
+  --paper: #25292e;
+  --panel: #25292e;
+  --sunk: #1a1d21;
+  --fg: #f6f8fa;
+  --fg-2: #c8d1da;
+  --fg-3: #97a1ad;
+  --border: #454c54;
+  --border-2: #5a626b;
+  --primary: #2fe0e1;
+  --primary-fg: #003d46;
+  --ring: #2fe0e1;
+  --info: var(--blue-3);
+  --info-wash: #16263a;
+  --info-line: #284b73;
+  --attention: var(--purple-4);
+  --attention-wash: #241c37;
+  --attention-line: #4a3a75;
+  --success: var(--green-3);
+  --warning: var(--yellow-3);
+  --destructive: #fa4549;
+  --destructive-wash: #341a1c;
+  --destructive-line: #68282c;
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.35);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.45), 0 2px 4px -2px rgb(0 0 0 / 0.35);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.55), 0 4px 6px -4px rgb(0 0 0 / 0.4);
+}
+
+/**
+ * Status-role tokens — derived, not new colour, one per StepRun status
+ * (tokens/status.ts). Declared once: each right-hand side is a semantic
+ * token that already differs between the light and dark blocks above, so
+ * these resolve correctly under either theme without duplication.
+ *
+ * `running` and `awaiting-human` intentionally share no colour with
+ * `--attention` — see the narrowing note on --attention above. Status is
+ * carried primarily by shape (primitives/StatusMark.tsx); colour is a
+ * secondary reinforcement, never the only signal.
+ *
+ * `awaiting-human` reuses --warning rather than a new hue. Flagged in the
+ * handoff report: prototype 13 used a purple "--hold" for this state, but
+ * purple is now --attention and is off-limits for anything but
+ * human-written-Artifact marks. --warning is the nearest Corpus role left
+ * that isn't already claimed by another status; this is a judgement call,
+ * not something either prototype states outright.
+ */
+:root {
+  --status-ready: var(--fg-3);
+  --status-running: var(--info);
+  --status-awaiting-human: var(--warning);
+  --status-succeeded: var(--success);
+  --status-failed: var(--destructive);
+  --status-skipped: var(--fg-3);
+  --status-cancelled: var(--border-2);
+}

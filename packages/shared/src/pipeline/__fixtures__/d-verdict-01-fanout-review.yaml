@@ -1,0 +1,62 @@
+# Copied from .scratch/distributed-software-factory/prototypes/pipeline-format/d-verdict/01-fanout-review.yaml
+# (the winning prototype: frame of style A, branches of style C).
+#
+# PATCHED: added `concurrency: cancel` at the Pipeline level. The prototype
+# predates issue 23 / the Automation section of spec.md, which locks "a
+# Pipeline containing ask: must write concurrency: explicitly" — this file
+# has a `review` Step with `ask:` and would otherwise be correctly rejected
+# by that rule. Everything else is unchanged from the prototype artifact.
+
+version: 1
+name: Rencana, tiga varian, review manusia
+repo: backend # bawaan Pipeline; Step dan cabang boleh menimpa
+unschedulableAfter: 2h # milik Pipeline (ticket 06)
+concurrency: cancel
+
+steps:
+  plan:
+    promptFile: .factory/prompts/plan.md
+    timeout: 30m
+    outputs: # kontrak Output — hanya ini yang mengalir
+      variants:
+        type: array
+        items: { key: string, brief: string }
+
+  implement:
+    after: [plan]
+    branches: # daftar konstanta: tiap cabang Step utuh
+      - key: agent-a
+        agent: claude
+      - key: agent-b
+        agent: codex
+      - key: agent-c
+        agent: cursor
+    minBranches: 1
+    promptFile: .factory/prompts/implement.md # bawaan semua cabang
+    runsOn: [exec:docker]
+    timeout: 45m
+    attempts: 2
+
+  pick-best:
+    after: [implement]
+    join: all # all (bawaan) | any | { min: 2 } — milik Join, ticket 06
+    promptFile: .factory/prompts/pick-best.md
+    timeout: 20m
+
+  review:
+    after: [pick-best]
+    promptFile: .factory/prompts/review.md
+    timeout: 30m # jam agent, per giliran — bukan jam manusia
+    ask: # kehadirannya yang membuat Step ini interaktif
+      group: reviewer
+      kind: approval
+    onReject: fail # fail | continue (bawaan) — bukan kegagalan step
+    humanTimeout: 7d # none (bawaan)
+    onHumanTimeout: fail
+
+  test:
+    after: [review]
+    run: pnpm test
+    runsOn: [exec:host, macos]
+    timeout: 20m
+    attempts: 3

@@ -1,0 +1,9 @@
+# Rule: outputs: is only for Steps that have an agent — rejected on a run: Step.
+version: 1
+name: Outputs on a run Step
+repo: backend
+steps:
+  build:
+    run: pnpm build
+    outputs:
+      ok: { type: boolean }

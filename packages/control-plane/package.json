@@ -1,0 +1,36 @@
+{
+  "name": "@factory/control-plane",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.build.json && cp -r src/db/sql dist/db/sql",
+    "dev": "tsx watch src/main.ts",
+    "db:generate": "tsx node_modules/drizzle-kit/bin.cjs generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "generate:openapi": "tsx src/openapi/generate.ts",
+    "check:openapi": "tsx src/openapi/check.ts",
+    "probe:editor-verified": "tsx scripts/probe-editor-verified.ts"
+  },
+  "dependencies": {
+    "@factory/shared": "workspace:*",
+    "@hono/node-server": "^1.13.8",
+    "@hono/zod-openapi": "^1.5.1",
+    "drizzle-orm": "^0.38.4",
+    "hono": "^4.12.0",
+    "pg": "^8.13.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^10.16.0",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.30.2",
+    "esbuild": "^0.28.1",
+    "testcontainers": "^10.16.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.4"
+  }
+}

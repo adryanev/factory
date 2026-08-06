@@ -1,0 +1,9 @@
+# Rule: agent:/prompt:/promptFile: XOR run: — a Step must not be both
+# agent-executed and shell-executed.
+version: 1
+name: Run and promptFile together
+repo: backend
+steps:
+  build:
+    run: pnpm build
+    promptFile: .factory/prompts/build.md

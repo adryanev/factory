@@ -1,0 +1,18 @@
+# Rule: a pull-request Step's title:/body: must reference an output of type
+# string — a number would not make a PR title.
+version: 1
+name: Title references a non-string output
+repo: backend
+steps:
+  review:
+    promptFile: .factory/prompts/review.md
+    outputs:
+      prTitle: { type: number }
+      prBody: { type: string }
+
+  open-pr:
+    after: [review]
+    kind: pull-request
+    base: main
+    title: { step: review, output: prTitle }
+    body: { step: review, output: prBody }

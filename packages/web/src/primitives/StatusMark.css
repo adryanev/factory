@@ -1,0 +1,23 @@
+.status-mark {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: -3px;
+  line-height: 0;
+}
+
+.status-mark__spin {
+  transform-origin: 8px 8px;
+  animation: status-mark-spin 1.6s linear infinite;
+}
+
+@keyframes status-mark-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-mark__spin {
+    animation: none;
+  }
+}

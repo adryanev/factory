@@ -1,0 +1,20 @@
+# Rule: Keys unique within branches:.
+version: 1
+name: Duplicate branch key
+repo: backend
+steps:
+  plan:
+    promptFile: .factory/prompts/plan.md
+    outputs:
+      variants:
+        type: array
+        items: { key: string, brief: string }
+
+  implement:
+    after: [plan]
+    branches:
+      - key: agent-a
+        agent: claude
+      - key: agent-a
+        agent: codex
+    promptFile: .factory/prompts/implement.md

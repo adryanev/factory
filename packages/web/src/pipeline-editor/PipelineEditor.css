@@ -1,0 +1,419 @@
+* {
+  box-sizing: border-box;
+}
+
+.pipeline-editor {
+  min-height: 100dvh;
+  color: var(--fg);
+  background: var(--bg);
+  font-family: var(--sans);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+
+.pipeline-editor button,
+.pipeline-editor input,
+.pipeline-editor textarea,
+.pipeline-editor select {
+  font: inherit;
+}
+
+.pipeline-editor button {
+  cursor: pointer;
+}
+
+.pipeline-editor button:focus-visible,
+.pipeline-editor input:focus-visible,
+.pipeline-editor textarea:focus-visible,
+.pipeline-editor select:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.pipeline-editor__topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-height: 3.25rem;
+  padding: 0 1rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+/* The shared button language (same values GrillingSession.css defines
+   globally) — redefined here so this screen does not depend on another
+   screen's stylesheet being loaded. */
+.pipeline-editor .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.15rem;
+  padding: 0.35rem 0.75rem;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.pipeline-editor .button:hover {
+  background: var(--sunk);
+  border-color: var(--border-2);
+}
+
+.pipeline-editor .button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.pipeline-editor .button--primary {
+  color: var(--primary-fg);
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.pipeline-editor .button--quiet {
+  min-height: 1.6rem;
+  padding: 0.15rem 0.45rem;
+  color: var(--fg-3);
+  background: transparent;
+  border-color: transparent;
+  font-weight: 500;
+}
+
+.pipeline-editor__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: none;
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+}
+
+.pipeline-editor__brand-mark {
+  width: 1rem;
+  height: 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+}
+
+.pipeline-editor__crumbs {
+  display: flex;
+  gap: 0.45rem;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pipeline-editor__crumbs strong {
+  color: var(--fg);
+}
+
+.pipeline-editor__heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem 1.25rem 0.75rem;
+}
+
+.pipeline-editor__heading h1 {
+  margin: 0 0 0.25rem;
+  font-family: var(--display);
+  font-size: var(--fs-2xl);
+  letter-spacing: var(--tracking-tight);
+}
+
+.pipeline-editor__heading p {
+  margin: 0;
+  color: var(--fg-2);
+  max-width: 46rem;
+}
+
+.pipeline-editor__facts {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+  flex: none;
+}
+
+.pipeline-editor__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+}
+
+.pipeline-editor__field input,
+.pipeline-editor__field select {
+  min-height: 2.15rem;
+  padding: 0.3rem 0.55rem;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  min-width: 12rem;
+}
+
+.pipeline-editor__layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  padding: 0 1.25rem 1.25rem;
+  align-items: stretch;
+}
+
+.pipeline-editor__pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.pipeline-editor__pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.pipeline-editor__pane-title {
+  font-weight: 700;
+  font-size: var(--fs-sm);
+}
+
+.pipeline-editor__scroll {
+  padding: 0.85rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.pipeline-editor__name-field input {
+  min-width: 100%;
+}
+
+.pipeline-editor__step {
+  padding: 0.75rem;
+  background: var(--sunk);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.pipeline-editor__step-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.pipeline-editor__key-field {
+  flex: 1;
+}
+
+.pipeline-editor__key-field input {
+  min-width: 100%;
+}
+
+.pipeline-editor__step-warn {
+  color: var(--destructive);
+  font-size: var(--fs-xs);
+}
+
+.pipeline-editor__mode,
+.pipeline-editor__after {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.pipeline-editor__mode legend,
+.pipeline-editor__after legend {
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  margin-bottom: 0.2rem;
+}
+
+.pipeline-editor__mode label,
+.pipeline-editor__after label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: var(--fs-xs);
+}
+
+.pipeline-editor__after {
+  align-items: flex-start;
+}
+
+.pipeline-editor__after-empty {
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+}
+
+.pipeline-editor__prompt {
+  min-height: 5.5rem;
+  padding: 0.45rem 0.55rem;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+}
+
+.pipeline-editor__run {
+  padding: 0.45rem 0.55rem;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.pipeline-editor__valid-badge {
+  color: var(--success);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+}
+
+.pipeline-editor__invalid-badge {
+  color: var(--destructive);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+}
+
+.pipeline-editor__issues {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: var(--fs-xs);
+  color: var(--destructive);
+  background: var(--destructive-wash);
+  border: 1px solid var(--destructive-line);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+}
+
+.pipeline-editor__issues code {
+  font-family: var(--mono);
+  background: transparent;
+}
+
+.pipeline-editor__valid-note {
+  margin: 0;
+  color: var(--success);
+  font-size: var(--fs-xs);
+}
+
+.pipeline-editor__yaml {
+  margin: 0;
+  padding: 0.75rem;
+  background: var(--sunk);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pipeline-editor__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.pipeline-editor__scope-note {
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+}
+
+.pipeline-editor__error {
+  margin: 0;
+  color: var(--destructive);
+  font-size: var(--fs-sm);
+  background: var(--destructive-wash);
+  border: 1px solid var(--destructive-line);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.75rem;
+}
+
+.pipeline-editor__result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  background: var(--info-wash);
+  border: 1px solid var(--info-line);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+}
+
+.pipeline-editor__result a {
+  color: var(--info);
+}
+
+.pipeline-editor__result code {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.pipeline-editor__project-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 1.25rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 32rem;
+}
+
+.pipeline-editor__project-list a {
+  display: block;
+  padding: 0.65rem 0.85rem;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+}
+
+.pipeline-editor__project-list a:hover {
+  background: var(--sunk);
+  border-color: var(--border-2);
+}
+
+@media (max-width: 900px) {
+  .pipeline-editor__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .pipeline-editor__heading {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

@@ -1,0 +1,8 @@
+# Rule: prompt: XOR promptFile: — a Step must not write both.
+version: 1
+name: Prompt and promptFile together
+repo: backend
+steps:
+  plan:
+    prompt: Do the thing.
+    promptFile: .factory/prompts/plan.md

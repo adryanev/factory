@@ -1,0 +1,23 @@
+# Rule: the kind is closed — a Step with kind: cannot fan out, cannot run on a
+# Runner, cannot be interactive, and must declare title:/body:.
+version: 1
+name: Kind Step with closed-surface violations
+repo: backend
+steps:
+  review:
+    promptFile: .factory/prompts/review.md
+    outputs:
+      prTitle: { type: string }
+      prBody: { type: string }
+
+  open-pr:
+    after: [review]
+    kind: pull-request
+    branches:
+      - key: a
+        repo: backend
+    runsOn: [exec:docker]
+    ask: { group: reviewers, kind: approval }
+    base: main
+    title: { step: review, output: prTitle }
+    body: { step: review, output: prBody }

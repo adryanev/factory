@@ -1,0 +1,20 @@
+# Accept: a kind: pull-request Step after a plain Step — born once, head branch
+# is that Step's branch. join: is allowed when the dep is not a fan-out (born
+# once either way).
+version: 1
+name: Pull-request after a plain Step
+repo: backend
+steps:
+  review:
+    promptFile: .factory/prompts/review.md
+    outputs:
+      prTitle: { type: string }
+      prBody: { type: string }
+
+  open-pr:
+    after: [review]
+    kind: pull-request
+    join: all
+    base: main
+    title: { step: review, output: prTitle }
+    body: { step: review, output: prBody }

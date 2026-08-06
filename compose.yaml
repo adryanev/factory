@@ -1,0 +1,200 @@
+# The single self-host deployment of factory (issue #21, spec "Packaging
+# self-host"). One machine, one compose file. See docs/operating.md for the
+# operator guide this file implements.
+#
+# Config split (spec decision 7, deliberate):
+#   - key material (master key, GitHub App private key) -> FILES, mounted
+#     read-only from ./deploy/keys/ via compose `secrets`. That directory is
+#     plain host filesystem, never a Docker volume, never under a path the
+#     backup routine touches (deploy/backup/backup.sh dumps Postgres and
+#     syncs Garage objects only). The master key's exclusion from the
+#     backup set is enforced by that PATH LAYOUT, not by a warning someone
+#     has to remember to read.
+#   - service passwords (Postgres, Garage, webhook, OAuth, break-glass) ->
+#     ENVIRONMENT VARIABLES, see deploy/.env.example. They are only useful
+#     while their service is reachable and rotate with a restart; none of
+#     them decrypts anything at rest. The GitHub App private key is the one
+#     exception on the env side too: it is PEM multi-line and mints
+#     installation tokens, so it is a FILE (GITHUB_APP_PRIVATE_KEY_FILE).
+#
+# No defaults where a default would be a working-but-wrong credential:
+# every secret interpolation uses `:?` so `docker compose up` before
+# `deploy/init/factory-init.sh` fails loudly instead of starting a stack
+# with a value someone invented.
+#
+# Garage is pinned exact, and the pin is load-bearing, not caution: v2.3.0
+# is the first release that understands --single-node /
+# --default-bucket / --default-access-key, and any older version fails on
+# the FIRST UPLOAD, not at boot (verified hands-on; transcript in
+# .scratch/distributed-software-factory/recon-deps.md). `latest` is refused
+# for the same reason sandcastle's version is pinned.
+#
+# Migrations are a one-shot service with
+#   depends_on: { condition: service_completed_successfully }
+# so exactly one migrator runs per compose-up BY CONSTRUCTION — and the
+# runner itself still takes pg_advisory_lock (deploy/migrate/migrate.sh ->
+# src/db/migrate.ts), because compose's guarantee does not cover an
+# operator typing the command by hand while the stack is up.
+
+services:
+  postgres:
+    # Version matches what packages/control-plane's test rig already pins
+    # (PostgreSqlContainer("postgres:16-alpine") in test/sql/db-rig.ts and
+    # test/seam1/setup.ts) — one Postgres version across tests and deploy.
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-factory}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env, see deploy/.env.example}
+      POSTGRES_DB: ${POSTGRES_DB:-factory}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-factory} -d ${POSTGRES_DB:-factory}"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  garage:
+    # Pinned exact and single-node by flags — v2.3.0's --single-node makes
+    # the layout step automatic, --default-bucket/--default-access-key make
+    # the `factory` bucket exist before the first upload. No `garage key
+    # create` output ever has to cross human hands (spec decision 1).
+    image: dxflrs/garage:v2.3.0
+    command: ["/garage", "server", "--single-node", "--default-bucket", "--default-access-key"]
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set in .env, see deploy/.env.example}
+      GARAGE_DEFAULT_BUCKET: factory
+      GARAGE_DEFAULT_ACCESS_KEY: ${GARAGE_ACCESS_KEY:?set in .env, see deploy/.env.example}
+      GARAGE_DEFAULT_SECRET_KEY: ${GARAGE_SECRET_KEY:?set in .env, see deploy/.env.example}
+    volumes:
+      - ./deploy/garage/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    ports:
+      # S3 API only (no web UI, no admin API on the host). Put this behind
+      # its own hostname at the reverse proxy — SigV4 signs the Host
+      # header, so Garage cannot share an origin with web+API (spec:
+      # "Garage mendapat hostname sendiri"). Host port overridable since
+      # 3900 is a common local collision.
+      - "${GARAGE_S3_HOST_PORT:-3900}:3900"
+    healthcheck:
+      # The image ships only the /garage binary — no shell, no curl
+      # (exec-form CMD avoids needing one); `garage status` succeeds once
+      # the admin/RPC layer answers, which single-node layout creation
+      # completes before.
+      test: ["CMD", "/garage", "status"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+    restart: unless-stopped
+
+  garage-init:
+    # One-shot: sets bucket-level CORS (GET for the browser origin, PUT for
+    # the Runner origin) once Garage is reachable. There is no `garage
+    # bucket cors` CLI subcommand (checked v2.3.0), so this calls the S3
+    # API directly (deploy/garage/configure-cors.sh).
+    image: amazon/aws-cli:2.31.13
+    depends_on:
+      garage:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: ${GARAGE_ACCESS_KEY:?set in .env, see deploy/.env.example}
+      AWS_SECRET_ACCESS_KEY: ${GARAGE_SECRET_KEY:?set in .env, see deploy/.env.example}
+      AWS_DEFAULT_REGION: garage
+      GARAGE_S3_ENDPOINT: http://garage:3900
+      GARAGE_DEFAULT_BUCKET: factory
+      WEB_ORIGIN: ${FACTORY_WEB_URL:?set in .env, see deploy/.env.example}
+      RUNNER_ORIGIN: ${RUNNER_ORIGIN:-http://localhost:4319}
+    volumes:
+      - ./deploy/garage/configure-cors.sh:/configure-cors.sh:ro
+    entrypoint: ["bash", "/configure-cors.sh"]
+    restart: "no"
+
+  migrate:
+    # One-shot migration service. The control-plane service below starts
+    # only after this exits 0 (service_completed_successfully), so exactly
+    # one migrator runs per compose-up BY CONSTRUCTION, and a failed
+    # migration holds the whole stack down as a red container. The runner
+    # inside also takes pg_advisory_lock (src/db/migrate.ts) for the
+    # hand-typed operator; compose's guarantee does not cover that case.
+    image: factory/control-plane:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-factory}:${POSTGRES_PASSWORD:?set in .env, see deploy/.env.example}@postgres:5432/${POSTGRES_DB:-factory}
+    volumes:
+      - ./deploy/migrate/migrate.sh:/migrate.sh:ro
+    entrypoint: ["sh", "/migrate.sh"]
+    restart: "no"
+
+  control-plane:
+    # The single web+control-plane image: this one service serves both the
+    # API and the Vite bundle it ships, so web<->API skew is structurally
+    # impossible (spec decision 3). Migrations and Garage CORS complete
+    # before it starts; the boot-time migration gate (migration-gate.ts)
+    # additionally refuses to serve against a schema it does not recognize.
+    image: factory/control-plane:local
+    build:
+      context: .
+      dockerfile: deploy/images/control-plane/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      garage:
+        condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
+    environment:
+      # Service passwords — env vars, per the config split. The two key
+      # files ride *path* env vars; the material never does.
+      DATABASE_URL: postgres://${POSTGRES_USER:-factory}:${POSTGRES_PASSWORD:?set in .env, see deploy/.env.example}@postgres:5432/${POSTGRES_DB:-factory}
+      FACTORY_MASTER_KEY_FILE: /etc/factory/keys/master.key
+      GITHUB_APP_PRIVATE_KEY_FILE: /etc/factory/keys/github-app-private-key.pem
+      GITHUB_APP_ID: ${GITHUB_APP_ID:?set in .env, see deploy/.env.example}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:?set in .env, see deploy/.env.example}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:?set in .env, see deploy/.env.example}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?set in .env, see deploy/.env.example}
+      BREAK_GLASS_PASSWORD: ${BREAK_GLASS_PASSWORD:?set in .env, see deploy/.env.example}
+      GARAGE_S3_ENDPOINT: http://garage:3900
+      GARAGE_BUCKET: factory
+      GARAGE_REGION: garage
+      GARAGE_ACCESS_KEY: ${GARAGE_ACCESS_KEY:?set in .env, see deploy/.env.example}
+      GARAGE_SECRET_KEY: ${GARAGE_SECRET_KEY:?set in .env, see deploy/.env.example}
+      # The web surface's public URL — what Commit Statuses link back to,
+      # and what garage-init's CORS allows as the browser origin.
+      FACTORY_WEB_URL: ${FACTORY_WEB_URL:?set in .env, see deploy/.env.example}
+      FACTORY_WEB_DIST_DIR: /app/web
+      PORT: 3000
+    secrets:
+      - source: master-key
+        target: /etc/factory/keys/master.key
+      - source: github-app-private-key
+        target: /etc/factory/keys/github-app-private-key.pem
+    ports:
+      - "${FACTORY_HTTP_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+secrets:
+  master-key:
+    # ./deploy/keys is plain host filesystem — not a named volume, not
+    # under any backup path. That layout is the enforcement that the
+    # master key never lands in a backup (spec decision 4).
+    file: ./deploy/keys/master.key
+  github-app-private-key:
+    file: ./deploy/keys/github-app-private-key.pem
+
+volumes:
+  postgres-data:
+  garage-meta:
+  garage-data:

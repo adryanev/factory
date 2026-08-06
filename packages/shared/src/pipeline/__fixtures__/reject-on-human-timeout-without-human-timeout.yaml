@@ -1,0 +1,10 @@
+# Rule: onHumanTimeout: is meaningful only when humanTimeout: is not none.
+version: 1
+name: onHumanTimeout without humanTimeout
+repo: backend
+concurrency: cancel
+steps:
+  review:
+    promptFile: .factory/prompts/review.md
+    ask: { group: reviewer, kind: approval }
+    onHumanTimeout: fail

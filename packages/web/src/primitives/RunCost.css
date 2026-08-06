@@ -1,0 +1,27 @@
+.run-cost {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.run-cost__label {
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+}
+
+.run-cost__usd {
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+/* The running-cost label is a state, not a warning — muted, never --warning
+   (the status colour vocabulary owns that role; cost has none). */
+.run-cost__note {
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+}

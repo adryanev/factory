@@ -1,0 +1,18 @@
+# Rule: repo: is rejected on a Step with kind: — it inherits its branch's repo.
+version: 1
+name: Repo written on a kind Step
+repo: backend
+steps:
+  review:
+    promptFile: .factory/prompts/review.md
+    outputs:
+      prTitle: { type: string }
+      prBody: { type: string }
+
+  open-pr:
+    after: [review]
+    kind: pull-request
+    base: main
+    repo: backend
+    title: { step: review, output: prTitle }
+    body: { step: review, output: prBody }

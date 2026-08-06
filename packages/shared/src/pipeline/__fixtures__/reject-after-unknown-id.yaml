@@ -1,0 +1,8 @@
+# Rule: after: points at ids that exist.
+version: 1
+name: After points at an unknown id
+repo: backend
+steps:
+  build:
+    after: [does-not-exist]
+    run: pnpm build

@@ -1,0 +1,15 @@
+# Rule: the source Step of a branchesFrom must have outputs: of type
+# array-of-object containing key: string. Here `summary` is a scalar string.
+version: 1
+name: branchesFrom source is not array-of-object
+repo: backend
+steps:
+  plan:
+    promptFile: prompts/plan.md
+    outputs:
+      summary: { type: string }
+
+  implement:
+    after: [plan]
+    branchesFrom: { step: plan, output: summary }
+    promptFile: prompts/implement.md

@@ -1,0 +1,6 @@
+# Key material lives here: master key, GitHub App private key (issue #21/#10).
+# This directory is deliberately NOT a Docker-managed volume and NOT under any path
+# a backup script would sync (see compose.yaml, "Config split"). Ignore everything
+# except this file so no key ever lands in git by accident.
+*
+!.gitignore

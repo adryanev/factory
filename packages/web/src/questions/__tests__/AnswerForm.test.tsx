@@ -58,7 +58,7 @@ function editArtifactQuestion(overrides: Partial<QuestionState> = {}): QuestionS
 describe("AnswerForm", () => {
   it("submits an approval with a reason", async () => {
     const user = userEvent.setup();
-    const onSubmit = vi.fn(async (answer: Answer) => ({ status: "accepted" } as const));
+    const onSubmit = vi.fn(async () => ({ status: "accepted" } as const));
     const onAnswered = vi.fn();
     render(<AnswerForm question={approvalQuestion()} onSubmit={onSubmit} onAnswered={onAnswered} />);
 
@@ -71,7 +71,7 @@ describe("AnswerForm", () => {
 
   it("submits a rejection (approved: false is data) and renders the rejection as text", async () => {
     const user = userEvent.setup();
-    const onSubmit = vi.fn(async (answer: Answer) => ({ status: "accepted" } as const));
+    const onSubmit = vi.fn(async () => ({ status: "accepted" } as const));
     render(<AnswerForm question={approvalQuestion()} onSubmit={onSubmit} onAnswered={() => {}} />);
 
     await user.click(screen.getByRole("radio", { name: /reject/i }));
@@ -102,12 +102,12 @@ describe("AnswerForm", () => {
     await waitFor(() => expect(screen.getByTestId("race-lost")).toBeInTheDocument());
     expect(screen.getByTestId("race-lost")).toHaveTextContent("answered by user_winner");
     // The draft is not discarded — the reason is still in the field.
-    expect((screen.getByLabelText("reason") as HTMLTextAreaElement).value).toBe("my careful typed reason");
+    expect(screen.getByLabelText("reason")).toHaveValue("my careful typed reason");
   });
 
   it("keeps a text box beside choice controls, even when allowOther is false", async () => {
     const user = userEvent.setup();
-    const onSubmit = vi.fn(async (answer: Answer) => ({ status: "accepted" } as const));
+    const onSubmit = vi.fn(async () => ({ status: "accepted" } as const));
     render(<AnswerForm question={choiceQuestion()} onSubmit={onSubmit} onAnswered={() => {}} />);
 
     expect(screen.getByRole("radio", { name: /option a/i })).toBeInTheDocument();
@@ -119,7 +119,7 @@ describe("AnswerForm", () => {
 
   it("submits an edit-artifact answer with the edited content", async () => {
     const user = userEvent.setup();
-    const onSubmit = vi.fn(async (answer: Answer) => ({ status: "accepted" } as const));
+    const onSubmit = vi.fn(async () => ({ status: "accepted" } as const));
     render(<AnswerForm question={editArtifactQuestion()} onSubmit={onSubmit} onAnswered={() => {}} />);
 
     await user.type(screen.getByLabelText("draft content"), "# New PRD");

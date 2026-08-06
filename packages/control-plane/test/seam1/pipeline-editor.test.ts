@@ -41,8 +41,8 @@ beforeEach(() => {
 
 let repoCounter = 2000;
 
-async function createProject(rig: TestRig, cookie: string, name: string): Promise<{ id: string }> {
-  const response = await rig.fetchWithCsrf(`${rig.baseUrl}/projects`, {
+async function createProject(testRig: TestRig, cookie: string, name: string): Promise<{ id: string }> {
+  const response = await testRig.fetchWithCsrf(`${testRig.baseUrl}/projects`, {
     method: "POST",
     headers: { "content-type": "application/json", cookie },
     body: JSON.stringify({ name }),
@@ -52,19 +52,19 @@ async function createProject(rig: TestRig, cookie: string, name: string): Promis
 }
 
 async function createRepository(
-  rig: TestRig,
+  testRig: TestRig,
   projectId: string,
   name: string,
 ): Promise<{ id: string; owner: string; name: string }> {
   repoCounter += 1;
   const owner = `editor-owner-${repoCounter}`;
   const installationRowId = `installation_${repoCounter}`;
-  await rig.pool.query(
+  await testRig.pool.query(
     "insert into github_app_installations (id, project_id, installation_id, account_login) values ($1, $2, $3, $4)",
     [installationRowId, projectId, 20_000_000 + repoCounter, owner],
   );
   const repositoryId = `repository_${repoCounter}`;
-  await rig.pool.query(
+  await testRig.pool.query(
     "insert into repositories (id, project_id, github_app_installation_id, owner, name, default_branch) values ($1, $2, $3, $4, $5, 'main')",
     [repositoryId, projectId, installationRowId, owner, name],
   );
@@ -73,18 +73,18 @@ async function createRepository(
 
 /** Logs in as a GitHub user and adds them as a Project `member`. Returns the cookie and the user's stored GitHub identity. */
 async function memberUser(
-  rig: TestRig,
+  testRig: TestRig,
   githubUserId: number,
   githubLogin: string,
   projectId: string,
 ): Promise<{ cookie: string; githubUserId: number; githubLogin: string }> {
-  const cookie = await rig.loginAsGithub({ githubUserId, githubLogin, name: null, avatarUrl: null });
-  const rows = await rig.pool.query(
+  const cookie = await testRig.loginAsGithub({ githubUserId, githubLogin, name: null, avatarUrl: null });
+  const rows = await testRig.pool.query(
     "select principal_id, github_user_id, github_login from users where github_user_id = $1",
     [githubUserId],
   );
-  const ownerCookie = await rig.loginAsBreakGlass();
-  const addResponse = await rig.fetchWithCsrf(`${rig.baseUrl}/projects/${projectId}/members`, {
+  const ownerCookie = await testRig.loginAsBreakGlass();
+  const addResponse = await testRig.fetchWithCsrf(`${testRig.baseUrl}/projects/${projectId}/members`, {
     method: "POST",
     headers: { "content-type": "application/json", cookie: ownerCookie },
     body: JSON.stringify({ principalId: rows.rows[0]!.principal_id, role: "member" }),
@@ -102,12 +102,12 @@ steps:
 `;
 
 function openEditorPullRequest(
-  rig: TestRig,
+  testRig: TestRig,
   cookie: string,
   projectId: string,
   body: { repositoryId: string; pipelinePath: string; yaml: string; editId: string },
 ): Promise<Response> {
-  return rig.fetchWithCsrf(`${rig.baseUrl}/projects/${projectId}/pipeline-editor`, {
+  return testRig.fetchWithCsrf(`${testRig.baseUrl}/projects/${projectId}/pipeline-editor`, {
     method: "POST",
     headers: { "content-type": "application/json", cookie },
     body: JSON.stringify(body),

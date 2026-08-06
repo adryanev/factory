@@ -28,7 +28,7 @@ describe("Runner protocol: /join and capabilities", () => {
 
     const first = await client.join(token);
     expect(first.status).toBe(200);
-    const body = first.body as { runner_id: string; secret: string };
+    const body = first.body;
     expect(body.runner_id).toMatch(/^runner_/);
     expect(body.secret).toMatch(/^rnr_/);
 

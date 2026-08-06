@@ -35,7 +35,7 @@ export interface StepRunRecord {
   startedAt: string | null;
   outputRefBranch: string | null;
   outputRefSha: string | null;
-  outputData: unknown | null;
+  outputData: unknown;
   prNumber: number | null;
   prUrl: string | null;
   finalPrompt: string | null;

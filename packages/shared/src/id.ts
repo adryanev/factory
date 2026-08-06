@@ -155,7 +155,7 @@ function uuidV7Bytes(options: IdGeneratorOptions): Uint8Array {
 
 /** Generates a new prefixed id. Safe to call client-side (browser, Runner, or control plane). */
 export function generateId<P extends IdPrefix>(prefix: P, options: IdGeneratorOptions = {}): Id<P> {
-  return `${prefix}_${encodeBase32(uuidV7Bytes(options))}` as Id<P>;
+  return `${prefix}_${encodeBase32(uuidV7Bytes(options))}`;
 }
 
 /** Structural validation only — does not confirm the id refers to an existing row. */

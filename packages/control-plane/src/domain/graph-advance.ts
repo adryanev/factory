@@ -182,7 +182,7 @@ async function fanOutRows(
     if (row.branchKey === null) continue;
     const current = latestByBranch.get(row.branchKey);
     if (current === undefined || row.turn > current.turn) {
-      latestByBranch.set(row.branchKey!, row);
+      latestByBranch.set(row.branchKey, row);
     }
   }
   return { decision, branches: [...latestByBranch.values()] };
@@ -309,7 +309,7 @@ interface ResolvedBranch {
 /** The structured Output map a branch/Step produced — unwraps the `{ kind: 'done', outputs }` envelope the /result gate stores. Shared with the control-plane Step executor (issue #17) to resolve `title:`/`body:` references. */
 export function structuredOutputs(outputData: unknown): unknown {
   if (typeof outputData === "object" && outputData !== null && "outputs" in outputData) {
-    return (outputData as { outputs: unknown }).outputs;
+    return (outputData).outputs;
   }
   return outputData;
 }
@@ -756,11 +756,11 @@ export async function buildJoinManifest(
   pipeline: Pipeline,
   step: Step,
 ): Promise<JoinManifest | null> {
-  const fanOutDeps = step.after.filter((depId) => isFanOutStep(pipeline.steps[depId]!));
-  if (fanOutDeps.length === 0) return null;
+  const fanOutDepIds = step.after.filter((depId) => isFanOutStep(pipeline.steps[depId]!));
+  if (fanOutDepIds.length === 0) return null;
 
   const entries: JoinManifest = [];
-  for (const depId of fanOutDeps) {
+  for (const depId of fanOutDepIds) {
     const { branches } = await fanOutRows(db, run.id, depId);
     for (const branch of branches) {
       const repository = await db
@@ -772,7 +772,7 @@ export async function buildJoinManifest(
         key: branch.branchKey!,
         repo: repository?.name ?? "unknown",
         branch: stepRunBranchName({
-          runId: branch.runId as never,
+          runId: branch.runId,
           stepKey: branch.stepKey,
           branchKey: branch.branchKey,
           turn: branch.turn,

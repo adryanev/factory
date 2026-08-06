@@ -6,8 +6,6 @@
  * that's the boundary the spec draws — Drizzle isn't trusted for these
  * three, so the test shouldn't go through Drizzle's query builder either.
  */
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -16,7 +14,6 @@ import { Pool } from "pg";
 import { MIGRATIONS_FOLDER } from "../../src/db/migrations-path.js";
 import { startPostgresContainer } from "../postgres-container.js";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
 
 export interface SqlRig {
   pool: Pool;

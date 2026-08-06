@@ -124,7 +124,7 @@ describe("Runner protocol: git-as-bus tokens and the /result invariant", () => {
     const claimed = await client.claim(secret, { tags: ["mint-failure-tag"] });
     // The hold elapses with nothing claimable — a 200 with null, not a 5xx.
     expect(claimed.status).toBe(200);
-    expect((claimed.body as { step_run: unknown }).step_run).toBeNull();
+    expect((claimed.body).step_run).toBeNull();
 
     const { rows } = await rig.pool.query("select outcome, leased_by, lease_token from step_runs where id = $1", [
       stepRunId,
@@ -191,7 +191,7 @@ describe("Runner protocol: git-as-bus tokens and the /result invariant", () => {
 
     // A failed result may omit the ref entirely — the branch was never pushed.
     const { secret: s2, client: c2 } = await joinRunner(rig, ownerCookie);
-    const { stepRunId: stepRunId2 } = await seedReadyStepRun(rig.pool);
+    await seedReadyStepRun(rig.pool);
     const claimed2 = await c2.claim(s2);
     const stepRun2 = (claimed2.body as { step_run: { id: string; lease_token: string } }).step_run;
     const noRef = await c2.result(s2, stepRun2.id, {
@@ -205,7 +205,7 @@ describe("Runner protocol: git-as-bus tokens and the /result invariant", () => {
 
   it("the Runner-protocol path never pushes on the control plane's behalf — the Runner is the pusher", async () => {
     const { secret, client } = await joinRunner(rig, ownerCookie);
-    const { stepRunId } = await seedReadyStepRun(rig.pool);
+    await seedReadyStepRun(rig.pool);
 
     const claimed = await client.claim(secret);
     const stepRun = (claimed.body as { step_run: { id: string; lease_token: string } }).step_run;

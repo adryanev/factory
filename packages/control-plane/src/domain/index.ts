@@ -38,7 +38,7 @@ import type {
   TriggerRunInput,
   TriggeredRun,
 } from "./runs.js";
-import type { DesiredState, HeartbeatLease, HeartbeatReply, RunnerIdentity } from "./runners.js";
+import type { HeartbeatLease, HeartbeatReply, RunnerIdentity } from "./runners.js";
 import type { ClaimedStepRun, ClaimInput } from "./step-run-claim.js";
 import * as stepRunLogsDomain from "./step-run-logs.js";
 import * as stepRunArtifactsDomain from "./step-run-artifacts.js";
@@ -51,7 +51,6 @@ import type {
   QuestionState,
 } from "./step-run-questions.js";
 import type {
-  ArtifactMetadataInput,
   LogChunkInput,
   QuestionInput,
   ResultInput,
@@ -60,7 +59,7 @@ import type {
   UploadRequest,
 } from "./step-run-turn.js";
 import type { ArtifactHistoryMeta, ArtifactMeta, ArtifactRead } from "./step-run-artifacts.js";
-import type { AttemptCost, ProjectCost, ProjectCostPrincipal, RunCost, StepRunCost } from "./costs.js";
+import type { ProjectCost, RunCost, StepRunCost } from "./costs.js";
 import type { ServiceAccountInfo, StoredSecret, PutSecretInput } from "./secrets.js";
 import type { EditorPullRequestResult, EditorRepository, OpenEditorPullRequestInput } from "./pipeline-editor.js";
 
@@ -418,7 +417,7 @@ export function createDomain(deps: AppDeps): Domain {
     },
     egress: {
       setAllowlist: (principal, projectId, allowlist) =>
-        egressDomain.setProjectEgressAllowlist(deps, principal, projectId as never, allowlist),
+        egressDomain.setProjectEgressAllowlist(deps, principal, projectId, allowlist),
     },
     costs: {
       stepRun: (principal, stepRunId) => costsDomain.getStepRunCost(deps, principal, stepRunId),

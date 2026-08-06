@@ -141,7 +141,7 @@ async function claimAndAsk(
     session_id: sessionId,
   });
   expect(asked.status).toBe(200);
-  return { questionId: (asked.body as { question_id: string }).question_id, groupId, stepRun, runId: seeded.runId };
+  return { questionId: (asked.body).question_id, groupId, stepRun, runId: seeded.runId };
 }
 
 async function answer(rig: TestRig, cookie: string, questionId: string, answerBody: unknown): Promise<Response> {

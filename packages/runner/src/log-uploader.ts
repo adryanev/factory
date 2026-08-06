@@ -29,7 +29,7 @@ export function createProtocolLogChunkUploader(
   attempt: number,
 ): LogChunkUploader {
   return {
-    async upload(chunk: LogChunk) {
+    async upload(this: void, chunk: LogChunk) {
       const key = `${attempt}/${chunk.seq}`;
       const [grant] = await deps.protocol.mintUploadGrants({
         stepRunId,

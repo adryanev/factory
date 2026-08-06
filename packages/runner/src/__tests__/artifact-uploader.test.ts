@@ -65,7 +65,15 @@ describe("createProtocolArtifactUploader", () => {
     const putBodies: { key: string; body: string }[] = [];
     globalThis.fetch = async (url: string | URL | Request, init?: RequestInit) => {
       if (init?.method === "PUT") {
-        putBodies.push({ key: String(url), body: String(init.body) });
+        // The uploader PUTs presigned string URLs with string bodies; assert
+        // that invariant instead of stringifying whatever fetch handed us.
+        if (typeof url !== "string") {
+          throw new Error(`expected a string PUT url, got ${url.constructor.name}`);
+        }
+        if (typeof init.body !== "string") {
+          throw new Error("expected a string PUT body");
+        }
+        putBodies.push({ key: url, body: init.body });
         return new Response(null, { status: 200 });
       }
       return new Response(null, { status: 404 });

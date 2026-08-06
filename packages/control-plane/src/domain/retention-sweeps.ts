@@ -74,7 +74,7 @@ function requireSweepStatements(
   if (extra.length > 0) {
     throw new Error(`retention_sweeps.sql has unused statement(s): ${extra.join(", ")}`);
   }
-  return statements as Record<(typeof SWEEP_STATEMENT_NAMES)[number], string>;
+  return statements;
 }
 
 /** The composition-root slice the sweeper needs. `pool` is the raw pg pool — the hand-written SQL needs positional `$1` binding that Drizzle's builder cannot express (same reason as `step-run-claim.ts`). */

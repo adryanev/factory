@@ -129,7 +129,7 @@ describe("Cost — write-once pricing and the three aggregations", () => {
   it("AC3/AC4 — a reported usage is priced once at /result, stored with the price_version, keyed (step_run_id, attempt)", async () => {
     const ids = realIdGenerator();
     const { secret, client } = await joinRunner(rig, ownerCookie);
-    const { projectId, stepRunId } = await seedPlanRun(rig, ids);
+    const { projectId } = await seedPlanRun(rig, ids);
     await addOwnerAsMember(rig, ownerCookie, projectId);
 
     const stepRun = await claimAndResult(rig, secret, client, {
@@ -167,7 +167,7 @@ describe("Cost — write-once pricing and the three aggregations", () => {
   it("AC1 — an agent that reports no usage gets a row with NULLs, shown as 'tidak didukung' (supported: false), never an estimate", async () => {
     const ids = realIdGenerator();
     const { secret, client } = await joinRunner(rig, ownerCookie);
-    const { projectId, stepRunId } = await seedPlanRun(rig, ids);
+    const { projectId } = await seedPlanRun(rig, ids);
     await addOwnerAsMember(rig, ownerCookie, projectId);
 
     const stepRun = await claimAndResult(rig, secret, client, {
@@ -297,7 +297,7 @@ describe("Cost — write-once pricing and the three aggregations", () => {
       definition: TWO_STEP_PIPELINE(repoName),
       definitionFiles: { ".factory/prompts/plan.md": PLAN_PROMPT },
     });
-    const planStepRunId = await seedStepRun(rig.pool, ids, {
+    await seedStepRun(rig.pool, ids, {
       runId,
       repositoryId: chain.repositoryId,
       stepKey: "plan",

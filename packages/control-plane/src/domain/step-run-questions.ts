@@ -41,7 +41,6 @@ import {
 } from "@factory/shared";
 import {
   artifacts,
-  groups,
   groupMembers,
   projects,
   questions,
@@ -51,7 +50,7 @@ import {
 } from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
 import type { Principal } from "./principal.js";
-import { advanceGraph, finalizeRunIfDone, parsePipelineSnapshot, type RunRow } from "./graph-advance.js";
+import { advanceGraph, finalizeRunIfDone, parsePipelineSnapshot } from "./graph-advance.js";
 import { DomainValidationError, ForbiddenError, NotFoundError } from "./errors.js";
 import { MAX_ARTIFACT_BYTES } from "./step-run-turn.js";
 
@@ -404,7 +403,7 @@ export async function answerQuestion(
         .set({ outcome: "failed", reason: "rejected-by-human" })
         .where(eq(stepRuns.id, context.stepRun.id));
       if (pipeline) {
-        await advanceGraph({ db: tx, now: () => now }, run as RunRow, pipeline, context.stepRun.stepKey);
+        await advanceGraph({ db: tx, now: () => now }, run, pipeline, context.stepRun.stepKey);
         await finalizeRunIfDone({ db: tx, now: () => now }, run.id, pipeline);
       }
       return true;

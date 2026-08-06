@@ -171,7 +171,7 @@ function isUniqueViolation(error: unknown): boolean {
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    (error as { code: unknown }).code === "23505"
+    (error).code === "23505"
   );
 }
 
@@ -859,7 +859,7 @@ export async function listRuns(
 
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
-  const nextCursor = hasMore ? (page[page.length - 1]!.id as Id<"run">) : null;
+  const nextCursor = hasMore ? (page[page.length - 1]!.id) : null;
 
   return { runs: page, nextCursor };
 }

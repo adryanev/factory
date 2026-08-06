@@ -272,7 +272,7 @@ export async function executePullRequestStep(
   claimed: HydratedClaim,
   options: ControlPlaneStepOptions = {},
 ): Promise<void> {
-  const { row, run, repository, pipeline, step } = claimed;
+  const { run, repository, pipeline, step } = claimed;
 
   if (step === null || pipeline === null || step.kind !== "pull-request") {
     await commitKindOutcome(deps, claimed, "failed", { reason: "control-plane-step-unresolved" });

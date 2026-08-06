@@ -183,7 +183,7 @@ async function claimAndAsk(
     session_id: "sess-abc",
   });
   expect(asked.status).toBe(200);
-  return { questionId: (asked.body as { question_id: string }).question_id, stepRun, runId: seeded.runId };
+  return { questionId: (asked.body).question_id, stepRun, runId: seeded.runId };
 }
 
 /** Removes a fixture's rows from the shared rig's consideration so later claims are deterministic. */

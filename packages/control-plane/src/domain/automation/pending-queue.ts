@@ -5,7 +5,6 @@
  * never re-reads a ref that moved.
  */
 import { and, asc, eq, isNull } from "drizzle-orm";
-import { generateId } from "@factory/shared";
 import { pendingAutomationRuns, projects, repositories, runs } from "../../db/schema.js";
 import type { AutomationDeps } from "./deps.js";
 import { recordAuditEvent } from "../audit.js";
@@ -69,7 +68,7 @@ export async function sweepPendingAutomationRuns(deps: AutomationDeps): Promise<
           credentialPrincipalId: pending.serviceAccountPrincipalId,
           definitionText: pending.definition as string,
           pipeline,
-          definitionFiles: pending.definitionFiles as unknown as Record<string, string>,
+          definitionFiles: pending.definitionFiles as Record<string, string>,
         });
       } catch (error) {
         if (isUniqueViolation(error)) {

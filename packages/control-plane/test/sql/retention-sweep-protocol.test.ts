@@ -317,7 +317,7 @@ describe("retention sweep protocol (SELECT → delete → mark)", () => {
   });
 
   it("sweeps mark only when the run ended — a still-running run is never touched even past every threshold", async () => {
-    const runA = await seedRun(rig.pool, ids, chain, { endedAt: daysAgo(500) });
+    await seedRun(rig.pool, ids, chain, { endedAt: daysAgo(500) });
     const runB = await seedRun(rig.pool, ids, chain, { endedAt: null });
     const stepB = await seedStepRun(rig.pool, ids, {
       runId: runB,
@@ -348,7 +348,7 @@ describe("retention sweep protocol (SELECT → delete → mark)", () => {
       logsPurgedAt: now(),
       branchesPurgedAt: now(),
     });
-    const stepA = await seedStepRun(rig.pool, ids, {
+    await seedStepRun(rig.pool, ids, {
       runId: runA,
       repositoryId: chain.repositoryId,
       outcome: "succeeded",

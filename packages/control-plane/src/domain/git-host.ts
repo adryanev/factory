@@ -379,7 +379,7 @@ export function createGithubHost(config?: GithubAppConfig): GitHost {
         base,
       });
       const response = await fetch(
-        `https://api.github.com/repos/${repo.owner}/${repo.name}/pulls?${query}`,
+        `https://api.github.com/repos/${repo.owner}/${repo.name}/pulls?${query.toString()}`,
         { headers: { ...GITHUB_ACCEPT, authorization: `Bearer ${token}` } },
       );
       if (!response.ok) {

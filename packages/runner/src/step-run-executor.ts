@@ -37,7 +37,7 @@ import { OutputInvalidError, TurnCancelledError, type Turn, type TurnResult, typ
 import type { GitOps } from "./git/ops.js";
 import { LogBuffer, createLogSink, type LogChunkUploader, type LogSink } from "./log-buffer.js";
 import { createProtocolLogChunkUploader } from "./log-uploader.js";
-import { createProtocolArtifactUploader, type ArtifactUploader, type UploadedArtifact } from "./artifact-uploader.js";
+import { createProtocolArtifactUploader, type ArtifactUploader } from "./artifact-uploader.js";
 import { createProtocolSessionStorage, type AgentSessionStorage } from "./session-storage.js";
 import type { Capabilities } from "./capabilities.js";
 import type { ArtifactWire, ClaimedStepRun, ProtocolClient } from "./protocol/client.js";
@@ -290,11 +290,14 @@ export function startCancelWatch(
       // the control plane's backstop for a Runner that stopped heartbeating.
     }
     if (!stopped) {
-      timer = setTimeout(tick, intervalMs);
+      // `tick` is async (it awaits the heartbeat) but setTimeout wants a void
+      // callback; the `void` marks the schedule-and-forget intent, and `tick`
+      // already swallows its own errors.
+      timer = setTimeout(() => void tick(), intervalMs);
     }
   };
 
-  timer = setTimeout(tick, intervalMs);
+  timer = setTimeout(() => void tick(), intervalMs);
   return {
     stop() {
       stopped = true;

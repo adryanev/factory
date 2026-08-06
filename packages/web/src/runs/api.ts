@@ -54,6 +54,20 @@ export interface RunCostRecord {
   runEnded: boolean;
 }
 
+export interface AttemptCostRecord {
+  attempt: number;
+  /** False when the agent reported no usage — render "tidak didukung". */
+  supported: boolean;
+  tokens: { inputTokens: number; outputTokens: number } | null;
+  costUsd: string | null;
+  priceVersion: string | null;
+}
+
+export interface StepRunCostRecord {
+  totalCostUsd: string | null;
+  attempts: AttemptCostRecord[];
+}
+
 export interface LogChunkRecord {
   seq: number;
   byteOffset: number;
@@ -151,6 +165,18 @@ export async function fetchRunCost(projectId: string, runId: string): Promise<Ru
   const body = await responseBody<RunCostRecord>(response);
   if (body === undefined) {
     throw new Error("run cost response was empty");
+  }
+  return body;
+}
+
+export async function fetchStepRunCost(stepRunId: string): Promise<StepRunCostRecord> {
+  const response = await fetch(`/step-runs/${encodeURIComponent(stepRunId)}/cost`);
+  if (!response.ok) {
+    throw requestError(response);
+  }
+  const body = await responseBody<StepRunCostRecord>(response);
+  if (body === undefined) {
+    throw new Error("step run cost response was empty");
   }
   return body;
 }

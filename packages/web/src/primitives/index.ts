@@ -24,6 +24,3 @@ export type { StepRunCostProps } from "./StepRunCost";
 
 export { RunCost } from "./RunCost";
 export type { RunCostProps } from "./RunCost";
-
-export { ProjectCost } from "./ProjectCost";
-export type { ProjectCostProps } from "./ProjectCost";

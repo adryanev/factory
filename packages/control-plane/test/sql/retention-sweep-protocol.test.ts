@@ -211,10 +211,13 @@ describe("retention sweep protocol (SELECT → delete → mark)", () => {
     );
     expect(sessionBRows[0]!.session_purged_at).toBeNull();
 
-    const { rows: deliveryRows } = await rig.pool.query<{ purged_at: Date | null }>(
-      `select purged_at from webhook_deliveries where delivery_id = 'delivery-1'`,
+    const { rows: deliveryRows } = await rig.pool.query<{ purged_at: Date | null; payload: unknown }>(
+      `select purged_at, payload from webhook_deliveries where delivery_id = 'delivery-1'`,
     );
     expect(deliveryRows[0]!.purged_at).toBeTruthy();
+    // Issue #23: the purge clears the delivery's raw event bytes while the
+    // row (the layer-1 dedup key) survives.
+    expect(deliveryRows[0]!.payload).toBeNull();
 
     // Cost retention: rows and their tables untouched.
     const { rows: costs } = await rig.pool.query(

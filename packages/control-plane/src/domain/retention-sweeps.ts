@@ -254,8 +254,11 @@ async function sweepSessions(
 
 /**
  * The webhook-delivery sweep: no blob to delete — the whole "deletion" is
- * the marker write itself, which is why the two statements of the pair are
- * back to back here with nothing in between.
+ * clearing the delivery's `payload` (issue #23: the row itself survives as
+ * the layer-1 dedup key; the raw event bytes are never read again once
+ * `processed_at` is set, and only processed rows are candidates) plus the
+ * marker write, which is why the two statements of the pair are back to
+ * back here with nothing in between.
  */
 async function sweepWebhookDeliveries(
   deps: RetentionSweepDeps,

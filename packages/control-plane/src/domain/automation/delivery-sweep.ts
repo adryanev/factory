@@ -46,7 +46,12 @@ export function webhookRetryBackoffMs(attempts: number): number {
  * The 24h window this used to hard-delete on is the retention sweep's job
  * now (`webhook_candidate`/`webhook_mark` in db/sql/retention_sweeps.sql,
  * driven by `runRetentionSweeps`): it marks `purgedAt` on its own hourly
- * cadence, independent of `processedAt`, and never removes the row.
+ * cadence, independent of `processedAt`, and never removes the row. Since
+ * issue #23 the purge's only work beyond the marker is clearing `payload`
+ * — the raw event bytes, read only here via `dispatchWebhookEvent` before
+ * `processedAt` is written. This sweep's selection (`processedAt IS NULL`)
+ * and the retention candidate (`processed_at IS NOT NULL`) are disjoint, so
+ * a delivery always carries its payload while it is still eligible here.
  */
 export async function sweepWebhookDeliveries(deps: AutomationDeps): Promise<number> {
   const now = deps.clock.now();

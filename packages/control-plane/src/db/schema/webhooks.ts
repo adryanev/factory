@@ -34,8 +34,14 @@ import { repositories } from "./repositories.js";
  * yang sama"): nullable, dengan partial index `(received_at) WHERE purged_at
  * IS NULL`, sehingga sweep-nya indexed scan yang menyusut sambil bekerja dan
  * idempoten. Baris ini tidak menunjuk blob apa pun — satu-satunya kerja sweep
- * retensi adalah menulis penandanya (db/sql/retention_sweeps.sql); baris itu
- * sendiri tidak pernah dihapus, terlepas dari `processedAt` atau `attempts`.
+ * retensi adalah menulis penandanya DAN mengosongkan `payload` (issue #23:
+ * baris itu sendiri tidak pernah dihapus, terlepas dari `processedAt` atau
+ * `attempts` — `deliveryId` tetap ada sebagai lapis pertama dedup; yang
+ * dibuang hanyalah isi event mentah yang sudah tidak pernah dibaca setelah
+ * `processedAt` terisi, lihat event-mapping.ts). `payload` nullable demi itu:
+ * setelah purge, `NULL` = sudah dipetakan lalu isinya dibuang. Sweep hanya
+ * memilih baris yang sudah `processedAt IS NOT NULL` — delivery yang belum
+ * dipetakan wajib mempertahankan payload-nya untuk dispatch.
  */
 export const webhookDeliveries = pgTable(
   "webhook_deliveries",
@@ -43,7 +49,7 @@ export const webhookDeliveries = pgTable(
     deliveryId: text("delivery_id").primaryKey(),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
     eventType: text("event_type").notNull(),
-    payload: jsonb("payload").notNull(),
+    payload: jsonb("payload"),
     processedAt: timestamp("processed_at", { withTimezone: true }),
     attempts: integer("attempts").notNull().default(0),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),

@@ -228,27 +228,33 @@ describe("retention_sweeps.sql", () => {
       const older = await seedWebhookDelivery(rig.pool, "delivery-older", hoursAgo(50));
       const fresh = await seedWebhookDelivery(rig.pool, "delivery-fresh", hoursAgo(1));
       await seedWebhookDelivery(rig.pool, "delivery-purged", hoursAgo(48), now());
+      // Issue #23: an old but still unprocessed delivery keeps its payload
+      // (it still needs it for dispatch) — never a candidate.
+      await seedWebhookDelivery(rig.pool, "delivery-unprocessed", hoursAgo(72), null, null);
 
       const { rows } = await rig.pool.query<{ delivery_id: string }>(webhookSelect!, [10]);
 
       expect(rows.map((r) => r.delivery_id)).toEqual([older, oldEnough]);
       expect(rows.map((r) => r.delivery_id)).not.toContain(fresh);
       expect(rows.map((r) => r.delivery_id)).not.toContain("delivery-purged");
+      expect(rows.map((r) => r.delivery_id)).not.toContain("delivery-unprocessed");
     });
 
-    it("is idempotent across two runs with identical result", async () => {
+    it("is idempotent across two runs with identical result — and the marker write clears the payload", async () => {
       const deliveryId = await seedWebhookDelivery(rig.pool, "delivery-idem", hoursAgo(30));
 
       const first = await rig.pool.query<{ delivery_id: string }>(webhookSelect!, [10]);
       expect(first.rows.map((r) => r.delivery_id)).toEqual([deliveryId]);
 
       await rig.pool.query(webhookUpdate!, [first.rows.map((r) => r.delivery_id)]);
-      const { rows: afterFirst } = await rig.pool.query<{ purged_at: Date }>(
-        `select purged_at from webhook_deliveries where delivery_id = $1`,
+      const { rows: afterFirst } = await rig.pool.query<{ purged_at: Date; payload: unknown }>(
+        `select purged_at, payload from webhook_deliveries where delivery_id = $1`,
         [deliveryId],
       );
       const purgedAt = afterFirst[0]?.purged_at;
       expect(purgedAt).toBeTruthy();
+      // Issue #23: the row survives as the dedup key, its bytes are gone.
+      expect(afterFirst[0]?.payload).toBeNull();
 
       // Second sweep: the row is no longer a candidate, and re-running the
       // UPDATE with the same id list must not move the timestamp.
@@ -258,11 +264,12 @@ describe("retention_sweeps.sql", () => {
       const result = await rig.pool.query(webhookUpdate!, [[deliveryId]]);
       expect(result.rowCount).toBe(0);
 
-      const { rows: afterSecond } = await rig.pool.query<{ purged_at: Date }>(
-        `select purged_at from webhook_deliveries where delivery_id = $1`,
+      const { rows: afterSecond } = await rig.pool.query<{ purged_at: Date; payload: unknown }>(
+        `select purged_at, payload from webhook_deliveries where delivery_id = $1`,
         [deliveryId],
       );
       expect(afterSecond[0]?.purged_at).toEqual(purgedAt);
+      expect(afterSecond[0]?.payload).toBeNull();
     });
   });
 });

@@ -241,7 +241,17 @@ export async function dispatchWebhookEvent(
   deps: AutomationDeps,
   delivery: typeof webhookDeliveries.$inferSelect,
 ): Promise<void> {
-  const payload = delivery.payload as Record<string, unknown>;
+  // `payload` is nullable since the retention sweep clears it for purged
+  // rows (issue #23). The delivery sweep only selects `processedAt IS NULL`
+  // rows, and the retention candidate requires `processed_at IS NOT NULL`,
+  // so a delivery in flight always carries its payload — this guard exists
+  // for the type, and fails loudly (dead-letter, not silent drop) if the two
+  // sweeps ever race a row between selection and dispatch.
+  const rawPayload = delivery.payload;
+  if (rawPayload === null) {
+    throw new Error(`delivery ${delivery.deliveryId} (${delivery.eventType}) dispatched without a payload`);
+  }
+  const payload = rawPayload as Record<string, unknown>;
   switch (delivery.eventType) {
     case "push":
       await handlePushEvent(deps, payload);

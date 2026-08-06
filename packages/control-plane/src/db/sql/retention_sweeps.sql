@@ -23,11 +23,17 @@
 
 -- Parameter tiap statement: $1 = batas jumlah baris per putaran (batch).
 
+-- Tiap statement dibaca lewat penanda `-- name:` di atasnya, bukan lewat
+-- posisinya di file: sepuluh statement yang diambil berdasarkan urutan
+-- tetap lolos pemeriksaan jumlah setelah seseorang menukar urutannya, dan
+-- salahnya baru kelihatan sebagai sweep yang menandai tabel yang keliru.
+
 -- =====================================================================
 -- 1. Artifact, 90 hari sejak Run berakhir (spec: "Artifact 90 hari sejak
 --    Run berakhir").
 -- =====================================================================
 
+-- name: artifact_candidate
 SELECT id
 FROM runs
 WHERE ended_at IS NOT NULL
@@ -39,6 +45,7 @@ FOR UPDATE SKIP LOCKED;
 
 -- Setelah aplikasi menghapus blob Artifact di bawah prefix artifact/ milik
 -- tiap run id di atas:
+-- name: artifact_mark
 UPDATE runs
 SET artifacts_purged_at = now()
 WHERE id = ANY($1::text[])
@@ -49,6 +56,7 @@ WHERE id = ANY($1::text[])
 --    berakhir").
 -- =====================================================================
 
+-- name: log_candidate
 SELECT id
 FROM runs
 WHERE ended_at IS NOT NULL
@@ -60,6 +68,7 @@ FOR UPDATE SKIP LOCKED;
 
 -- Setelah aplikasi menghapus blob log_chunks di bawah prefix log/ milik
 -- tiap run id di atas:
+-- name: log_mark
 UPDATE runs
 SET logs_purged_at = now()
 WHERE id = ANY($1::text[])
@@ -70,6 +79,7 @@ WHERE id = ANY($1::text[])
 --    (spec: "Branch saat Run berakhir").
 -- =====================================================================
 
+-- name: branch_candidate
 SELECT id
 FROM runs
 WHERE ended_at IS NOT NULL
@@ -81,6 +91,7 @@ FOR UPDATE SKIP LOCKED;
 -- Setelah aplikasi menghapus branch git `run/<run-id>/...` di Git Remote
 -- milik tiap run id di atas (branch setengah jadi yang gagal dihapus dicoba
 -- lagi putaran berikutnya -- penandanya belum tertulis):
+-- name: branch_mark
 UPDATE runs
 SET branches_purged_at = now()
 WHERE id = ANY($1::text[])
@@ -93,6 +104,7 @@ WHERE id = ANY($1::text[])
 --    untuk sisanya (definisi di db/schema/step_runs.ts).
 -- =====================================================================
 
+-- name: session_candidate
 SELECT step_runs.id
 FROM step_runs
 JOIN runs ON runs.id = step_runs.run_id
@@ -106,6 +118,7 @@ FOR UPDATE OF step_runs SKIP LOCKED;
 
 -- Setelah aplikasi menghapus blob session di bawah prefix session/ milik
 -- tiap step_run id di atas:
+-- name: session_mark
 UPDATE step_runs
 SET session_purged_at = now()
 WHERE id = ANY($1::text[])
@@ -119,6 +132,7 @@ WHERE id = ANY($1::text[])
 --    Ambang `received_at`, bukan `ended_at`: tabel ini tidak punya Run.
 -- =====================================================================
 
+-- name: webhook_candidate
 SELECT delivery_id
 FROM webhook_deliveries
 WHERE received_at < now() - interval '24 hours'
@@ -127,6 +141,7 @@ ORDER BY received_at
 LIMIT $1
 FOR UPDATE SKIP LOCKED;
 
+-- name: webhook_mark
 UPDATE webhook_deliveries
 SET purged_at = now()
 WHERE delivery_id = ANY($1::text[])

@@ -6,7 +6,6 @@
  * that's the boundary the spec draws — Drizzle isn't trusted for these
  * three, so the test shouldn't go through Drizzle's query builder either.
  */
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
@@ -17,7 +16,6 @@ import { Pool } from "pg";
 import { MIGRATIONS_FOLDER } from "../../src/db/migrations-path.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const SQL_DIR = path.resolve(here, "../../src/db/sql");
 
 export interface SqlRig {
   pool: Pool;
@@ -58,21 +56,12 @@ export async function startSqlRig(): Promise<SqlRig> {
 }
 
 /**
- * Reads one of the three hand-written `.sql` files and strips full-line
- * comments, returning the bare statement(s) — the same text a caller would
- * send over the wire, without the prose that documents it.
+ * The production loader, re-exported rather than reimplemented. These tests
+ * exist to prove what the application actually sends; a second copy of the
+ * parser here could drift from `src/db/sql/load.ts` and the contract test
+ * would keep passing while proving something else.
  */
-export function loadSqlStatements(fileName: string): string[] {
-  const raw = readFileSync(path.join(SQL_DIR, fileName), "utf-8");
-  const withoutComments = raw
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("--"))
-    .join("\n");
-  return withoutComments
-    .split(";")
-    .map((statement) => statement.trim())
-    .filter((statement) => statement.length > 0);
-}
+export { loadNamedSqlStatements, loadSqlStatements } from "../../src/db/sql/load.js";
 
 /** Deterministic id generator — a counter stands in for both clock and randomness. */
 export function testIdGenerator() {

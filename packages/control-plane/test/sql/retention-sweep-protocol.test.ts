@@ -33,7 +33,6 @@ import type { ObjectStore } from "../../src/object-store.js";
 import { createFakeObjectStore } from "../seam1/fake-object-store.js";
 import { createFakeGitHost } from "../seam1/fake-git-host.js";
 import {
-  loadSqlStatements,
   resetDatabase,
   startSqlRig,
   testIdGenerator,
@@ -66,11 +65,6 @@ describe("retention sweep protocol (SELECT → delete → mark)", () => {
   let chain: Awaited<ReturnType<typeof seedProjectRepoPrincipal>>;
   let objectStore: ReturnType<typeof createFakeObjectStore>;
   let gitHost: ReturnType<typeof createFakeGitHost>;
-
-  // Guards: the SQL pairs must load exactly as the contract test reads them.
-  if (loadSqlStatements("retention_sweeps.sql").length !== 10) {
-    throw new Error("retention_sweeps.sql must contain 5 SELECT/UPDATE pairs");
-  }
 
   function sweepDeps(pool: Pool) {
     return {

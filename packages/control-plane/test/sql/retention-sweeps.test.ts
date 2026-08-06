@@ -18,7 +18,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
-  loadSqlStatements,
+  loadNamedSqlStatements,
   resetDatabase,
   startSqlRig,
   testIdGenerator,
@@ -41,24 +41,22 @@ describe("retention_sweeps.sql", () => {
   const ids = testIdGenerator();
   let chain: Awaited<ReturnType<typeof seedProjectRepoPrincipal>>;
 
-  const statements = loadSqlStatements("retention_sweeps.sql");
-  const [
-    artifactSelect,
-    artifactUpdate,
-    logSelect,
-    logUpdate,
-    branchSelect,
-    branchUpdate,
-    sessionSelect,
-    sessionUpdate,
-    webhookSelect,
-    webhookUpdate,
-  ] = statements;
-  if (statements.length !== 10) {
-    throw new Error(
-      `expected 10 statements (5 SELECT/UPDATE pairs) in retention_sweeps.sql, got ${statements.length}`,
-    );
-  }
+  // Read by name, exactly as `domain/retention-sweeps.ts` reads them: a test
+  // that took them by position would keep passing against a reordered file
+  // while the application paired the wrong SELECT with the wrong UPDATE.
+  const statements = loadNamedSqlStatements("retention_sweeps.sql");
+  const {
+    artifact_candidate: artifactSelect,
+    artifact_mark: artifactUpdate,
+    log_candidate: logSelect,
+    log_mark: logUpdate,
+    branch_candidate: branchSelect,
+    branch_mark: branchUpdate,
+    session_candidate: sessionSelect,
+    session_mark: sessionUpdate,
+    webhook_candidate: webhookSelect,
+    webhook_mark: webhookUpdate,
+  } = statements;
 
   beforeAll(async () => {
     rig = await startSqlRig();

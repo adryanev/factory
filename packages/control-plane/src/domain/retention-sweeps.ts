@@ -37,29 +37,44 @@ import { eq } from "drizzle-orm";
 import type { Id } from "@factory/shared";
 import { artifacts, githubAppInstallations, logChunks, repositories, stepRuns } from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
-import { loadSqlStatements } from "../db/sql/load.js";
+import { loadNamedSqlStatements } from "../db/sql/load.js";
 
-const [
-  artifactCandidate,
-  artifactMark,
-  logCandidate,
-  logMark,
-  branchCandidate,
-  branchMark,
-  sessionCandidate,
-  sessionMark,
-  webhookCandidate,
-  webhookMark,
-] = requireSweepPairs(loadSqlStatements("retention_sweeps.sql"));
+/**
+ * The five SELECT/UPDATE pairs, read by the `-- name:` marker above each one
+ * rather than by position. A reordered file used to stay both count-correct
+ * and type-correct while silently pairing, say, the log candidates with the
+ * artifact marker — the kind of mistake whose only symptom is a sweep marking
+ * rows it never cleaned.
+ */
+const SWEEP_STATEMENT_NAMES = [
+  "artifact_candidate",
+  "artifact_mark",
+  "log_candidate",
+  "log_mark",
+  "branch_candidate",
+  "branch_mark",
+  "session_candidate",
+  "session_mark",
+  "webhook_candidate",
+  "webhook_mark",
+] as const;
 
-/** The five SELECT/UPDATE pairs, in the order the file documents them — same guard the contract test applies, so a reshaped file fails here and in the test at the same place. */
-function requireSweepPairs(statements: string[]): [string, string, string, string, string, string, string, string, string, string] {
-  if (statements.length !== 10) {
-    throw new Error(
-      `expected 10 statements (5 SELECT/UPDATE pairs) in retention_sweeps.sql, got ${statements.length}`,
-    );
+const sweeps = requireSweepStatements(loadNamedSqlStatements("retention_sweeps.sql"));
+
+function requireSweepStatements(
+  statements: Record<string, string>,
+): Record<(typeof SWEEP_STATEMENT_NAMES)[number], string> {
+  const missing = SWEEP_STATEMENT_NAMES.filter((name) => statements[name] === undefined);
+  if (missing.length > 0) {
+    throw new Error(`retention_sweeps.sql is missing statement(s): ${missing.join(", ")}`);
   }
-  return statements as [string, string, string, string, string, string, string, string, string, string];
+  const extra = Object.keys(statements).filter(
+    (name) => !SWEEP_STATEMENT_NAMES.includes(name as (typeof SWEEP_STATEMENT_NAMES)[number]),
+  );
+  if (extra.length > 0) {
+    throw new Error(`retention_sweeps.sql has unused statement(s): ${extra.join(", ")}`);
+  }
+  return statements as Record<(typeof SWEEP_STATEMENT_NAMES)[number], string>;
 }
 
 /** The composition-root slice the sweeper needs. `pool` is the raw pg pool — the hand-written SQL needs positional `$1` binding that Drizzle's builder cannot express (same reason as `step-run-claim.ts`). */
@@ -104,11 +119,11 @@ export async function runRetentionSweeps(
     failedRuns: 0,
   };
 
-  counts.artifactRuns = await sweepRunBlobKind(deps, artifactCandidate, artifactMark, artifactBlobKeys, batch, counts);
-  counts.logRuns = await sweepRunBlobKind(deps, logCandidate, logMark, logBlobKeys, batch, counts);
-  counts.branchRuns = await sweepBranches(deps, branchCandidate, branchMark, batch, counts);
-  counts.sessionStepRuns = await sweepSessions(deps, sessionCandidate, sessionMark, batch, counts);
-  counts.webhookDeliveries = await sweepWebhookDeliveries(deps, webhookCandidate, webhookMark, batch);
+  counts.artifactRuns = await sweepRunBlobKind(deps, sweeps.artifact_candidate, sweeps.artifact_mark, artifactBlobKeys, batch, counts);
+  counts.logRuns = await sweepRunBlobKind(deps, sweeps.log_candidate, sweeps.log_mark, logBlobKeys, batch, counts);
+  counts.branchRuns = await sweepBranches(deps, sweeps.branch_candidate, sweeps.branch_mark, batch, counts);
+  counts.sessionStepRuns = await sweepSessions(deps, sweeps.session_candidate, sweeps.session_mark, batch, counts);
+  counts.webhookDeliveries = await sweepWebhookDeliveries(deps, sweeps.webhook_candidate, sweeps.webhook_mark, batch);
 
   return counts;
 }

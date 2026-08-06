@@ -64,7 +64,7 @@ export interface AppDeps {
   db: Database;
   /**
    * The shared secret the GitHub App webhook signs with (issue #18). One
-   * endpoint, one secret — the HMAC check in `domain/automation.ts` is the
+   * endpoint, one secret — the HMAC check in `domain/automation/webhook-ingest.ts` is the
    * only consumer; a wrong or absent secret means every webhook is rejected
    * before its payload is trusted.
    */

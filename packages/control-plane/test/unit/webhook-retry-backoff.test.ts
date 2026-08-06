@@ -6,7 +6,7 @@
  * attempt — so it can be checked without a database or a clock.
  */
 import { describe, expect, it } from "vitest";
-import { webhookRetryBackoffMs } from "../../src/domain/automation.js";
+import { webhookRetryBackoffMs } from "../../src/domain/automation/index.js";
 
 describe("webhookRetryBackoffMs", () => {
   it("starts at 30 seconds after the first failed attempt", () => {

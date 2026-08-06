@@ -13,7 +13,7 @@ import { requireProjectMembership } from "./projects.js";
 import { DomainValidationError, NotFoundError } from "./errors.js";
 import { advanceGraph, finalizeRunIfDone, parsePipelineSnapshot } from "./graph-advance.js";
 import { sweepPendingNotifications } from "./notifications.js";
-import { sweepAutomation } from "./automation.js";
+import { sweepAutomation } from "./automation/index.js";
 
 const TERMINAL_OUTCOMES = new Set(["succeeded", "failed", "cancelled", "skipped"]);
 

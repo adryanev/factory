@@ -55,14 +55,15 @@ if [ -f "$PRIVATE_KEY_FILE" ]; then
 fi
 
 # Render the manifest: placeholders are plain tokens, so sed is safe here.
+MANIFEST_TMP_FILE="$(mktemp)"
+trap 'rm -f "$MANIFEST_TMP_FILE"' EXIT
 sed \
   -e "s|__FACTORY_WEB_URL__|$FACTORY_WEB_URL|g" \
   -e "s|__FACTORY_WEBHOOK_URL__|$FACTORY_WEBHOOK_URL|g" \
   -e "s|__FACTORY_MANIFEST_REDIRECT_URL__|$REDIRECT_URL|g" \
   -e "s|__FACTORY_OAUTH_CALLBACK_URL__|$OAUTH_CALLBACK_URL|g" \
-  "$MANIFEST_FILE" > /tmp/factory-manifest.json
-MANIFEST_JSON="$(cat /tmp/factory-manifest.json)"
-rm -f /tmp/factory-manifest.json
+  "$MANIFEST_FILE" > "$MANIFEST_TMP_FILE"
+MANIFEST_JSON="$(cat "$MANIFEST_TMP_FILE")"
 
 # The callback listener: catches the redirect from GitHub and extracts the
 # code from the query string. python3's http.server logs the full request
@@ -70,7 +71,7 @@ rm -f /tmp/factory-manifest.json
 CALLBACK_LOG="$(mktemp)"
 python3 -m http.server "$REDIRECT_PORT" > "$CALLBACK_LOG" 2>&1 &
 LISTENER_PID=$!
-trap 'kill $LISTENER_PID 2>/dev/null || true; rm -f "$CALLBACK_LOG"' EXIT
+trap 'kill $LISTENER_PID 2>/dev/null || true; rm -f "$CALLBACK_LOG" "$MANIFEST_TMP_FILE"' EXIT
 
 FORM_FILE="$(mktemp)"
 cat > "$FORM_FILE" <<EOF

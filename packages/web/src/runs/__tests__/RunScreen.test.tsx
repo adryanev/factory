@@ -9,8 +9,10 @@ import {
   fetchRun,
   fetchRunCost,
   fetchStepRunArtifacts,
+  fetchStepRunCost,
 } from "../api";
-import type { RunDetail, RunPollResult, StepRunRecord } from "../api";
+import type { RunDetail, RunPollResult, StepRunCostRecord, StepRunRecord } from "../api";
+import { COST_UNSUPPORTED_LABEL } from "../../cost/format";
 
 vi.mock("../api", () => ({
   cancelRun: vi.fn(),
@@ -19,6 +21,7 @@ vi.mock("../api", () => ({
   fetchRun: vi.fn(),
   fetchRunCost: vi.fn(),
   fetchStepRunArtifacts: vi.fn(),
+  fetchStepRunCost: vi.fn(),
 }));
 
 const RUN_ID = "run_01hmonitoring";
@@ -124,10 +127,19 @@ function fanOutRuns(): StepRunRecord[] {
 
 const notModified: RunPollResult = { status: "not-modified", etag: '"fixture"' };
 
+const stepRunCost: StepRunCostRecord = {
+  totalCostUsd: "1.500000",
+  attempts: [
+    { attempt: 1, supported: false, tokens: null, costUsd: null, priceVersion: null },
+    { attempt: 2, supported: true, tokens: { inputTokens: 500_000, outputTokens: 0 }, costUsd: "1.500000", priceVersion: "v1" },
+  ],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchRun).mockResolvedValue(notModified);
   vi.mocked(fetchRunCost).mockRejectedValue(new Error("cost not in fixture"));
+  vi.mocked(fetchStepRunCost).mockResolvedValue(stepRunCost);
   vi.mocked(fetchLogTail).mockResolvedValue({ chunks: [], nextOffset: 0, attempt: 1, ended: true });
   vi.mocked(fetchLogChunk).mockResolvedValue("");
   vi.mocked(fetchStepRunArtifacts).mockResolvedValue([]);
@@ -237,5 +249,64 @@ describe("RunScreen", () => {
     expect(screen.getByTestId("cancel-intent")).toHaveTextContent(/Cancellation requested/i);
     expect(cancelRun).toHaveBeenCalledWith(PROJECT_ID, RUN_ID);
     resolveCancel?.({ ...initial.run, cancelRequestedAt: "2026-08-04T08:00:00.000Z" });
+  });
+
+  it("renders the focused StepRun's cost — total and per-attempt breakdown — through the Info tab", async () => {
+    const user = userEvent.setup();
+    const runs = [stepRun("plan", null, "failed"), stepRun("pick", null, "ready")];
+    render(
+      <RunScreen
+        projectId={PROJECT_ID}
+        runId={RUN_ID}
+        initialData={detail(runs, false)}
+        now={() => Date.parse("2026-08-04T08:00:00.000Z")}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Info" }));
+
+    expect(fetchStepRunCost).toHaveBeenCalledWith("steprun_plan_root");
+    expect(await screen.findByText("attempt 1")).toBeInTheDocument();
+    expect(screen.getByText("attempt 2")).toBeInTheDocument();
+    expect(screen.getByText(COST_UNSUPPORTED_LABEL)).toBeInTheDocument();
+    expect(screen.getAllByText("$1.50")).toHaveLength(2); // attempt 2's row + the total
+  });
+
+  it("shows 'tidak didukung' through the screen for a StepRun whose agent reported no usage — never a figure", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetchStepRunCost).mockResolvedValue({
+      totalCostUsd: null,
+      attempts: [{ attempt: 1, supported: false, tokens: null, costUsd: null, priceVersion: null }],
+    });
+    render(<RunScreen projectId={PROJECT_ID} runId={RUN_ID} initialData={detail([stepRun("plan", null, "succeeded")], false)} />);
+
+    await user.click(screen.getByRole("tab", { name: "Info" }));
+
+    expect(await screen.findAllByText(COST_UNSUPPORTED_LABEL)).toHaveLength(2); // total + attempt 1
+    expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
+  });
+
+  it("refetches the per-StepRun cost when the selected StepRun changes", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      stepRun("plan", null, "succeeded"),
+      stepRun("implement", null, "succeeded"),
+      stepRun("pick", null, "ready"),
+    ];
+    render(
+      <RunScreen
+        projectId={PROJECT_ID}
+        runId={RUN_ID}
+        initialData={detail(runs, false)}
+        now={() => Date.parse("2026-08-04T08:00:00.000Z")}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Info" }));
+    expect(await screen.findByText("Cost")).toBeInTheDocument();
+    expect(fetchStepRunCost).toHaveBeenLastCalledWith("steprun_plan_root");
+
+    await user.click(screen.getByRole("button", { name: /implement/i }));
+    expect(fetchStepRunCost).toHaveBeenLastCalledWith("steprun_implement_root");
   });
 });

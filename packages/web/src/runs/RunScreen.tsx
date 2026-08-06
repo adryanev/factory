@@ -8,6 +8,7 @@ import {
   type FanOutBranch,
 } from "../primitives";
 import { RunCost } from "../primitives/RunCost";
+import { StepRunCost } from "../primitives/StepRunCost";
 import type { RunCostData } from "../cost/types";
 import "../tokens";
 import type { StepRunStatus } from "../tokens/status";
@@ -18,9 +19,11 @@ import {
   fetchRun,
   fetchRunCost,
   fetchStepRunArtifacts,
+  fetchStepRunCost,
   type ArtifactRecord,
   type RunDetail,
   type RunPollResult,
+  type StepRunCostRecord,
   type StepRunRecord,
 } from "./api";
 import "./RunScreen.css";
@@ -536,7 +539,15 @@ function ArtifactPanel({
   );
 }
 
-function InfoPanel({ runId, stepRun }: { runId: string; stepRun: StepRunRecord | undefined }): React.JSX.Element {
+function InfoPanel({
+  runId,
+  stepRun,
+  cost,
+}: {
+  runId: string;
+  stepRun: StepRunRecord | undefined;
+  cost: StepRunCostRecord | null;
+}): React.JSX.Element {
   if (stepRun === undefined) return <div className="empty-state">Select a StepRun first.</div>;
   const status = statusLabel(stepRun.outcome);
   return (
@@ -552,6 +563,12 @@ function InfoPanel({ runId, stepRun }: { runId: string; stepRun: StepRunRecord |
       <dt>Reason</dt>
       <dd>{stepRun.reason ?? "No reason recorded."}</dd>
       {stepRun.prUrl ? <><dt>Pull request</dt><dd><a href={stepRun.prUrl}>{stepRun.prNumber ? `#${stepRun.prNumber}` : stepRun.prUrl}</a></dd></> : null}
+      {cost ? (
+        <>
+          <dt>Cost</dt>
+          <dd><StepRunCost data={cost} /></dd>
+        </>
+      ) : null}
     </dl>
   );
 }
@@ -560,6 +577,7 @@ function Inspector({
   detail,
   runId,
   selectedStepRun,
+  stepRunCost,
   tab,
   setTab,
   logStepRunId,
@@ -571,6 +589,7 @@ function Inspector({
   detail: RunDetail;
   runId: string;
   selectedStepRun: StepRunRecord | undefined;
+  stepRunCost: StepRunCostRecord | null;
   tab: InspectorTab;
   setTab: (tab: InspectorTab) => void;
   logStepRunId: string | null;
@@ -598,7 +617,7 @@ function Inspector({
         {tab === "log" ? <LogPanel detail={detail} selectedStepRun={selectedStepRun} logStepRunId={logStepRunId} logStates={logStates} onSelectLog={onSelectLog} /> : null}
         {tab === "output" ? <OutputPanel stepRun={selectedStepRun} /> : null}
         {tab === "artifact" ? <ArtifactPanel stepRun={selectedStepRun} artifacts={artifacts} onLoad={onLoadArtifacts} /> : null}
-        {tab === "info" ? <InfoPanel runId={runId} stepRun={selectedStepRun} /> : null}
+        {tab === "info" ? <InfoPanel runId={runId} stepRun={selectedStepRun} cost={stepRunCost} /> : null}
       </div>
     </aside>
   );
@@ -633,6 +652,7 @@ export function RunScreen({
   const nowSource = useRef<() => number>(now ?? (() => Date.now()));
   const [detail, setDetail] = useState<RunDetail | null>(initialData ?? null);
   const [cost, setCost] = useState<RunCostData | null>(null);
+  const [stepRunCost, setStepRunCost] = useState<StepRunCostRecord | null>(null);
   const [etag, setEtag] = useState<string | null>(null);
   const etagRef = useRef<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -702,6 +722,21 @@ export function RunScreen({
       setLogStepRunId(selected.id);
     }
   }, [detail, nowMs, pipeline, selectedId, logStepRunId]);
+
+  useEffect(() => {
+    if (selectedStepRun === undefined) return;
+    let disposed = false;
+    void fetchStepRunCost(selectedStepRun.id)
+      .then((stepRunCostResult) => {
+        if (!disposed) setStepRunCost(stepRunCostResult);
+      })
+      .catch(() => {
+        // Cost is a separate aggregation endpoint; a missing cost must not hide the StepRun.
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [selectedStepRun?.id]);
 
   const activeLogStepRun = detail?.stepRuns.find((stepRun) => stepRun.id === logStepRunId);
   useEffect(() => {
@@ -835,6 +870,7 @@ export function RunScreen({
           detail={detail}
           runId={runId}
           selectedStepRun={selected}
+          stepRunCost={stepRunCost}
           tab={tab}
           setTab={setTab}
           logStepRunId={logStepRunId}

@@ -23,3 +23,6 @@ deploy/github-app/register.html
 
 # OS
 .DS_Store
+
+# Editor hook cache: per-session state with machine-local absolute paths
+.impeccable/hook.cache.json

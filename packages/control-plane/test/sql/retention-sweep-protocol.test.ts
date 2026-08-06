@@ -25,7 +25,7 @@
  *  - a Run with no StepRuns and no blobs is still marked — the cleanup fact
  *    is recorded even when there was nothing to reclaim.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Pool } from "pg";
 import { createDatabase } from "../../src/db/client.js";
 import { runRetentionSweeps } from "../../src/domain/retention-sweeps.js";
@@ -273,10 +273,24 @@ describe("retention sweep protocol (SELECT → delete → mark)", () => {
       },
     };
 
+    // The failure must be observable, not just counted: an operator reading
+    // the log needs the row, the sweep, and the cause to tell a transient
+    // 503 apart from a permanent 404 without re-deriving either from a bare
+    // failure count.
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
     const deps = sweepDeps(rig.pool);
     const first = await runRetentionSweeps({ ...deps, objectStore: flaky });
     expect(first.artifactRuns).toBe(0);
     expect(first.failedRuns).toBe(1);
+
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    const [message, cause] = consoleError.mock.calls[0]!;
+    expect(message).toContain("artifact");
+    expect(message).toContain(runA);
+    expect(cause).toBeInstanceOf(Error);
+    expect((cause as Error).message).toBe("garage delete failed: 503");
+    consoleError.mockRestore();
 
     const afterFailure = await rig.pool.query<{ artifacts_purged_at: Date | null }>(
       `select artifacts_purged_at from runs where id = $1`,

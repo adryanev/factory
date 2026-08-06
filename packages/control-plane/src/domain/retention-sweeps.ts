@@ -119,8 +119,8 @@ export async function runRetentionSweeps(
     failedRuns: 0,
   };
 
-  counts.artifactRuns = await sweepRunBlobKind(deps, sweeps.artifact_candidate, sweeps.artifact_mark, artifactBlobKeys, batch, counts);
-  counts.logRuns = await sweepRunBlobKind(deps, sweeps.log_candidate, sweeps.log_mark, logBlobKeys, batch, counts);
+  counts.artifactRuns = await sweepRunBlobKind(deps, "artifact", sweeps.artifact_candidate, sweeps.artifact_mark, artifactBlobKeys, batch, counts);
+  counts.logRuns = await sweepRunBlobKind(deps, "log", sweeps.log_candidate, sweeps.log_mark, logBlobKeys, batch, counts);
   counts.branchRuns = await sweepBranches(deps, sweeps.branch_candidate, sweeps.branch_mark, batch, counts);
   counts.sessionStepRuns = await sweepSessions(deps, sweeps.session_candidate, sweeps.session_mark, batch, counts);
   counts.webhookDeliveries = await sweepWebhookDeliveries(deps, sweeps.webhook_candidate, sweeps.webhook_mark, batch);
@@ -149,6 +149,7 @@ async function markRuns(deps: RetentionSweepDeps, statement: string, ids: string
  */
 async function sweepRunBlobKind(
   deps: RetentionSweepDeps,
+  kind: "artifact" | "log",
   selectSql: string,
   markSql: string,
   gatherKeys: (deps: RetentionSweepDeps, runId: Id<"run">) => Promise<string[]>,
@@ -163,7 +164,8 @@ async function sweepRunBlobKind(
       await Promise.all(keys.map((key) => deps.objectStore.deleteObject(key)));
       await markRuns(deps, markSql, [runId]);
       marked += 1;
-    } catch {
+    } catch (error) {
+      console.error(`retention sweep (${kind}) failed for run ${runId}`, error);
       counts.failedRuns += 1;
     }
   }
@@ -213,7 +215,8 @@ async function sweepBranches(
       }
       await markRuns(deps, markSql, [runId]);
       marked += 1;
-    } catch {
+    } catch (error) {
+      console.error(`retention sweep (branch) failed for run ${runId}`, error);
       counts.failedRuns += 1;
     }
   }
@@ -241,7 +244,8 @@ async function sweepSessions(
       }
       await deps.pool.query(markSql, [[id]]);
       marked += 1;
-    } catch {
+    } catch (error) {
+      console.error(`retention sweep (session) failed for step-run ${id}`, error);
       counts.failedRuns += 1;
     }
   }

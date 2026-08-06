@@ -37,6 +37,8 @@ export interface NotificationSender {
 export interface ClaimConnectionLimiter {
   tryAcquire(): boolean;
   release(): void;
+  /** Slots currently held. How close an instance is to its cap is the one number that explains a burst of 503s, and it is otherwise invisible. */
+  inUse(): number;
 }
 
 export function createClaimConnectionLimiter(maxHangingConnections: number): ClaimConnectionLimiter {
@@ -51,6 +53,9 @@ export function createClaimConnectionLimiter(maxHangingConnections: number): Cla
     },
     release(): void {
       hanging -= 1;
+    },
+    inUse(): number {
+      return hanging;
     },
   };
 }

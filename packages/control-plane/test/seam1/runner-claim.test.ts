@@ -95,6 +95,23 @@ describe("Runner protocol: /claim", () => {
     expect(body.protocol).toEqual({ min: 1, max: 1 });
   });
 
+  /**
+   * Blocks until the instance is holding `count` hanging `/claim` slots.
+   * Times out with the count it actually saw, so a genuine regression reads
+   * as "the connections never registered" instead of as a wrong status code.
+   */
+  async function waitForHangingClaims(rig: TestRig, count: number): Promise<void> {
+    const deadline = Date.now() + 5000;
+    while (rig.deps.claimLimiter.inUse() < count) {
+      if (Date.now() > deadline) {
+        throw new Error(
+          `timed out waiting for ${count} hanging /claim connections; saw ${rig.deps.claimLimiter.inUse()}`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+
   describe("connection cap", () => {
     let cappedRig: TestRig;
     let cappedOwnerCookie: string;
@@ -113,11 +130,16 @@ describe("Runner protocol: /claim", () => {
       const runnerB = await joinRunner(cappedRig, cappedOwnerCookie);
       const runnerC = await joinRunner(cappedRig, cappedOwnerCookie);
 
-      // Two occupy the cap's two slots with a long hold; give them a moment
-      // to actually be hanging before the third arrives.
+      // Two occupy the cap's two slots with a long hold. Waiting on the
+      // limiter's own count rather than on a fixed delay is what makes this
+      // deterministic: a sleep only guesses how long the two requests need to
+      // reach the server, and under a loaded machine (`pnpm -r test` runs
+      // four suites at once) the guess is sometimes short — the third caller
+      // then arrives under the cap and is served normally, failing the
+      // assertion for a reason that has nothing to do with the cap.
       const hangingA = runnerA.client.claim(runnerA.secret, { tags: ["never-matches"] });
       const hangingB = runnerB.client.claim(runnerB.secret, { tags: ["never-matches"] });
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await waitForHangingClaims(cappedRig, 2);
 
       const overCap = await runnerC.client.claim(runnerC.secret, { tags: ["never-matches"] });
       expect(overCap.status).toBe(503);

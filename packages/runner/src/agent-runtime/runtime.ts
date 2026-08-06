@@ -12,6 +12,21 @@
  *   4. closes the sandbox and reports the worktree path + whether teardown
  *      preserved it (uncommitted changes → the executor commits there).
  *
+ * Egress (AC6, issue #22) is enforced by default in BOTH modes:
+ *
+ *   - `exec:host` — the agent's OS user gets a `pf` allowlist anchor applied
+ *     through `deps.egress` before the first spawn (`host-provider.ts`).
+ *   - `exec:docker` — the per-StepRun network is created `--internal` (the
+ *     step container has no route to anything outside it) and an
+ *     allowlist-enforcing sidecar proxy (the runner's own `egress-proxy`
+ *     subcommand, see `egress-docker.ts`/`egress-proxy.ts`) is deployed on
+ *     that network plus an ordinary upstream network. The step container's
+ *     proxy env is the only path off the network; the sidecar denies every
+ *     host not on the Project allowlist. An empty allowlist denies
+ *     everything. `deps.allowUnenforcedDockerEgress` is the explicit
+ *     operator opt-out: it restores the pre-enforcement shape (plain bridge,
+ *     no sidecar, no proxy env).
+ *
  * Cancel is built **outside** sandcastle (spec, verbatim): docker mode stops
  * every container on the StepRun's network with a 30-second grace; host mode
  * SIGTERMs the command's process group. Sandcastle's own idle/completion
@@ -65,22 +80,114 @@ export class OutputInvalidError extends Error {
   }
 }
 
+/** The docker egress shape for one turn, derived once at `startTurn`. */
+type DockerEgressPlan =
+  | { enforced: true; upstreamNetwork: string; sidecarName: string }
+  | { enforced: false };
+
 /**
- * Thrown when a turn asked for `exec:docker` on a Runner that has not been
- * told to accept unenforced egress. Docker mode applies no egress rule at all
- * — `egressAllowlist` reaches this file and is then only ever read by the host
- * provider — so running one silently would break the default-deny promise in
- * `docs/SECURITY.md`. Refusing is the fail-closed reading; the operator opts
- * back in per Runner. See `docs/adr/0005-sandbox-egress.md`.
+ * Docker egress is enforced unless the operator explicitly opted out with
+ * `allowUnenforcedDockerEgress` — the per-StepRun network name is the seed
+ * for both the upstream network and the sidecar container name, so every
+ * artifact of a turn is recoverable from the spec alone.
  */
-export class UnenforcedEgressError extends Error {
-  constructor() {
-    super(
-      "exec:docker applies no egress rules: the sandbox joins an ordinary bridge network and can reach anything this host can. " +
-        "Run the Step with `runs_on: [exec:host]`, or start the Runner with --allow-unenforced-docker-egress to accept that.",
-    );
-    this.name = "UnenforcedEgressError";
+function egressPlan(deps: TurnRuntimeDeps, spec: TurnSpec): DockerEgressPlan {
+  if (spec.runsOn !== "docker" || deps.allowUnenforcedDockerEgress === true) {
+    return { enforced: false };
   }
+  return {
+    enforced: true,
+    upstreamNetwork: `${spec.network}-upstream`,
+    sidecarName: `${spec.network}-egress`,
+  };
+}
+
+/**
+ * The proxy env a step container needs: both cases of HTTP(S)/ALL_PROXY,
+ * and NO_PROXY explicitly cleared so nothing from the host env can carve a
+ * bypass. Every proxy-ignoring tool simply cannot connect — there is no
+ * route off the internal network other than the sidecar.
+ */
+function proxyEnvFor(proxyUrl: string): Record<string, string> {
+  return {
+    HTTP_PROXY: proxyUrl,
+    http_proxy: proxyUrl,
+    HTTPS_PROXY: proxyUrl,
+    https_proxy: proxyUrl,
+    ALL_PROXY: proxyUrl,
+    all_proxy: proxyUrl,
+    NO_PROXY: "",
+    no_proxy: "",
+  };
+}
+
+/**
+ * The `exec:docker` egress setup, run before the sandbox provider is handed
+ * to sandcastle (the step container must never start before its only exit
+ * exists): the internal per-StepRun network (fail-closed if a pre-existing
+ * network of that name is not internal — a crashed pre-upgrade Runner must
+ * not silently reopen egress), the upstream network, then the sidecar.
+ * Resolves with the proxy env for the step container, or `null` when the
+ * turn runs unenforced.
+ */
+async function provisionDockerEgress(
+  deps: TurnRuntimeDeps,
+  spec: TurnSpec,
+  plan: DockerEgressPlan,
+): Promise<Record<string, string> | null> {
+  if (!plan.enforced) {
+    // Unenforced mode: the pre-enforcement shape, a plain bridge network.
+    await deps.docker.createNetwork(spec.network).catch(() => {
+      // A pre-existing network (e.g. a re-claimed turn) is not an error;
+      // any real failure surfaces when the container fails to attach.
+    });
+    return null;
+  }
+  try {
+    await deps.docker.createNetwork(spec.network, { internal: true });
+  } catch {
+    // The network may pre-exist (a re-claimed turn after a crash). It must
+    // be internal — an external pre-existing network would silently reopen
+    // egress, so the turn fails closed instead.
+    const isInternal = await deps.docker.networkInternal(spec.network).catch(() => false);
+    if (!isInternal) {
+      throw new Error(
+        `docker egress network '${spec.network}' already exists and is not internal — ` +
+          "remove it (docker network rm) before re-claiming this StepRun, or the turn would run unenforced",
+      );
+    }
+  }
+  await deps.docker.createNetwork(plan.upstreamNetwork).catch(() => {
+    // Same pre-existing tolerance: the upstream network is not a security
+    // boundary, only the sidecar's egress path.
+  });
+  const { proxyUrl } = await deps.dockerEgress.deploy({
+    name: plan.sidecarName,
+    perRunNetwork: spec.network,
+    upstreamNetwork: plan.upstreamNetwork,
+    allowlist: spec.egressAllowlist ?? [],
+  });
+  return proxyEnvFor(proxyUrl);
+}
+
+/**
+ * The `exec:docker` teardown, run after the sandbox closed (the step
+ * container is already gone): remove the sidecar first — a network cannot
+ * be removed while a container is still attached — then both networks. Every
+ * step is best-effort, like every teardown in this seam.
+ */
+async function teardownDockerEgress(
+  deps: TurnRuntimeDeps,
+  spec: TurnSpec,
+  plan: DockerEgressPlan,
+): Promise<void> {
+  if (!plan.enforced) {
+    await deps.docker.removeNetwork(spec.network).catch(() => {});
+    return;
+  }
+  await deps.dockerEgress.remove(plan.sidecarName).catch(() => {});
+  await deps.docker.removeNetwork(spec.network).catch(() => {});
+  await deps.docker.removeNetwork(plan.upstreamNetwork).catch(() => {});
 }
 
 /** Single-quotes a value for `/bin/sh` assignment; the only escaping `sh` needs inside single quotes is the quote itself. */
@@ -98,10 +205,6 @@ export function shellEnvPrefix(secrets: Record<string, string>): string {
 export function createTurnRuntime(deps: TurnRuntimeDeps) {
   return {
     startTurn(spec: TurnSpec): Turn {
-      // Both kinds of turn pass here, so the egress gate is checked once.
-      if (spec.runsOn === "docker" && deps.allowUnenforcedDockerEgress !== true) {
-        throw new UnenforcedEgressError();
-      }
       if (spec.kind === "agent") {
         return startAgentTurn(deps, spec);
       }
@@ -113,12 +216,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps) {
       let activePgid: number | null = null;
 
       const done = (async (): Promise<TurnResult> => {
-        if (spec.runsOn === "docker") {
-          await deps.docker.createNetwork(spec.network).catch(() => {
-            // A pre-existing network (e.g. a re-claimed turn) is not an error;
-            // any real failure surfaces when the container fails to attach.
-          });
-        }
+        // Egress is enforced by default: the per-StepRun network is created
+        // internal and the sidecar is deployed before the sandbox provider
+        // exists (issue #22). Failing closed here is deliberate — a step
+        // container must never start before its only exit is in place.
+        const plan = egressPlan(deps, spec);
+        const proxyEnv =
+          spec.runsOn === "docker" ? await provisionDockerEgress(deps, spec, plan) : null;
 
         // The command that actually runs: in docker mode the secrets ride as
         // inline shell env assignments (no file is ever written); in host mode
@@ -129,7 +233,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps) {
         const sandboxProvider =
           spec.runsOn === "docker"
             ? // The built-in provider, as-is — we never modify it (spec: AC1).
-              docker({ imageName: spec.image, network: spec.network })
+              // Enforcement rides the provider options: the internal network
+              // plus the proxy env that routes all traffic through the
+              // allowlist-enforcing sidecar (issue #22).
+              docker({
+                imageName: spec.image,
+                network: spec.network,
+                ...(proxyEnv === null ? {} : { env: proxyEnv }),
+              })
             : createFactoryHostProvider({
                 hostProcess: deps.hostProcess,
                 onSpawn: (pgid) => {
@@ -176,8 +287,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps) {
           }
           throw error;
         } finally {
+          // The sidecar and both networks must go when the turn ends — on
+          // success, on failure, and on cancel (issue #22). The sandbox has
+          // already closed by the time we get here, so the step container
+          // can no longer be attached to the network.
           if (spec.runsOn === "docker") {
-            await deps.docker.removeNetwork(spec.network).catch(() => {});
+            await teardownDockerEgress(deps, spec, plan);
           }
         }
       })();
@@ -220,13 +335,18 @@ function startAgentTurn(deps: TurnRuntimeDeps, spec: AgentTurnSpec): Turn {
   const abort = new AbortController();
 
   const done = (async (): Promise<TurnResult> => {
-    if (spec.runsOn === "docker") {
-      await deps.docker.createNetwork(spec.network).catch(() => {});
-    }
+    // Egress enforcement before anything untrusted starts — same contract as
+    // the shell path (issue #22).
+    const plan = egressPlan(deps, spec);
+    const proxyEnv = spec.runsOn === "docker" ? await provisionDockerEgress(deps, spec, plan) : null;
 
     const sandboxProvider =
       spec.runsOn === "docker"
-        ? docker({ imageName: spec.image, network: spec.network })
+        ? docker({
+            imageName: spec.image,
+            network: spec.network,
+            ...(proxyEnv === null ? {} : { env: proxyEnv }),
+          })
         : createFactoryHostProvider({
             hostProcess: deps.hostProcess,
             // Cancel for an agent turn goes through the AbortSignal sandcastle
@@ -314,7 +434,7 @@ function startAgentTurn(deps: TurnRuntimeDeps, spec: AgentTurnSpec): Turn {
       throw error;
     } finally {
       if (spec.runsOn === "docker") {
-        await deps.docker.removeNetwork(spec.network).catch(() => {});
+        await teardownDockerEgress(deps, spec, plan);
       }
     }
   })();

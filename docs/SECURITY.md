@@ -26,18 +26,21 @@ from defending against that, and only that.
 - **Secrets ride the `/claim` payload** and are handed directly to the agent
   call — never written to a file inside the sandbox.
 - **Default-deny egress** from the sandbox; the per-Project allowlist is the
-  only exception set, and every change is audited. **Enforced today only in
-  `exec:host`**, where the Runner installs pf rules for the agent's OS user.
-  In `exec:docker` the allowlist reaches the Runner on the `/claim` payload
-  but is not yet applied at the network layer: the sandbox joins an ordinary
-  bridge network and can reach anything the host can. Because of that, a
-  Runner **refuses `exec:docker` turns** unless it was started with
-  `--allow-unenforced-docker-egress` (or
-  `FACTORY_ALLOW_UNENFORCED_DOCKER_EGRESS=1`) — the refusal is reported as a
-  failed Step Run naming the flag. An operator who passes it is accepting
-  unprotected egress for every docker turn on that Runner. Enforcement is
-  macOS-only either way, since the rules are `pf`; a Linux Runner has no
-  enforced mode. See `docs/adr/0005-sandbox-egress.md`.
+  only exception set, and every change is audited. **Enforced in both
+  execution modes.** `exec:host` installs pf rules for the agent's OS user
+  (macOS-only). `exec:docker` runs the step container on an **internal
+  per-StepRun network** whose only exit is an allowlist-enforcing **sidecar
+  proxy** (the runner's own `egress-proxy` subcommand, deployed per StepRun
+  and torn down with it); an empty allowlist denies everything, and there is
+  no TLS MITM — the proxy checks the destination hostname and tunnels the
+  bytes. A Step container whose proxy is bypassed or absent simply has no
+  route out. The explicit operator opt-out
+  (`--allow-unenforced-docker-egress` or
+  `FACTORY_ALLOW_UNENFORCED_DOCKER_EGRESS=1`) restores the old unprotected
+  shape per Runner — plain bridge network, no sidecar — and is visible in
+  that Runner's launch command. `exec:host` enforcement is macOS-only
+  (pf rules); `exec:docker` enforcement is platform-independent. See
+  `docs/adr/0005-sandbox-egress.md`.
 - **`exec:host` runs the agent as a separate OS user** from the Runner, so
   that user cannot read the Runner's secret files (mode `0600`).
 

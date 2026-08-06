@@ -167,12 +167,24 @@ export interface Turn {
   cancel(): void;
 }
 
-/** The docker CLI primitives the seam needs for the per-StepRun-network cancel boundary. */
+/** The docker CLI primitives the seam needs for the per-StepRun-network cancel boundary and egress enforcement (issue #22). */
 export interface DockerControl {
-  /** `docker network create <name>` — must exist before the docker provider attaches. */
-  createNetwork(name: string): Promise<void>;
+  /**
+   * `docker network create [--internal] <name>` — must exist before the
+   * docker provider attaches. `internal: true` is the egress boundary: the
+   * step container then has no route to anything outside the network (issue
+   * #22); the sidecar is its only path off it.
+   */
+  createNetwork(name: string, options?: { internal?: boolean }): Promise<void>;
   /** `docker network rm <name>` — best-effort teardown. */
   removeNetwork(name: string): Promise<void>;
+  /**
+   * `docker network inspect <name> --format {{.Internal}}` — true when the
+   * network is `--internal`. The fail-closed check for a re-claimed turn
+   * whose network already exists: a pre-existing network that is not
+   * internal means the turn must not run (issue #22).
+   */
+  networkInternal(name: string): Promise<boolean>;
   /** `docker ps -q --filter network=<name>` — every container on the StepRun's network. */
   containerIdsOnNetwork(name: string): Promise<string[]>;
   /** `docker stop --time <graceSeconds> <ids...>` — the 30-second grace cancel. */
@@ -205,13 +217,22 @@ export interface TurnRuntimeDeps {
   /** Egress enforcement (AC6) — when present, `exec:host` installs default-deny allowlist rules for the agent user. */
   egress?: import("./egress.js").EgressControl;
   /**
-   * Lets `exec:docker` turns run even though no egress rule is applied to
-   * them. Off by default, which makes the Runner refuse docker turns
-   * outright: AC6 promises a default-deny allowlist, and docker mode delivers
-   * none — the sandbox joins an ordinary bridge network and reaches whatever
-   * the host reaches. See `docs/adr/0005-sandbox-egress.md`.
+   * Turns `exec:docker` egress enforcement **off** for this Runner (issue
+   * #22). Off by default, and default-deny holds in that default: every
+   * docker turn runs on an internal per-StepRun network with an
+   * allowlist-enforcing sidecar proxy as its only path off the network. An
+   * operator who sets this opts back into the pre-enforcement behavior — the
+   * sandbox joins an ordinary bridge network and reaches whatever the host
+   * reaches. See `docs/adr/0005-sandbox-egress.md`.
    */
   allowUnenforcedDockerEgress?: boolean;
+  /**
+   * The docker egress enforcement seam (issue #22): deploys the
+   * allowlist-enforcing sidecar proxy on the StepRun's networks before the
+   * step container starts, and removes it at teardown. Required, so a deps
+   * set without it cannot silently run docker turns unenforced.
+   */
+  dockerEgress: import("./egress-docker.js").DockerEgressControl;
   /**
    * Builds the sandcastle `AgentProvider` for an agent CLI name (issue 9's
    * agent turns). Injectable so tests can substitute a provider without

@@ -150,6 +150,7 @@ async function claimControlPlaneStepRun(
     CONTROL_PLANE_CLAIM_SLOTS,
     CONTROL_PLANE_LEASE_SECONDS,
     "pull-request",
+    deps.clock.now(), // issue #25 — the same clock that stamped unschedulable_after.
   ]);
   return result.rows[0] ?? null;
 }

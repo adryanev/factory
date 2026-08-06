@@ -64,4 +64,5 @@ export const statusColor: Record<StepRunStatus, string> = {
   failed: "var(--status-failed)",
   skipped: "var(--status-skipped)",
   cancelled: "var(--status-cancelled)",
+  unschedulable: "var(--status-unschedulable)",
 };

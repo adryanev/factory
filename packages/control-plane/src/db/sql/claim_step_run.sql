@@ -32,6 +32,17 @@
 --                                    dieksekusi control plane")
 --   $5  wanted_kind     text|null -- NULL untuk klaim Runner biasa,
 --                                    'pull-request' untuk control plane
+--   $6  now             timestamptz -- jam pemanggil (deps.clock), diuji ke
+--                                    `unschedulable_after` (issue #25) --
+--                                    BUKAN `now()` Postgres: `lease_expires_at`
+--                                    distempel kueri ini sendiri, jadi ia
+--                                    diuji ke jam Postgres; `unschedulable_after`
+--                                    distempel jam aplikasi saat materialisasi
+--                                    (automation.ts: "stamped from the same
+--                                    clock the sweep compares against"), jadi
+--                                    ia diuji ke jam aplikasi -- dua pasang
+--                                    stempel-bandinger, dua jam, masing-masing
+--                                    konsisten.
 --
 -- Fence `count(*) < $3`: dihitung dari StepRun yang SEDANG dipegang lessee
 -- ini dengan lease belum kedaluwarsa -- bukan angka self-report Runner --
@@ -45,6 +56,16 @@
 --
 -- `ORDER BY ready_at`: FIFO murni, tanpa prioritas (aditif, ditunda -- lihat
 -- "Out of Scope").
+--
+-- `unschedulable_after` (issue #25): satu klausa opsional ke kueri klaim
+-- (ticket 07: "unschedulableAfter menambah satu klausa opsional ke kueri
+-- klaim, bukan penjadwal baru"), diuji ke jam pemanggil ($6). Predikatnya
+-- perbandingan kolom biasa pada baris yang sudah dipilih index partial
+-- `step_runs_ready_claim_idx` (ORDER BY ready_at) -- bukan fungsi pada
+-- kolom, jadi tidak memaksa scan penuh; index partial
+-- `step_runs_unschedulable_ready_idx` melayani sweep yang memindahkan baris
+-- basi ke outcome terminal. Baris yang melewati batas TETAP bisa lolos
+-- lewat celah antara sweep -- itulah gunanya klausa ini.
 
 WITH candidate AS (
   SELECT id
@@ -52,6 +73,7 @@ WITH candidate AS (
   WHERE outcome = 'ready'
     AND kind IS NOT DISTINCT FROM $5
     AND required_tags <@ $2::text[]
+    AND (unschedulable_after IS NULL OR unschedulable_after > $6)
     AND (
       SELECT count(*)
       FROM step_runs held

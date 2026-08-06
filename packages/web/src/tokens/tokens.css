@@ -203,6 +203,11 @@
  * human-written-Artifact marks. --warning is the nearest Corpus role left
  * that isn't already claimed by another status; this is a judgement call,
  * not something either prototype states outright.
+ *
+ * `unschedulable` (issue #25 — a StepRun past its recorded deadline)
+ * reuses --fg-2: a dimmed, muted tone that reads as "stale", distinct from
+ * --fg-3 (ready/skipped) and --border-2 (cancelled). The same judgement
+ * call as awaiting-human — the shape carries the primary signal.
  */
 :root {
   --status-ready: var(--fg-3);
@@ -212,4 +217,5 @@
   --status-failed: var(--destructive);
   --status-skipped: var(--fg-3);
   --status-cancelled: var(--border-2);
+  --status-unschedulable: var(--fg-2);
 }

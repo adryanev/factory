@@ -56,7 +56,7 @@ const stepRunSchema = z
     branchKey: z.string().nullable(),
     turn: z.number(),
     attempt: z.number(),
-    outcome: z.enum(["ready", "running", "awaiting-human", "succeeded", "failed", "skipped", "cancelled"]),
+    outcome: z.enum(["ready", "running", "awaiting-human", "succeeded", "failed", "skipped", "cancelled", "unschedulable"]),
     reason: z.string().nullable(),
     kind: z.literal("pull-request").nullable(),
     requiredTags: z.array(z.string()),

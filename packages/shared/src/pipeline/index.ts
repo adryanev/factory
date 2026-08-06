@@ -41,7 +41,7 @@ export {
 } from "../question.js";
 
 export { KEY_PATTERN, isValidKey } from "./key.js";
-export { DURATION_PATTERN, durationSchema, humanTimeoutSchema } from "./duration.js";
+export { DURATION_PATTERN, durationSchema, humanTimeoutSchema, parseDuration } from "./duration.js";
 
 export { globMatches, anyGlobMatches, globToRegExp } from "./glob.js";
 export { cronMatches, isValidCronExpression } from "./cron.js";

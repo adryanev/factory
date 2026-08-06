@@ -35,6 +35,7 @@ export const joinManifestEntrySchema = z.object({
     "failed",
     "skipped",
     "cancelled",
+    "unschedulable",
   ]),
   /** The branch's structured Output (the `done` arm's `outputs`), when it succeeded — null otherwise. */
   outputs: z.unknown().nullable(),

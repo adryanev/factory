@@ -44,7 +44,10 @@ export interface FanOutBranch {
 }
 
 export function classifyBranch(branch: FanOutBranch): FanOutBucket {
-  if (branch.status === "failed") return "failed";
+  // `unschedulable` (issue #25) ranks with `failed`: both are terminal
+  // non-success — a branch that will never run holds the Run back just like
+  // one that broke, so it must not hide behind healthy branches.
+  if (branch.status === "failed" || branch.status === "unschedulable") return "failed";
   if (branch.status === "awaiting-human") return "awaiting-human";
   if (branch.status === "ready" && branch.unscheduledOverThreshold === true) {
     return "unsched";

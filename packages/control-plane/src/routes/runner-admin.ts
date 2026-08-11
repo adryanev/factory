@@ -17,6 +17,30 @@ import { requirePrincipal } from "./require-principal.js";
 const runnerIdParamSchema = z.object({ id: z.string().openapi({ param: { name: "id", in: "path" } }) });
 const stepRunIdParamSchema = z.object({ id: z.string().openapi({ param: { name: "id", in: "path" } }) });
 
+const runnerPoolEntrySchema = z
+  .object({
+    id: z.string(),
+    desiredState: z.enum(["active", "draining", "revoked"]),
+    tags: z.array(z.string()),
+    slots: z.number(),
+    protocolVersion: z.number().nullable(),
+    releaseVersion: z.string().nullable(),
+    lastHeartbeatAt: z.string().datetime().nullable(),
+    activeLeases: z.number(),
+  })
+  .openapi("RunnerPoolEntry");
+
+const listRunnersRoute = createRoute({
+  method: "get",
+  path: "/runners",
+  summary: "The Runner pool — every registered Runner with its protocol/lease status, for the pool screen (issue #33). Org owner only.",
+  responses: {
+    200: { description: "Ok.", content: { "application/json": { schema: z.object({ runners: z.array(runnerPoolEntrySchema) }) } } },
+    401: { description: "Not logged in.", content: { "application/json": { schema: errorResponseSchema } } },
+    403: { description: "Not an org owner.", content: { "application/json": { schema: errorResponseSchema } } },
+  },
+});
+
 const mintJoinTokenRoute = createRoute({
   method: "post",
   path: "/runner-joins",
@@ -91,6 +115,12 @@ const cancelStepRunRoute = createRoute({
 });
 
 export function registerRunnerAdminRoutes(app: OpenAPIHono<AppEnv>, deps: RouteDeps): void {
+  app.openapi(listRunnersRoute, async (c) => {
+    const principal = requirePrincipal(c);
+    const runners = await deps.domain.runners.list(principal);
+    return c.json({ runners }, 200);
+  });
+
   app.openapi(mintJoinTokenRoute, async (c) => {
     const principal = requirePrincipal(c);
     const { token } = await deps.domain.runners.mintJoinToken(principal);

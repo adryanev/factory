@@ -22,7 +22,7 @@
  * succeeds regardless of the caller's protocol version (spec: "/heartbeat
  * selalu diterima walau protokol di luar rentang").
  */
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { encodeBase32, generateId, SUPPORTED_PROTOCOL_RANGE, type Id } from "@factory/shared";
 import { runnerJoinTokens, runners, stepRuns } from "../db/schema.js";
 import type { AppDeps } from "../deps.js";
@@ -305,4 +305,45 @@ export async function revokeRunner(deps: Pick<AppDeps, "db">, principal: Princip
   await requireOrgOwner(deps, principal);
   await getRunnerOrThrow(deps, runnerId);
   await deps.db.update(runners).set({ desiredState: "revoked" }).where(eq(runners.id, runnerId));
+}
+
+/** One row of the pool the UI renders — the Runner's own facts plus the live lease count. */
+export interface RunnerPoolEntry {
+  id: Id<"runner">;
+  desiredState: DesiredState;
+  tags: string[];
+  slots: number;
+  protocolVersion: number | null;
+  releaseVersion: string | null;
+  lastHeartbeatAt: Date | null;
+  activeLeases: number;
+}
+
+/** The Runner pool surface (issue #33): every registered Runner, newest to oldest, with the lease count the UI shows as "status protocol". Org owner only — the pool is org-wide. */
+export async function listRunners(deps: Pick<AppDeps, "db">, principal: Principal): Promise<RunnerPoolEntry[]> {
+  await requireOrgOwner(deps, principal);
+  const rows = await deps.db.select().from(runners).orderBy(desc(runners.lastHeartbeatAt), asc(runners.id));
+  if (rows.length === 0) return [];
+  const leaseRows = await deps.db
+    .select({ leasedBy: stepRuns.leasedBy, count: sql<number>`count(*)::int` })
+    .from(stepRuns)
+    .where(
+      and(
+        isNotNull(stepRuns.leasedBy),
+        gt(stepRuns.leaseExpiresAt, new Date()),
+        inArray(stepRuns.leasedBy, rows.map((row) => row.id)),
+      ),
+    )
+    .groupBy(stepRuns.leasedBy);
+  const leaseCounts = new Map(leaseRows.map((row) => [row.leasedBy!, row.count]));
+  return rows.map((row) => ({
+    id: row.id,
+    desiredState: row.desiredState,
+    tags: row.tags,
+    slots: row.slots,
+    protocolVersion: row.protocolVersion,
+    releaseVersion: row.releaseVersion,
+    lastHeartbeatAt: row.lastHeartbeatAt,
+    activeLeases: leaseCounts.get(row.id) ?? 0,
+  }));
 }

@@ -9,6 +9,7 @@ import { QuestionList } from "./questions/QuestionList";
 import { RunScreen } from "./runs/RunScreen";
 import { PipelineEditor } from "./pipeline-editor/PipelineEditor";
 import { CronSkipsScreen } from "./cron-skips/CronSkipsScreen";
+import { RunnerPoolScreen } from "./runners/RunnerPoolScreen";
 
 function runRoute(pathname: string): { projectId: string; runId: string } | null {
   const match = pathname.match(/^\/projects\/([^/]+)\/runs\/([^/]+)(?:\/)?$/);
@@ -44,6 +45,9 @@ export function App(): React.JSX.Element {
   const skipsRoute = typeof window === "undefined" ? null : cronSkipsRoute(window.location.pathname);
   if (skipsRoute) {
     return <CronSkipsScreen projectId={skipsRoute.projectId} />;
+  }
+  if (typeof window !== "undefined" && (window.location.pathname === "/runners" || window.location.pathname === "/runners/")) {
+    return <RunnerPoolScreen />;
   }
   return (
     <main>

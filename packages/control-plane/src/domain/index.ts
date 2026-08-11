@@ -38,7 +38,7 @@ import type {
   TriggerRunInput,
   TriggeredRun,
 } from "./runs.js";
-import type { HeartbeatLease, HeartbeatReply, RunnerIdentity } from "./runners.js";
+import type { HeartbeatLease, HeartbeatReply, RunnerIdentity, RunnerPoolEntry } from "./runners.js";
 import type { ClaimedStepRun, ClaimInput } from "./step-run-claim.js";
 import * as stepRunLogsDomain from "./step-run-logs.js";
 import * as stepRunArtifactsDomain from "./step-run-artifacts.js";
@@ -87,7 +87,7 @@ export {
 } from "./errors.js";
 export { ClaimCapacityError } from "./step-run-claim.js";
 export type { LoginResult } from "./auth.js";
-export type { DesiredState, HeartbeatLease, HeartbeatReply, RunnerIdentity } from "./runners.js";
+export type { DesiredState, HeartbeatLease, HeartbeatReply, RunnerIdentity, RunnerPoolEntry } from "./runners.js";
 export type { ClaimedStepRun, ClaimInput } from "./step-run-claim.js";
 export type {
   ArtifactMetadataInput,
@@ -172,6 +172,7 @@ export interface Domain {
     setPolicy: (principal: Principal, runnerId: Id<"runner">, policy: { slots: number; tags: string[] }) => Promise<void>;
     drain: (principal: Principal, runnerId: Id<"runner">) => Promise<void>;
     revoke: (principal: Principal, runnerId: Id<"runner">) => Promise<void>;
+    list: (principal: Principal) => Promise<RunnerPoolEntry[]>;
   };
   stepRuns: {
     claim: (runner: RunnerIdentity, input: ClaimInput) => Promise<ClaimedStepRun | null>;
@@ -356,6 +357,7 @@ export function createDomain(deps: AppDeps): Domain {
       setPolicy: (principal, runnerId, policy) => runnersDomain.setRunnerPolicy(deps, principal, runnerId, policy),
       drain: (principal, runnerId) => runnersDomain.drainRunner(deps, principal, runnerId),
       revoke: (principal, runnerId) => runnersDomain.revokeRunner(deps, principal, runnerId),
+      list: (principal) => runnersDomain.listRunners(deps, principal),
     },
     stepRuns: {
       claim: (runner, input) => claimDomain.claimStepRun(deps, runner, input),

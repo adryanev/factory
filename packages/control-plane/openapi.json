@@ -1282,6 +1282,57 @@
           "outcome"
         ]
       },
+      "RunnerPoolEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "desiredState": {
+            "type": "string",
+            "enum": [
+              "active",
+              "draining",
+              "revoked"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "slots": {
+            "type": "number"
+          },
+          "protocolVersion": {
+            "type": "number",
+            "nullable": true
+          },
+          "releaseVersion": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastHeartbeatAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "activeLeases": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "desiredState",
+          "tags",
+          "slots",
+          "protocolVersion",
+          "releaseVersion",
+          "lastHeartbeatAt",
+          "activeLeases"
+        ]
+      },
       "LogTailResponse": {
         "type": "object",
         "properties": {
@@ -5514,6 +5565,78 @@
           },
           "409": {
             "description": "Lease no longer valid — cancelled, or superseded by another claim.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runners": {
+      "get": {
+        "summary": "The Runner pool — every registered Runner with its protocol/lease status, for the pool screen (issue #33). Org owner only.",
+        "responses": {
+          "200": {
+            "description": "Ok.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runners": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RunnerPoolEntry"
+                      }
+                    }
+                  },
+                  "required": [
+                    "runners"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an org owner.",
             "content": {
               "application/json": {
                 "schema": {

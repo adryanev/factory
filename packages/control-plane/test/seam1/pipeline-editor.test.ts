@@ -285,4 +285,27 @@ steps:
     expect(rig.gitHost.pullRequests.filter((pr) => pr.head === `factory/editor/${editId}`)).toHaveLength(1);
     expect(rig.gitHost.revocations).toHaveLength(2); // one token per request, each revoked
   });
+
+  it("revokes the minted token when the operation fails mid-flight — teardown runs on the error path too (AC3)", async () => {
+    // The write lands, then the PR create fails with a transient 503 — the
+    // mint happened, the operation failed, and the `finally` still revokes
+    // the exact token that was minted, so no narrow token ever outlives its
+    // operation, success or failure.
+    rig.gitHost.failNextCreates = 1;
+    const response = await openEditorPullRequest(rig, user.cookie, project.id, {
+      repositoryId: hostRepo.id,
+      pipelinePath: ".factory/pipeline.yaml",
+      yaml: VALID_YAML,
+      editId: "edit_midflight",
+    });
+    expect(response.status).toBe(500);
+    const body = (await response.json()) as { code: string };
+    expect(body.code).toBe("internal_error");
+
+    expect(rig.gitHost.minted).toHaveLength(1);
+    expect(rig.gitHost.contents).toHaveLength(1);
+    expect(rig.gitHost.pullRequests).toHaveLength(0);
+    expect(rig.gitHost.revocations).toHaveLength(1);
+    expect(rig.gitHost.revocations[0]!.token).toBe(rig.gitHost.minted[0]!.token);
+  });
 });

@@ -72,10 +72,24 @@ probe: `pnpm --filter @factory/control-plane probe:editor-verified`
 (`packages/control-plane/scripts/probe-editor-verified.ts`) mints the
 editor's token, writes one file through the same `writeFile` path, reads
 the commit's `verification` object back from the Git Data API, and prints
-`verified`/`reason`. **Result at implementation time: not run.** This
-environment has no GitHub App credentials, no installation, and no target
-repository reachable, so the claim still rests on GitHub's documented
-behavior. Run the probe against a real installation to settle it.
+`verified`/`reason`. **Result at issue #36 closing time: still not run.**
+This environment has no GitHub App credentials, no installation, and no
+target repository reachable, so the claim still rests on GitHub's
+documented behavior. Run the probe against a real installation to settle
+it; the command, the required env vars, and the exact `verified`/`reason`
+output are documented in the probe file's header.
+
+### The fragile paths are pinned by backend tests (issue #36)
+
+Issue #36's verification found the editor's route/domain layer carried no
+backend tests. It now does, in `test/seam1/pipeline-editor.test.ts` over
+the seam-1 rig with the fake `GitHost`: the PR lands in the host repo only,
+attribution is author=user / committer=bot, the token is minted with
+exactly the two editor permissions and revoked on success and on a
+mid-flight failure (`failNextCreates`), invalid definitions are rejected
+before any GitHub call, non-members get 403, foreign repositories 404, and
+a retried request with the same `editId` adopts the same PR through both
+422-as-success halves (Contents write and PR create).
 
 ## Consequences
 

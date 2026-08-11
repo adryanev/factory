@@ -8,6 +8,7 @@ import { useState } from "react";
 import { QuestionList } from "./questions/QuestionList";
 import { RunScreen } from "./runs/RunScreen";
 import { PipelineEditor } from "./pipeline-editor/PipelineEditor";
+import { CronSkipsScreen } from "./cron-skips/CronSkipsScreen";
 
 function runRoute(pathname: string): { projectId: string; runId: string } | null {
   const match = pathname.match(/^\/projects\/([^/]+)\/runs\/([^/]+)(?:\/)?$/);
@@ -25,6 +26,11 @@ function pipelineEditorRoute(pathname: string): { projectId: string | null } | n
   return null;
 }
 
+function cronSkipsRoute(pathname: string): { projectId: string } | null {
+  const match = pathname.match(/^\/projects\/([^/]+)\/automation\/cron-skips(?:\/)?$/);
+  return match?.[1] ? { projectId: decodeURIComponent(match[1]) } : null;
+}
+
 export function App(): React.JSX.Element {
   const [waitingQuestionCount, setWaitingQuestionCount] = useState(0);
   const route = typeof window === "undefined" ? null : runRoute(window.location.pathname);
@@ -34,6 +40,10 @@ export function App(): React.JSX.Element {
   const editorRoute = typeof window === "undefined" ? null : pipelineEditorRoute(window.location.pathname);
   if (editorRoute) {
     return <PipelineEditor projectId={editorRoute.projectId} />;
+  }
+  const skipsRoute = typeof window === "undefined" ? null : cronSkipsRoute(window.location.pathname);
+  if (skipsRoute) {
+    return <CronSkipsScreen projectId={skipsRoute.projectId} />;
   }
   return (
     <main>

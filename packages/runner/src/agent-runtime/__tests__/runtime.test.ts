@@ -592,50 +592,61 @@ function tagEmittingProvider(payload: string): AgentProvider {
 }
 
 describe("agent-runtime: agent turn (issue 9)", () => {
-  it("runs the agent in the sandbox, and the single <factory-output> tag comes back validated against the shared union", async () => {
-    const repoDir = await makeTempGitRepo();
-    try {
-      const contract = compileStepOutputContract({
-        outputs: { variants: { type: "array", items: { key: "string", brief: "string" } } },
-      });
-      const deps: TurnRuntimeDeps = {
-        docker: fakeDocker(),
-        dockerEgress: fakeDockerEgress(),
-        hostProcess: createHostProcessControl(),
-        createSandbox: async () => {
-          throw new Error("agent turns use run(), never createSandbox");
-        },
-        agentProviderFor: () =>
-          tagEmittingProvider('{"kind":"done","outputs":{"variants":[{"key":"agent-a","brief":"b"}]}}'),
-      };
-      const runtime = createTurnRuntime(deps);
-      const turn = runtime.startTurn({
-        kind: "agent",
-        prompt: `Plan three variants.\n\n<${FACTORY_OUTPUT_TAG}>`,
-        agent: "fake",
-        outputContract: contract,
-        maxRetries: 0,
-        workingDirectory: repoDir,
-        branch: "run/x/plan/t1-a1",
-        baseRef: "main",
-        runsOn: "host",
-        image: "factory-sandbox",
-        network: "factory-steprun-1",
-      });
+  it(
+    "runs the agent in the sandbox, and the single <factory-output> tag comes back validated against the shared union",
+    // Drives real sandcastle `run()` against a real git repo (issue #37: the
+    // sandcastle contract tests flake at vitest's default 5s timeout when the
+    // full `pnpm -r test` runs at once on a loaded CI runner).
+    { timeout: 20_000 },
+    async () => {
+      const repoDir = await makeTempGitRepo();
+      try {
+        const contract = compileStepOutputContract({
+          outputs: { variants: { type: "array", items: { key: "string", brief: "string" } } },
+        });
+        const deps: TurnRuntimeDeps = {
+          docker: fakeDocker(),
+          dockerEgress: fakeDockerEgress(),
+          hostProcess: createHostProcessControl(),
+          createSandbox: async () => {
+            throw new Error("agent turns use run(), never createSandbox");
+          },
+          agentProviderFor: () =>
+            tagEmittingProvider('{"kind":"done","outputs":{"variants":[{"key":"agent-a","brief":"b"}]}}'),
+        };
+        const runtime = createTurnRuntime(deps);
+        const turn = runtime.startTurn({
+          kind: "agent",
+          prompt: `Plan three variants.\n\n<${FACTORY_OUTPUT_TAG}>`,
+          agent: "fake",
+          outputContract: contract,
+          maxRetries: 0,
+          workingDirectory: repoDir,
+          branch: "run/x/plan/t1-a1",
+          baseRef: "main",
+          runsOn: "host",
+          image: "factory-sandbox",
+          network: "factory-steprun-1",
+        });
 
-      const result = await turn.done;
-      expect(result.output).toEqual({
-        kind: "done",
-        outputs: { variants: [{ key: "agent-a", brief: "b" }] },
-      });
-      expect(result.stdout).toContain(`<${FACTORY_OUTPUT_TAG}>`);
-      expect(result.exitCode).toBe(0);
-    } finally {
-      await rm(repoDir, { recursive: true, force: true });
-    }
-  });
+        const result = await turn.done;
+        expect(result.output).toEqual({
+          kind: "done",
+          outputs: { variants: [{ key: "agent-a", brief: "b" }] },
+        });
+        expect(result.stdout).toContain(`<${FACTORY_OUTPUT_TAG}>`);
+        expect(result.exitCode).toBe(0);
+      } finally {
+        await rm(repoDir, { recursive: true, force: true });
+      }
+    },
+  );
 
-  it("a rejected Output surfaces as OutputInvalidError (never a seam fault), so the executor can report output-invalid", async () => {
+  it(
+    "a rejected Output surfaces as OutputInvalidError (never a seam fault), so the executor can report output-invalid",
+    // Same real-sandcastle budget guard as the sibling test above.
+    { timeout: 20_000 },
+    async () => {
     const repoDir = await makeTempGitRepo();
     try {
       const contract = compileStepOutputContract({ outputs: { summary: { type: "string" } } });
@@ -667,5 +678,6 @@ describe("agent-runtime: agent turn (issue 9)", () => {
     } finally {
       await rm(repoDir, { recursive: true, force: true });
     }
-  });
+    },
+  );
 });

@@ -154,47 +154,70 @@ describe("sandcastle contract: session-capture gate", () => {
     },
   );
 
-  it("tag 'none' silently disables session capture — no capture, no error", async () => {
-    const storage = fakeSessionStorage("none");
-    const repoDir = await makeTempGitRepo();
-    repoDirs.push(repoDir);
+  it(
+    "tag 'none' silently disables session capture — no capture, no error",
+    // Drives real sandcastle `run()` (git worktree + process spawns); under a
+    // concurrently-loaded `pnpm -r run test` (the control-plane seam-1 suite
+    // boots Postgres containers at the same time) a run that takes ~1s here
+    // can stretch past vitest's default 5s timeout on a 4-vCPU CI runner.
+    // Same guard as the idle-timer test below — the budget covers machine
+    // speed variance; no assertion here is wall-clock, so a wider budget
+    // weakens nothing.
+    { timeout: 20_000 },
+    async () => {
+      const storage = fakeSessionStorage("none");
+      const repoDir = await makeTempGitRepo();
+      repoDirs.push(repoDir);
 
-    const result = await run({
-      agent: shellProvider("echo SESSION:sess-none", { captureSessions: true, sessionStorage: storage }),
-      sandbox: noSandbox(),
-      cwd: repoDir,
-      prompt: "run",
-      maxIterations: 1,
-      completionSignal: [],
-      branchStrategy: { type: "head" },
-    });
-    expect(result.stdout).toContain("SESSION:sess-none");
-    // The same provider shape, same captureSessions/sessionStorage opt-in —
-    // only the tag changed, and capture silently did not happen.
-    expect(storage.captures).toEqual([]);
-  });
+      const result = await run({
+        agent: shellProvider("echo SESSION:sess-none", { captureSessions: true, sessionStorage: storage }),
+        sandbox: noSandbox(),
+        cwd: repoDir,
+        prompt: "run",
+        maxIterations: 1,
+        completionSignal: [],
+        branchStrategy: { type: "head" },
+      });
+      expect(result.stdout).toContain("SESSION:sess-none");
+      // The same provider shape, same captureSessions/sessionStorage opt-in —
+      // only the tag changed, and capture silently did not happen.
+      expect(storage.captures).toEqual([]);
+    },
+  );
 
-  it("a provider that never opts in does not capture, whatever its tag", async () => {
-    const storage = fakeSessionStorage("no-opt-in");
-    const repoDir = await makeTempGitRepo();
-    repoDirs.push(repoDir);
+  it(
+    "a provider that never opts in does not capture, whatever its tag",
+    // Same real-sandcastle budget guard as the sibling tests above.
+    { timeout: 20_000 },
+    async () => {
+      const storage = fakeSessionStorage("no-opt-in");
+      const repoDir = await makeTempGitRepo();
+      repoDirs.push(repoDir);
 
-    const result = await run({
-      agent: shellProvider("echo SESSION:sess-optout", { captureSessions: false, sessionStorage: storage }),
-      sandbox: HOST_PROVIDER,
-      cwd: repoDir,
-      prompt: "run",
-      maxIterations: 1,
-      completionSignal: [],
-      branchStrategy: { type: "head" },
-    });
-    expect(result.stdout).toContain("SESSION:sess-optout");
-    expect(storage.captures).toEqual([]);
-  });
+      const result = await run({
+        agent: shellProvider("echo SESSION:sess-optout", { captureSessions: false, sessionStorage: storage }),
+        sandbox: HOST_PROVIDER,
+        cwd: repoDir,
+        prompt: "run",
+        maxIterations: 1,
+        completionSignal: [],
+        branchStrategy: { type: "head" },
+      });
+      expect(result.stdout).toContain("SESSION:sess-optout");
+      expect(storage.captures).toEqual([]);
+    },
+  );
 });
 
 describe("sandcastle contract: worktree path verbatim", () => {
-  it("the branch-strategy worktree path is passed to the provider verbatim and files land exactly there", async () => {
+  it(
+    "the branch-strategy worktree path is passed to the provider verbatim and files land exactly there",
+    // The branch-strategy path does real `git worktree add` — the heaviest
+    // startup of the three behaviors, and the slowest of the unguarded tests
+    // (~1.5s here, 3-5x slower on a loaded 4-vCPU CI runner). Same budget
+    // guard as the idle-timer test below.
+    { timeout: 20_000 },
+    async () => {
     const seenPaths: string[] = [];
     const createHandle = (HOST_PROVIDER as unknown as {
       create: (options: { worktreePath: string; hostRepoPath: string; mounts: unknown[]; env: Record<string, string> }) => Promise<import("@ai-hero/sandcastle").BindMountSandboxHandle>;
@@ -232,7 +255,8 @@ describe("sandcastle contract: worktree path verbatim", () => {
     // The run reports the same branch and left the worktree preserved (dirty).
     expect(result.branch).toBe(branch);
     expect(result.preservedWorktreePath).toBe(worktreePath);
-  });
+    },
+  );
 });
 
 describe("sandcastle contract: idle timer resets on each output", () => {

@@ -251,6 +251,31 @@ describe("RunScreen", () => {
     resolveCancel?.({ ...initial.run, cancelRequestedAt: "2026-08-04T08:00:00.000Z" });
   });
 
+  it("renders the StepRun's finalPrompt — what was actually sent to the agent — through the Info tab", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      stepRun("implement", null, "succeeded", {
+        finalPrompt: "Plan three variants.\n\n<factory-output>",
+      }),
+    ];
+    render(<RunScreen projectId={PROJECT_ID} runId={RUN_ID} initialData={detail(runs, false)} />);
+
+    await user.click(screen.getByRole("tab", { name: "Info" }));
+
+    expect(screen.getByTestId("final-prompt")).toHaveTextContent("Plan three variants.");
+    expect(screen.getByTestId("final-prompt")).toHaveTextContent("<factory-output>");
+  });
+
+  it("shows no Final prompt row for a run: StepRun — nothing was sent to any agent", async () => {
+    const user = userEvent.setup();
+    render(<RunScreen projectId={PROJECT_ID} runId={RUN_ID} initialData={detail([stepRun("plan", null, "succeeded")], false)} />);
+
+    await user.click(screen.getByRole("tab", { name: "Info" }));
+
+    expect(screen.queryByTestId("final-prompt")).not.toBeInTheDocument();
+    expect(screen.queryByText("Final prompt")).not.toBeInTheDocument();
+  });
+
   it("renders the focused StepRun's cost — total and per-attempt breakdown — through the Info tab", async () => {
     const user = userEvent.setup();
     const runs = [stepRun("plan", null, "failed"), stepRun("pick", null, "ready")];

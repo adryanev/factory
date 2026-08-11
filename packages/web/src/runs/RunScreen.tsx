@@ -564,6 +564,12 @@ function InfoPanel({
       <dt>Reason</dt>
       <dd>{stepRun.reason ?? "No reason recorded."}</dd>
       {stepRun.prUrl ? <><dt>Pull request</dt><dd><a href={stepRun.prUrl}>{stepRun.prNumber ? `#${stepRun.prNumber}` : stepRun.prUrl}</a></dd></> : null}
+      {stepRun.finalPrompt !== null ? (
+        <>
+          <dt>Final prompt</dt>
+          <dd><pre className="data-view" data-testid="final-prompt">{stepRun.finalPrompt}</pre></dd>
+        </>
+      ) : null}
       {cost ? (
         <>
           <dt>Cost</dt>

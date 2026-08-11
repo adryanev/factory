@@ -31,9 +31,10 @@ function urlOf(input: RequestInfo | URL): string {
 }
 
 function mockFetchPages(pages: unknown[][]): ReturnType<typeof vi.fn> {
-  const fetchImpl = vi.fn(async () => {
+  const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+    const url = urlOf(input);
     const calls = fetchImpl.mock.calls.filter(([callInput]) => urlOf(callInput).startsWith("/projects/"));
-    const index = Math.min(calls.length - 1, pages.length - 1);
+    const index = url.startsWith("/projects/") ? Math.min(calls.length - 1, pages.length - 1) : 0;
     const skips = pages[index] ?? [];
     const nextCursor = index < pages.length - 1 ? (skips[skips.length - 1] as { id: string }).id : null;
     return {

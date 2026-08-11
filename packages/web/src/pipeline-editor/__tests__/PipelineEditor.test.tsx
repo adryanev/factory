@@ -41,7 +41,10 @@ describe("PipelineEditor", () => {
   it("locks the UI scope to the Project's host repositories and shows a valid YAML preview with no draft controls", async () => {
     render(<PipelineEditor projectId={PROJECT_ID} />);
 
+    // The select itself renders before the repo fetch lands — wait for the
+    // loaded state, not the always-present control.
     const hostSelect = await screen.findByLabelText("Host repository");
+    await screen.findByRole("option", { name: "acme/backend" });
     const options = within(hostSelect).getAllByRole("option");
     expect(options.map((option) => option.textContent)).toEqual(["acme/backend"]);
 
@@ -56,10 +59,10 @@ describe("PipelineEditor", () => {
   it("shows the project picker when opened without a project id", async () => {
     render(<PipelineEditor projectId={null} />);
     const picker = await screen.findByTestId("project-picker");
-    expect(within(picker).getByRole("link", { name: "checkout" })).toHaveAttribute(
-      "href",
-      `/projects/${PROJECT_ID}/pipeline-editor`,
-    );
+    // The list element renders before projects load — wait for a project link.
+    const link = await screen.findByRole("link", { name: "checkout" });
+    expect(link).toHaveAttribute("href", `/projects/${PROJECT_ID}/pipeline-editor`);
+    expect(within(picker).getByRole("link", { name: "checkout" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open PR" })).not.toBeInTheDocument();
   });
 
@@ -67,6 +70,7 @@ describe("PipelineEditor", () => {
     const user = userEvent.setup();
     render(<PipelineEditor projectId={PROJECT_ID} />);
     await screen.findByLabelText("Host repository");
+    await screen.findByRole("option", { name: "acme/backend" });
 
     await user.click(screen.getByRole("button", { name: "Add step" }));
     await user.type(screen.getByLabelText("step 2 key"), "test");
@@ -86,6 +90,7 @@ describe("PipelineEditor", () => {
     const user = userEvent.setup();
     render(<PipelineEditor projectId={PROJECT_ID} />);
     await screen.findByLabelText("Host repository");
+    await screen.findByRole("option", { name: "acme/backend" });
 
     await user.click(screen.getByRole("button", { name: "Open PR" }));
 
@@ -112,6 +117,7 @@ describe("PipelineEditor", () => {
     vi.mocked(openEditorPullRequest).mockRejectedValue(new Error("github_identity_required: no GitHub identity"));
     render(<PipelineEditor projectId={PROJECT_ID} />);
     await screen.findByLabelText("Host repository");
+    await screen.findByRole("option", { name: "acme/backend" });
 
     await user.click(screen.getByRole("button", { name: "Open PR" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("github_identity_required");

@@ -139,7 +139,7 @@ Alamat `users.noreply.github.com` dipilih karena selalu terpetakan ke akun untuk
 Dua syarat dinyatakan supaya ini bukan janji kosong:
 
 - Kontribusi baru terhitung setelah commit **mendarat di default branch**. PR editor yang tidak pernah di-merge tidak muncul di grafik siapa pun, dan itu benar.
-- Commit dibuat lewat **Git Data / Contents API**, bukan clone lokal — editor menulis satu file YAML, jadi tidak ada alasan menyiapkan worktree. Klaim yang **belum diverifikasi ulang di sesi ini**: commit lewat API dengan installation token ditandatangani GitHub dan muncul `Verified`. Cek saat implementasi.
+- Commit dibuat lewat **Git Data / Contents API**, bukan clone lokal — editor menulis satu file YAML, jadi tidak ada alasan menyiapkan worktree. Klaim bahwa commit lewat API dengan installation token muncul `Verified` sudah **diprobe 2026-08-12 (#42) dan terbukti salah**: GitHub hanya menandatangani commit API yang tidak menyebut `author` maupun `committer`. Karena atribusi ke user adalah inti fitur ini, commit editor unsigned (ADR-0004).
 
 Dua hal jatuh gratis: **`member` boleh** (ticket 11 sudah menolak peran `maintainer` karena memisahkan "menulis Pipeline" dari "menjalankan Pipeline" tidak berarti untuk tim internal), dan validasi PR editor lewat jalur PR check ticket 08 apa adanya.
 

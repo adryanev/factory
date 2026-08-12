@@ -25,10 +25,17 @@
  * RESULT (documented at implementation time, issue #20): RUN 2026-08-12
  * against app factory-localhost (id 4557244), installation 153069158, repo
  * adryanev/factory. The commit was created, but the claim did NOT hold:
- * verification.verified = false, reason "unsigned". GitHub signs API-created
- * commits only when the committer identity maps to a verified GitHub user;
- * the editor's committer factory[bot]@users.noreply.github.com maps to no
- * account, so the commit surfaces as unsigned.
+ * verification.verified = false, reason "unsigned".
+ *
+ * Issue #42 followed that up by probing every identity shape the Contents
+ * API accepts, on the same installation. All four that name an identity came
+ * back unsigned: the editor's factory[bot] address, the App's own bot
+ * account with and without its numeric id prefix, and author-only with the
+ * committer omitted. Only the request that names neither author nor
+ * committer is signed — GitHub then writes author = the App's bot and
+ * committer = GitHub <noreply@github.com>. Signature and user attribution
+ * are therefore mutually exclusive here, and issue #20 chooses attribution:
+ * editor commits are unsigned by decision (ADR-0004).
  *
  * The run also turned up three bugs, each now fixed and covered by test:
  * the Contents API does not create the branch it is handed (#39), a write

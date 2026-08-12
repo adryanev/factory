@@ -229,7 +229,16 @@ flags in production form)
 - GitHub enterprise cloud docs: commit signing with GitHub Apps (community discussion #50055)
 - API reference specifies verification object structure with verified boolean
 
-**Verdict:** **CONFIRMED** (installation token commits are signed by GitHub and marked verified)
+**Verdict:** ~~**CONFIRMED**~~ → **REFUTED by probe (2026-08-12, issue #42).** This
+recon was documentation-only and read the doc too broadly. GitHub signs an
+API-created commit only when the request names **neither** `author` nor
+`committer`; it then writes the commit as the App's bot with committer
+`GitHub <noreply@github.com>`. Every request that names an identity — the
+editor's `factory[bot]`, the App's own bot account with or without its
+numeric id prefix, author-only with the committer omitted — comes back
+`verified: false`, reason `unsigned`. Since user attribution is the point of
+issue #20, editor commits are unsigned by decision. See
+`docs/adr/0004-pipeline-editor.md`.
 
 ---
 
@@ -242,7 +251,7 @@ flags in production form)
 | Drizzle partial index | No | Use `.where()` and `.nullsNotDistinct()` natively; no raw-SQL fallback |
 | Zod→OpenAPI | No | Pick zod-openapi or @asteasolutions/zod-to-openapi; both production-ready |
 | testcontainers | No | Test on Node 26 early if paranoid; minimum met |
-| GitHub signatures | No | Proceed; confirmed for installation tokens |
+| GitHub signatures | No | Refuted by probe (#42): a commit that names an author/committer is unsigned. Attribution wins; editor commits are unsigned |
 
 ---
 

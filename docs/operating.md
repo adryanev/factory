@@ -249,3 +249,10 @@ impossible:
   proxy. HTTPS is still mandatory for the webhook endpoint.
 - **Runner on Windows.** There is no Windows path.
 - **Migration rollback.** Forward only; backward is restore-from-backup.
+- **Branch protection that requires signed commits**, on a repository the
+  visual Pipeline editor writes to. GitHub signs an API-created commit only
+  when the request names no author and no committer at all; the editor names
+  both, because attributing the commit to the clicking user is the point of
+  the feature (ADR-0004). Editor commits are therefore unsigned and such a
+  rule rejects them. Runner commits are made by local `git` with no signing
+  key configured, so they are unsigned as well.

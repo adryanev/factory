@@ -193,6 +193,51 @@ describe("the visual Pipeline editor (issue #20)", () => {
     expect(after.rows[0]!.n).toBe(before.rows[0]!.n);
   });
 
+  it("edits a pipeline file that already exists: the write carries the blob sha it replaces (issue #41)", async () => {
+    // The editor's ordinary case, and the one the #20 probe never exercised —
+    // it wrote a fresh path, where the Contents API asks for no sha.
+    const editId = "edit_existing1";
+    const branch = `factory/editor/${editId}`;
+    rig.gitHost.registerFileSha(
+      { owner: hostRepo.owner, name: hostRepo.name },
+      branch,
+      ".factory/pipeline.yaml",
+      "blob-sha-of-the-file-on-the-branch",
+    );
+
+    const response = await openEditorPullRequest(rig, user.cookie, project.id, {
+      repositoryId: hostRepo.id,
+      pipelinePath: ".factory/pipeline.yaml",
+      yaml: VALID_YAML,
+      editId,
+    });
+
+    expect(response.status).toBe(201);
+    // The sha was read from the branch the editor had just cut, not from base.
+    expect(rig.gitHost.shaReads).toContainEqual({
+      repo: { owner: hostRepo.owner, name: hostRepo.name },
+      path: ".factory/pipeline.yaml",
+      ref: branch,
+    });
+    const write = rig.gitHost.contents.find((entry) => entry.branch === branch);
+    expect(write?.replacedSha).toBe("blob-sha-of-the-file-on-the-branch");
+  });
+
+  it("creates a pipeline file that does not exist yet: the write carries no sha (issue #41)", async () => {
+    const editId = "edit_newfile1";
+    const response = await openEditorPullRequest(rig, user.cookie, project.id, {
+      repositoryId: hostRepo.id,
+      pipelinePath: ".factory/brand-new.yaml",
+      yaml: VALID_YAML,
+      editId,
+    });
+
+    expect(response.status).toBe(201);
+    const write = rig.gitHost.contents.find((entry) => entry.branch === `factory/editor/${editId}`);
+    expect(write).toBeDefined();
+    expect(write?.replacedSha).toBeUndefined();
+  });
+
   it("lists the host-repo candidates for the editor UI, scoped to the Project (AC1)", async () => {
     const otherRepo = await createRepository(rig, project.id, "other-repo");
     const response = await rig.fetchWithCsrf(`${rig.baseUrl}/projects/${project.id}/repositories`, {
@@ -279,9 +324,10 @@ steps:
     expect(first.status).toBe(201);
     const firstBody = (await first.json()) as { prNumber: number; commitSha: string };
 
-    // The second request re-writes the same branch: the Contents API answers
-    // 422 (the fake mirrors GitHub), the create answers 422, and the open PR
-    // is adopted — one PR for one edit.
+    // The second request meets the branch its own first attempt cut, reads
+    // the sha that attempt wrote, and re-writes. What must not double is the
+    // PR: the create answers 422 and the open PR is adopted — one PR for one
+    // edit, which is what the editId promises.
     const second = await openEditorPullRequest(rig, user.cookie, project.id, {
       repositoryId: hostRepo.id,
       pipelinePath: ".factory/pipeline.yaml",
@@ -291,8 +337,12 @@ steps:
     expect(second.status).toBe(201);
     const secondBody = (await second.json()) as { prNumber: number; commitSha: string };
     expect(secondBody.prNumber).toBe(firstBody.prNumber);
-    expect(rig.gitHost.contents.filter((w) => w.branch === `factory/editor/${editId}`)).toHaveLength(1);
     expect(rig.gitHost.pullRequests.filter((pr) => pr.head === `factory/editor/${editId}`)).toHaveLength(1);
+    // The retry's write is a valid one: it carried the blob sha the first
+    // write left behind, rather than being refused for want of it.
+    const writes = rig.gitHost.contents.filter((w) => w.branch === `factory/editor/${editId}`);
+    expect(writes).toHaveLength(2);
+    expect(writes[1]!.replacedSha).toMatch(/^blob-sha-/);
     expect(rig.gitHost.revocations).toHaveLength(2); // one token per request, each revoked
   });
 

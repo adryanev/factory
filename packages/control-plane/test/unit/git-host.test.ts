@@ -95,6 +95,79 @@ describe("createBranch", () => {
   });
 });
 
+describe("readFileSha", () => {
+  const repo = { owner: "acme", name: "backend" };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns the blob sha of the file on that ref", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ type: "file", sha: "c".repeat(40) }));
+
+    await expect(createGithubHost().readFileSha(repo, ".factory/pipeline.yaml", "factory/editor/e1", "t")).resolves.toBe(
+      "c".repeat(40),
+    );
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.github.com/repos/acme/backend/contents/.factory/pipeline.yaml?ref=factory%2Feditor%2Fe1",
+    );
+  });
+
+  it("reads a missing file as null — that is the new-file case, not a failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 404 }));
+
+    await expect(
+      createGithubHost().readFileSha(repo, ".factory/new.yaml", "factory/editor/e1", "t"),
+    ).resolves.toBeNull();
+  });
+
+  it("surfaces any other failure instead of reporting the file absent", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 403 }));
+
+    await expect(
+      createGithubHost().readFileSha(repo, ".factory/pipeline.yaml", "factory/editor/e1", "t"),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe("writeFile", () => {
+  const repo = { owner: "acme", name: "backend" };
+  const input = {
+    path: ".factory/pipeline.yaml",
+    content: "steps: []",
+    branch: "factory/editor/e1",
+    message: "factory: update",
+    author: { name: "someone", email: "someone@users.noreply.github.com" },
+    committer: { name: "factory[bot]", email: "factory[bot]@users.noreply.github.com" },
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("carries the sha of the file it replaces", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ commit: { sha: "d".repeat(40) } }));
+
+    await createGithubHost().writeFile(repo, { ...input, sha: "e".repeat(40) }, "t");
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).sha).toBe("e".repeat(40));
+  });
+
+  it("omits sha entirely for a new file — the Contents API rejects one for a path that holds nothing", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ commit: { sha: "d".repeat(40) } }));
+
+    await createGithubHost().writeFile(repo, input, "t");
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).not.toHaveProperty("sha");
+  });
+});
+
 describe("listRefsByPrefix", () => {
   afterEach(() => {
     vi.restoreAllMocks();

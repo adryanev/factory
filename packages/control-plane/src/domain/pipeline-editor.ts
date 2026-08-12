@@ -194,6 +194,13 @@ export async function openEditorPullRequest(
     // lands on its own branch and carries on.
     await deps.gitHost.createBranch(repo, branch, base, token.token);
 
+    // The Contents API replaces a file only when handed the blob SHA it is
+    // replacing (issue #41), and the editor's usual case is exactly that: a
+    // pipeline file that already exists on the branch just cut from base.
+    // Reading it here — after the cut — means a retried request sees what
+    // its own earlier attempt wrote. `null` is the new-file case.
+    const existingSha = await deps.gitHost.readFileSha(repo, input.pipelinePath, branch, token.token);
+
     let commitSha: string;
     try {
       const written = await deps.gitHost.writeFile(repo, {
@@ -203,13 +210,14 @@ export async function openEditorPullRequest(
         message: `factory: update ${input.pipelinePath} (visual editor)`,
         author,
         committer: EDITOR_COMMITTER,
+        ...(existingSha === null ? {} : { sha: existingSha }),
       }, token.token);
       commitSha = written.sha;
     } catch (error) {
       if (!(error instanceof ContentConflictError)) throw error;
-      // The branch already exists — a retried request (the branch name is
-      // the idempotency key). Proceed to find-or-create: the PR below will
-      // 422 and be adopted, exactly the issue #17 rule.
+      // The file changed between the SHA read and the write. Proceed to
+      // find-or-create: the branch name is the idempotency key, so the PR
+      // below is adopted rather than duplicated — the issue #17 rule.
       commitSha = "";
     }
 

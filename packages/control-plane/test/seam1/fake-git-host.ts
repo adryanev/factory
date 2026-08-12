@@ -70,7 +70,10 @@ export interface ContentsWriteRecord {
   author: { name: string; email: string };
   committer: { name: string; email: string };
   token: string;
+  /** The commit sha the write produced. */
   sha: string;
+  /** The blob sha the write carried to replace an existing file, or undefined for a new file (issue #41). */
+  replacedSha: string | undefined;
 }
 
 export interface RevocationRecord {
@@ -111,6 +114,10 @@ export interface FakeGitHost extends GitHost {
   revocations: RevocationRecord[];
   /** Every `createBranch` call, in order — proves the editor cuts its branch before the first write (issue #39). */
   createdBranches: { repo: RepoRef; branch: string; base: string }[];
+  /** Every `readFileSha` call, in order — proves the editor reads the blob sha it must replace (issue #41). */
+  shaReads: { repo: RepoRef; path: string; ref: string }[];
+  /** Registers a file as already present at `path` on `ref` with blob sha `sha` — the "editing a pipeline that exists" fixture (issue #41). */
+  registerFileSha(repo: RepoRef, ref: string, path: string, sha: string): void;
   /** Every `listRefsByPrefix` call, in order — the retention sweep's ref-listing half. */
   listedRefs: { repo: RepoRef; prefix: string }[];
   /** Every `deleteRef` call, in order — the retention sweep's branch-deletion half. */
@@ -135,8 +142,8 @@ export function createFakeGitHost(): FakeGitHost {
   const refs = new Map<string, string>(); // "owner/name@ref" -> sha
   const files = new Map<string, string>(); // "owner/name@sha:path" -> content
   const openPrs = new Map<string, PullRequestRecord>(); // "owner/name|head|base" -> pr
-  const writtenBranches = new Set<string>(); // "owner/name|branch" -> has a Contents-API write (issue #20's 422-as-success signal)
   const existingBranches = new Set<string>(); // "owner/name|branch" -> the branch was cut (issue #39: the Contents API never cuts one)
+  const fileShas = new Map<string, string>(); // "owner/name|branch|path" -> the file's current blob sha (issue #41: a write must carry it)
   let mintCount = 0;
   let prCounter = 0;
   let writeCounter = 0;
@@ -150,6 +157,7 @@ export function createFakeGitHost(): FakeGitHost {
     contents: [],
     revocations: [],
     createdBranches: [],
+    shaReads: [],
     listedRefs: [],
     deletedRefs: [],
     failNextMints: 0,
@@ -175,8 +183,9 @@ export function createFakeGitHost(): FakeGitHost {
       refs.clear();
       files.clear();
       openPrs.clear();
-      writtenBranches.clear();
       existingBranches.clear();
+      fileShas.clear();
+      this.shaReads.length = 0;
     },
 
     registerRef(repo, ref, sha) {
@@ -184,6 +193,9 @@ export function createFakeGitHost(): FakeGitHost {
     },
     registerFile(repo, sha, path, content) {
       files.set(`${repoKey(repo)}@${sha}:${path}`, content);
+    },
+    registerFileSha(repo, ref, path, sha) {
+      fileShas.set(`${repoKey(repo)}|${ref}|${path}`, sha);
     },
     registerOpenPullRequest(repo, head, base, pr) {
       prCounter += 1;
@@ -295,6 +307,10 @@ export function createFakeGitHost(): FakeGitHost {
       this.createdBranches.push({ repo, branch, base });
       existingBranches.add(`${repoKey(repo)}|${branch}`);
     },
+    async readFileSha(repo, path, ref) {
+      this.shaReads.push({ repo, path, ref });
+      return fileShas.get(`${repoKey(repo)}|${ref}|${path}`) ?? null;
+    },
     async writeFile(repo, input, token) {
       const branchKey = `${repoKey(repo)}|${input.branch}`;
       // The Contents API writes to a branch, it never cuts one: a write to a
@@ -304,16 +320,18 @@ export function createFakeGitHost(): FakeGitHost {
       if (!existingBranches.has(branchKey)) {
         throw new GithubRequestError(`github content write failed: 404`, 404, null);
       }
-      // A branch that already has a Contents-API write answers 422, exactly
-      // like GitHub ("sha wasn't supplied") — the editor treats that as
-      // success-by-adoption and proceeds to find-or-create its PR.
-      if (writtenBranches.has(branchKey)) {
+      // GitHub refuses a write over a file that already exists unless it is
+      // handed that file's current blob sha, and refuses a stale one
+      // ("sha wasn't supplied" / "does not match") — issue #41.
+      const fileKey = `${branchKey}|${input.path}`;
+      const currentSha = fileShas.get(fileKey);
+      if (currentSha !== undefined && input.sha !== currentSha) {
         throw new ContentConflictError(repo, input.branch, "sha wasn't supplied");
       }
-      writtenBranches.add(branchKey);
       writeCounter += 1;
       const sha = `content-sha-${writeCounter}`;
-      this.contents.push({ repo, ...input, token, sha });
+      fileShas.set(fileKey, `blob-sha-${writeCounter}`);
+      this.contents.push({ repo, ...input, token, sha, replacedSha: input.sha });
       return { sha };
     },
     async revokeInstallationToken(token) {

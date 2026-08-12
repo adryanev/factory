@@ -100,12 +100,13 @@ export class PullRequestConflictError extends Error {
 }
 
 /**
- * Thrown by `writeFile` on GitHub's 422 — the branch (or the path, in a
- * conflicting shape) already exists, and a Contents API write without the
- * current file's `sha` is refused. The editor treats it the same way issue
- * #17 treats a PR-create 422: as success-by-adoption, because the branch
- * name **is** the editor's idempotency key — a retried request re-runs
- * find-or-create and adopts whatever its branch already produced.
+ * Thrown by `writeFile` on GitHub's 422 — the write carried no usable `sha`
+ * for the file it replaces (issue #41: the editor reads the SHA first, so
+ * this is the narrow window where the file changed between that read and the
+ * write). The editor treats it the same way issue #17 treats a PR-create
+ * 422: as success-by-adoption, because the branch name **is** the editor's
+ * idempotency key — a retried request re-runs find-or-create and adopts
+ * whatever its branch already produced.
  */
 export class ContentConflictError extends Error {
   constructor(repo: RepoRef, branch: string, detail: string) {
@@ -179,17 +180,6 @@ export interface GitHost {
   /** Posts a Commit Status to a commit SHA — the checks-area link back to the Run page (issue #17, AC7). Checks API rejected by design. */
   postCommitStatus(repo: RepoRef, sha: string, status: CommitStatusInput, token: string): Promise<void>;
   /**
-   * The editor's single write (issue #20): writes one file through the
-   * Contents API — blob, tree, commit, and ref in one call, no local clone
-   * (ticket 27: "editor menulis satu file YAML, jadi tidak ada alasan
-   * menyiapkan worktree"). The commit's `author` and `committer` are
-   * distinct: git separates author from committer, GitHub attributes
-   * contributions to the author, so the author is the clicking User (via
-   * `users.noreply.github.com`) while the committer is the bot identity.
-   * Throws {@link ContentConflictError} on 422 — the branch already exists,
-   * which is the editor's retry-as-adoption signal.
-   */
-  /**
    * Cuts `branch` from the tip of `base` through the Git Data API. The
    * Contents API does not create the branch it is handed — a write to a
    * branch that does not exist is a 404 (verified against the API on
@@ -200,7 +190,27 @@ export interface GitHost {
    * an existing ref.
    */
   createBranch(repo: RepoRef, branch: string, base: string, token: string): Promise<void>;
-
+  /**
+   * The blob SHA of `path` on `ref`, or `null` when no file is there. The
+   * Contents API refuses a write over an existing file unless it is handed
+   * that SHA, so the editor reads it before writing; `null` is the
+   * new-file case, where the write must omit `sha` instead.
+   */
+  readFileSha(repo: RepoRef, path: string, ref: string, token: string): Promise<string | null>;
+  /**
+   * The editor's single write (issue #20): writes one file through the
+   * Contents API — blob, tree, commit, and ref in one call, no local clone
+   * (ticket 27: "editor menulis satu file YAML, jadi tidak ada alasan
+   * menyiapkan worktree"). The commit's `author` and `committer` are
+   * distinct: git separates author from committer, GitHub attributes
+   * contributions to the author, so the author is the clicking User (via
+   * `users.noreply.github.com`) while the committer is the bot identity.
+   *
+   * `sha` is the blob SHA of the file this write replaces, from
+   * {@link GitHost.readFileSha}; it is omitted only when the path holds no
+   * file yet. Throws {@link ContentConflictError} on 422 — a write GitHub
+   * refused for want of a usable `sha`.
+   */
   writeFile(
     repo: RepoRef,
     input: {
@@ -210,6 +220,7 @@ export interface GitHost {
       message: string;
       author: { name: string; email: string };
       committer: { name: string; email: string };
+      sha?: string;
     },
     token: string,
   ): Promise<{ sha: string }>;
@@ -488,6 +499,32 @@ export function createGithubHost(config?: GithubAppConfig): GitHost {
       }
     },
 
+    async readFileSha(repo, path, ref, token) {
+      const response = await fetch(
+        `https://api.github.com/repos/${repo.owner}/${repo.name}/contents/${path}?ref=${encodeURIComponent(ref)}`,
+        { headers: { ...GITHUB_ACCEPT, authorization: `Bearer ${token}` } },
+      );
+      // 404 = no file at that path on that ref. That is the new-file case,
+      // an expected outcome, so it reads as null rather than throwing.
+      if (response.status === 404) {
+        return null;
+      }
+      if (!response.ok) {
+        throw new GithubRequestError(
+          `github content sha read failed: ${response.status}`,
+          response.status,
+          retryAfterFrom(response),
+        );
+      }
+      const body = (await response.json()) as { sha?: string };
+      if (body.sha === undefined) {
+        // A directory answers with an array, which carries no `sha` — the
+        // caller asked for a file path and got something it cannot replace.
+        throw new Error(`github content sha read returned no sha for ${path}`);
+      }
+      return body.sha;
+    },
+
     async writeFile(repo, input, token) {
       const response = await fetch(
         `https://api.github.com/repos/${repo.owner}/${repo.name}/contents/${input.path}`,
@@ -500,15 +537,19 @@ export function createGithubHost(config?: GithubAppConfig): GitHost {
             branch: input.branch,
             author: input.author,
             committer: input.committer,
+            // Required by the Contents API when the path already holds a
+            // file, and rejected when it does not — so it rides only when
+            // the caller read one (issue #41).
+            ...(input.sha === undefined ? {} : { sha: input.sha }),
           }),
         },
       );
       if (response.status === 422) {
-        // 422 = the branch already exists (a retried request — the editor's
-        // branch name is its idempotency key) or the path is in a conflicting
-        // shape. Either way the caller treats it as success-by-adoption: it
-        // proceeds to find-or-create the PR for the branch, exactly the
-        // issue #17 rule for a 422 on createPullRequest.
+        // 422 = GitHub refused the write for want of a usable `sha`. The
+        // caller read one first, so this is the file changing under it; it
+        // treats the 422 as success-by-adoption and proceeds to
+        // find-or-create the PR for the branch, exactly the issue #17 rule
+        // for a 422 on createPullRequest.
         const detail = await response.text();
         throw new ContentConflictError(repo, input.branch, detail);
       }

@@ -15,6 +15,7 @@
  */
 import {
   ContentConflictError,
+  GithubRequestError,
   PullRequestConflictError,
   RefNotFoundError,
   type CommitStatusInput,
@@ -108,6 +109,8 @@ export interface FakeGitHost extends GitHost {
   contents: ContentsWriteRecord[];
   /** Every installation-token revocation, in order (issue #20, AC3) — assert the token is torn down after the operation. */
   revocations: RevocationRecord[];
+  /** Every `createBranch` call, in order — proves the editor cuts its branch before the first write (issue #39). */
+  createdBranches: { repo: RepoRef; branch: string; base: string }[];
   /** Every `listRefsByPrefix` call, in order — the retention sweep's ref-listing half. */
   listedRefs: { repo: RepoRef; prefix: string }[];
   /** Every `deleteRef` call, in order — the retention sweep's branch-deletion half. */
@@ -133,6 +136,7 @@ export function createFakeGitHost(): FakeGitHost {
   const files = new Map<string, string>(); // "owner/name@sha:path" -> content
   const openPrs = new Map<string, PullRequestRecord>(); // "owner/name|head|base" -> pr
   const writtenBranches = new Set<string>(); // "owner/name|branch" -> has a Contents-API write (issue #20's 422-as-success signal)
+  const existingBranches = new Set<string>(); // "owner/name|branch" -> the branch was cut (issue #39: the Contents API never cuts one)
   let mintCount = 0;
   let prCounter = 0;
   let writeCounter = 0;
@@ -145,6 +149,7 @@ export function createFakeGitHost(): FakeGitHost {
     finds: [],
     contents: [],
     revocations: [],
+    createdBranches: [],
     listedRefs: [],
     deletedRefs: [],
     failNextMints: 0,
@@ -160,6 +165,7 @@ export function createFakeGitHost(): FakeGitHost {
       this.finds.length = 0;
       this.contents.length = 0;
       this.revocations.length = 0;
+      this.createdBranches.length = 0;
       this.listedRefs.length = 0;
       this.deletedRefs.length = 0;
       this.failNextMints = 0;
@@ -170,6 +176,7 @@ export function createFakeGitHost(): FakeGitHost {
       files.clear();
       openPrs.clear();
       writtenBranches.clear();
+      existingBranches.clear();
     },
 
     registerRef(repo, ref, sha) {
@@ -282,11 +289,24 @@ export function createFakeGitHost(): FakeGitHost {
       }
       this.statuses.push({ repo, sha, status, token });
     },
+    async createBranch(repo, branch, base) {
+      // Cutting a branch that already exists is success on the real host
+      // (422 "Reference already exists"), so the fake records and returns.
+      this.createdBranches.push({ repo, branch, base });
+      existingBranches.add(`${repoKey(repo)}|${branch}`);
+    },
     async writeFile(repo, input, token) {
+      const branchKey = `${repoKey(repo)}|${input.branch}`;
+      // The Contents API writes to a branch, it never cuts one: a write to a
+      // branch that does not exist is a 404 (issue #39, verified against the
+      // API). The fake holds the same rule, so a caller that writes before it
+      // cuts fails here instead of only in production.
+      if (!existingBranches.has(branchKey)) {
+        throw new GithubRequestError(`github content write failed: 404`, 404, null);
+      }
       // A branch that already has a Contents-API write answers 422, exactly
       // like GitHub ("sha wasn't supplied") — the editor treats that as
       // success-by-adoption and proceeds to find-or-create its PR.
-      const branchKey = `${repoKey(repo)}|${input.branch}`;
       if (writtenBranches.has(branchKey)) {
         throw new ContentConflictError(repo, input.branch, "sha wasn't supplied");
       }

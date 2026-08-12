@@ -188,6 +188,12 @@ export async function openEditorPullRequest(
 
   const token = await deps.gitHost.mintInstallationToken(repo, installation.installationId, EDITOR_WRITE_PERMISSIONS);
   try {
+    // The Contents API writes to a branch, it does not create one: a write to
+    // a branch that does not exist yet is a 404 (issue #39). Cut it first —
+    // cutting a branch that already exists is success, so a retried request
+    // lands on its own branch and carries on.
+    await deps.gitHost.createBranch(repo, branch, base, token.token);
+
     let commitSha: string;
     try {
       const written = await deps.gitHost.writeFile(repo, {

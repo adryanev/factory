@@ -240,6 +240,7 @@ function withFailingReadFile(base: GitHost, failTimes: number): GitHost {
     findOpenPullRequest: (repo, head, baseRef, token) => base.findOpenPullRequest(repo, head, baseRef, token),
     createPullRequest: (repo, input, token) => base.createPullRequest(repo, input, token),
     postCommitStatus: (repo, sha, status, token) => base.postCommitStatus(repo, sha, status, token),
+    createBranch: (repo, branch, baseRef, token) => base.createBranch(repo, branch, baseRef, token),
     writeFile: (repo, input, token) => base.writeFile(repo, input, token),
     revokeInstallationToken: (token) => base.revokeInstallationToken(token),
     listRefsByPrefix: (repo, prefix, token) => base.listRefsByPrefix(repo, prefix, token),

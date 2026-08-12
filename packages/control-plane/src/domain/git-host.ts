@@ -189,6 +189,18 @@ export interface GitHost {
    * Throws {@link ContentConflictError} on 422 — the branch already exists,
    * which is the editor's retry-as-adoption signal.
    */
+  /**
+   * Cuts `branch` from the tip of `base` through the Git Data API. The
+   * Contents API does not create the branch it is handed — a write to a
+   * branch that does not exist is a 404 (verified against the API on
+   * 2026-08-12, issue #39) — so the editor cuts its own branch before its
+   * first write. A branch that already exists is success, not an error: the
+   * editor's branch name is its idempotency key, so a retried request re-runs
+   * this against its own branch. That is the rule `push` applies to a 422 on
+   * an existing ref.
+   */
+  createBranch(repo: RepoRef, branch: string, base: string, token: string): Promise<void>;
+
   writeFile(
     repo: RepoRef,
     input: {
@@ -442,6 +454,36 @@ export function createGithubHost(config?: GithubAppConfig): GitHost {
           `github commit status post failed: ${response.status}`,
           response.status,
           retryAfterFrom(response),
+        );
+      }
+    },
+
+    async createBranch(repo, branch, base, token) {
+      const headers = { ...GITHUB_ACCEPT, authorization: `Bearer ${token}`, "content-type": "application/json" };
+      const baseRef = await fetch(
+        `https://api.github.com/repos/${repo.owner}/${repo.name}/git/ref/heads/${base}`,
+        { headers },
+      );
+      if (!baseRef.ok) {
+        throw new GithubRequestError(
+          `github base ref read failed: ${baseRef.status}`,
+          baseRef.status,
+          retryAfterFrom(baseRef),
+        );
+      }
+      const { object } = (await baseRef.json()) as { object: { sha: string } };
+      const created = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/git/refs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: object.sha }),
+      });
+      // 422 = "Reference already exists": a retried request meeting the branch
+      // its own earlier attempt cut. Success, exactly as in `push`.
+      if (!created.ok && created.status !== 422) {
+        throw new GithubRequestError(
+          `github branch create failed: ${created.status}`,
+          created.status,
+          retryAfterFrom(created),
         );
       }
     },

@@ -149,6 +149,16 @@ describe("the visual Pipeline editor (issue #20)", () => {
     expect(body.headBranch).toBe("factory/editor/edit_abc123");
     expect(body.commitSha).toMatch(/^content-sha-/);
 
+    // Issue #39: the branch is cut from the repo's default branch before the
+    // first write — the Contents API 404s on a branch that does not exist.
+    expect(rig.gitHost.createdBranches).toEqual([
+      {
+        repo: { owner: hostRepo.owner, name: hostRepo.name },
+        branch: "factory/editor/edit_abc123",
+        base: "main",
+      },
+    ]);
+
     // AC4: the file write went through the Contents API surface, into the
     // host repo only (AC1), with the exact attribution split (AC2).
     expect(rig.gitHost.contents).toHaveLength(1);

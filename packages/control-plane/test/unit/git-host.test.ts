@@ -56,6 +56,45 @@ describe("createGithubHost", () => {
   });
 });
 
+describe("createBranch", () => {
+  const repo = { owner: "acme", name: "backend" };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("cuts the branch at the sha the base ref points at", async () => {
+    const baseSha = "a".repeat(40);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ ref: "refs/heads/main", object: { sha: baseSha } }))
+      .mockResolvedValueOnce(Response.json({ ref: "refs/heads/factory/editor/e1" }, { status: 201 }));
+
+    await createGithubHost().createBranch(repo, "factory/editor/e1", "main", "t");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.github.com/repos/acme/backend/git/ref/heads/main");
+    const [createUrl, createInit] = fetchMock.mock.calls[1]!;
+    expect(createUrl).toBe("https://api.github.com/repos/acme/backend/git/refs");
+    expect(JSON.parse(String(createInit?.body))).toEqual({ ref: "refs/heads/factory/editor/e1", sha: baseSha });
+  });
+
+  it("treats a branch that already exists as success — the retried request meets its own branch", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ object: { sha: "b".repeat(40) } }))
+      .mockResolvedValueOnce(Response.json({ message: "Reference already exists" }, { status: 422 }));
+
+    await expect(createGithubHost().createBranch(repo, "factory/editor/e1", "main", "t")).resolves.toBeUndefined();
+  });
+
+  it("surfaces an unreadable base ref instead of cutting from nothing", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("", { status: 404 }));
+
+    await expect(createGithubHost().createBranch(repo, "factory/editor/e1", "gone", "t")).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+});
+
 describe("listRefsByPrefix", () => {
   afterEach(() => {
     vi.restoreAllMocks();

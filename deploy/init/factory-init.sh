@@ -41,7 +41,9 @@ MASTER_KEY_HEX="$(openssl rand -hex 32)"
 printf '{"currentVersion":1,"keys":{"1":"%s"}}\n' "$MASTER_KEY_HEX" > "$MASTER_KEY_FILE"
 chmod 600 "$MASTER_KEY_FILE"
 
-POSTGRES_PASSWORD="$(openssl rand -base64 24)"
+# Hex, not base64: this value is interpolated into DATABASE_URL by
+# compose.yaml, and base64's `/` `+` `=` break the URL's authority section.
+POSTGRES_PASSWORD="$(openssl rand -hex 24)"
 GARAGE_RPC_SECRET="$(openssl rand -hex 32)"
 GARAGE_ACCESS_KEY="$(openssl rand -hex 16)"
 GARAGE_SECRET_KEY="$(openssl rand -base64 32)"

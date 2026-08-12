@@ -464,7 +464,7 @@ Prosa spec di sini longgar, implementasinya benar.
 - [ ] `author` = user penekan tombol lewat alamat `users.noreply.github.com`; `committer` = identitas bot
 - [ ] Push memakai installation token ad-hoc, repo tuan rumah saja, dihapus setelah selesai; token OAuth per-user ditolak
 - [ ] Commit dibuat lewat Git Data / Contents API, bukan clone lokal
-- [ ] **Verifikasi saat implementasi**: klaim bahwa commit lewat API dengan installation token muncul sebagai `Verified` belum pernah dicek ulang
+- [x] **Verifikasi saat implementasi**: klaim `Verified` sudah diprobe (2026-08-12) dan **tidak terpenuhi** — commit editor unsigned karena request menyebut `author`/`committer`; atribusi menang atas tanda tangan (ADR-0004, #42)
 - [ ] Validasi memakai skema Zod yang sama, sebagai umpan balik awal — yang mengikat tetap control plane saat trigger
 - [ ] Izin `member` cukup — turunan langsung dari penolakan peran `maintainer`
 - [ ] PR yang dibuka editor **bukan** jenis kejadian audit; PR itu sendiri sudah catatan permanen ber-atribusi di GitHub

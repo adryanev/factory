@@ -56,7 +56,19 @@ import { formatValidationIssues } from "./runs.js";
 /** The editor's token permission surface: exactly the two writes the operation makes — the file write and the PR. This is the first `pull_requests:write` use outside `kind: pull-request` (ticket 27: "pemakaian pertama `pull_requests:write` di luar `kind: pull-request`"). */
 export const EDITOR_WRITE_PERMISSIONS = { contents: "write", pull_requests: "write" } as const;
 
-/** The bot identity every editor commit is committed as (issue #20, AC2: "committer = identitas bot"). */
+/**
+ * The bot identity every editor commit is committed as (issue #20, AC2:
+ * "committer = identitas bot").
+ *
+ * Naming a committer costs the commit its signature, and that is the
+ * accepted trade (issue #42, probed 2026-08-12): GitHub signs an
+ * API-created commit only when the request names neither author nor
+ * committer, in which case the commit is attributed wholly to the App's bot
+ * — which is exactly what this issue exists to avoid. Changing this address
+ * does not buy a signature back; every identity shape was probed. Editor
+ * commits are unsigned, so branch protection requiring signed commits
+ * rejects them (docs/operating.md).
+ */
 export const EDITOR_COMMITTER = { name: "factory[bot]", email: "factory[bot]@users.noreply.github.com" } as const;
 
 /** The branch the editor's PR opens from. The `editId` suffix is the idempotency key. */

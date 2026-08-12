@@ -12,20 +12,28 @@
  *   GITHUB_INSTALLATION_ID=<installation id> \
  *   GITHUB_REPO_OWNER=<owner> \
  *   GITHUB_REPO_NAME=<name> \
+ *   GITHUB_REPO_BASE_BRANCH=<default branch> \
  *   pnpm --filter @factory/control-plane probe:editor-verified
  *
- * It mints the same ad-hoc installation token the editor uses, writes one
- * file through the same Contents-API `writeFile` path (author = probe user,
- * committer = factory[bot]), reads the commit's `verification` object back
- * from the Git Data API, and prints `verified` and `reason`. The probe
- * branch is left behind for inspection — delete it after reading the output.
+ * It mints the same ad-hoc installation token the editor uses and makes the
+ * editor's three write calls in the editor's order (cut branch, read blob
+ * sha, write the file; author = probe user, committer = factory[bot]), then
+ * reads the commit's `verification` object back from the Git Data API and
+ * prints `verified` and `reason`. The probe branch is left behind for
+ * inspection — delete it after reading the output.
  *
- * RESULT (documented at implementation time, issue #20): NOT RUN HERE. This
- * environment has no GitHub App credentials, no installation, and no target
- * repository reachable, so the claim could not be empirically re-checked —
- * it rests on GitHub's documented behavior that commits created via the
- * REST API are signed by GitHub's own key and rendered `Verified`. Run this
- * probe against a real installation to settle it.
+ * RESULT (documented at implementation time, issue #20): RUN 2026-08-12
+ * against app factory-localhost (id 4557244), installation 153069158, repo
+ * adryanev/factory. The commit was created, but the claim did NOT hold:
+ * verification.verified = false, reason "unsigned". GitHub signs API-created
+ * commits only when the committer identity maps to a verified GitHub user;
+ * the editor's committer factory[bot]@users.noreply.github.com maps to no
+ * account, so the commit surfaces as unsigned.
+ *
+ * The run also turned up three bugs, each now fixed and covered by test:
+ * the Contents API does not create the branch it is handed (#39), a write
+ * over an existing file must carry that file's blob sha (#41), and
+ * matching-refs returns a plain array rather than { refs: [...] } (#39).
  */
 import { readFileSync } from "node:fs";
 import { createGithubHost } from "../src/domain/git-host.js";
@@ -52,18 +60,25 @@ async function main(): Promise<void> {
   const host = createGithubHost({ appId, privateKey });
   const token = await host.mintInstallationToken(repo, installationId, { contents: "write", pull_requests: "write" });
 
+  const base = requiredEnv("GITHUB_REPO_BASE_BRANCH");
   const branch = `factory/probe/editor-verified-${Date.now()}`;
   const path = "factory-probe/editor-verified.txt";
   try {
+    // The same three calls the editor makes, in the same order: cut the
+    // branch (the Contents API never does, issue #39), read the blob sha of
+    // whatever is at the path (issue #41), then write.
+    await host.createBranch(repo, branch, base, token.token);
+    const existingSha = await host.readFileSha(repo, path, branch, token.token);
     const { sha } = await host.writeFile(
       repo,
       {
         path,
-        content: "probe: commit created through the Contents API with an installation token\n",
+        content: `probe: commit created through the Contents API with an installation token (${new Date().toISOString()})\n`,
         branch,
         message: "factory: editor-verified probe",
         author: { name: "factory-probe", email: "1+factory-probe@users.noreply.github.com" },
         committer: EDITOR_COMMITTER,
+        ...(existingSha === null ? {} : { sha: existingSha }),
       },
       token.token,
     );

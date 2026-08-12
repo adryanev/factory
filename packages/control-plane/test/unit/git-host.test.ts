@@ -56,6 +56,20 @@ describe("createGithubHost", () => {
   });
 });
 
+/**
+ * The JSON body of a recorded `fetch` call. Every GitHost write sends a
+ * `JSON.stringify`d string; a body of any other shape is a defect in the call
+ * under test, so it fails here rather than being coerced into the
+ * `[object Object]` that would make the assertion below pass for the wrong reason.
+ */
+function jsonBody(init: RequestInit | undefined): Record<string, unknown> {
+  const body = init?.body;
+  if (typeof body !== "string") {
+    throw new Error(`expected a JSON string request body, got ${typeof body}`);
+  }
+  return JSON.parse(body) as Record<string, unknown>;
+}
+
 describe("createBranch", () => {
   const repo = { owner: "acme", name: "backend" };
 
@@ -75,7 +89,7 @@ describe("createBranch", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.github.com/repos/acme/backend/git/ref/heads/main");
     const [createUrl, createInit] = fetchMock.mock.calls[1]!;
     expect(createUrl).toBe("https://api.github.com/repos/acme/backend/git/refs");
-    expect(JSON.parse(String(createInit?.body))).toEqual({ ref: "refs/heads/factory/editor/e1", sha: baseSha });
+    expect(jsonBody(createInit)).toEqual({ ref: "refs/heads/factory/editor/e1", sha: baseSha });
   });
 
   it("treats a branch that already exists as success — the retried request meets its own branch", async () => {
@@ -154,7 +168,7 @@ describe("writeFile", () => {
 
     await createGithubHost().writeFile(repo, { ...input, sha: "e".repeat(40) }, "t");
 
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).sha).toBe("e".repeat(40));
+    expect(jsonBody(fetchMock.mock.calls[0]?.[1]).sha).toBe("e".repeat(40));
   });
 
   it("omits sha entirely for a new file — the Contents API rejects one for a path that holds nothing", async () => {
@@ -164,7 +178,7 @@ describe("writeFile", () => {
 
     await createGithubHost().writeFile(repo, input, "t");
 
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).not.toHaveProperty("sha");
+    expect(jsonBody(fetchMock.mock.calls[0]?.[1])).not.toHaveProperty("sha");
   });
 });
 

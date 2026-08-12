@@ -516,9 +516,9 @@ export function createGithubHost(config?: GithubAppConfig): GitHost {
           retryAfterFrom(response),
         );
       }
-      const body = (await response.json()) as { refs: { ref: string }[] };
+      const body = (await response.json()) as { ref: string }[];
       const fullPrefix = `refs/heads/${prefix}`;
-      return body.refs
+      return body
         .map((entry) => entry.ref)
         .filter((ref) => ref.startsWith(fullPrefix))
         .map((ref) => ref.slice("refs/heads/".length));

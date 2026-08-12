@@ -1,10 +1,14 @@
 /**
  * Unit tests for the GitHub App half of `GitHost` that needs no network: the
  * RS256 app JWT minted to authorize installation-token requests, and the
- * unconfigured-host guard. Everything that dials github.com is covered by the
- * fake in seam-1 instead — never tested here.
+ * unconfigured-host guard. Behaviour that only needs a request to be *sent*
+ * is covered by the fake in seam-1 instead.
+ *
+ * The exception is how a real GitHub response body is parsed: the seam-1 fake
+ * returns domain values, so it can never catch a wrong assumption about the
+ * JSON GitHub actually sends. Those cases stub `fetch` and assert on the shape.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createGithubHost, retryAfterFrom, signGithubAppJwt } from "../../src/domain/git-host.js";
 
 const PRIVATE_KEY = `-----BEGIN RSA PRIVATE KEY-----
@@ -49,6 +53,49 @@ describe("createGithubHost", () => {
     await expect(host.mintInstallationToken({ owner: "acme", name: "backend" }, 42)).rejects.toThrow(
       "github app credentials not configured",
     );
+  });
+});
+
+describe("listRefsByPrefix", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("reads the matching-refs array GitHub sends and returns bare branch names", async () => {
+    // Verified against the API on 2026-08-12 (issue #39): matching-refs
+    // responds with a plain array, NOT an object wrapping a `refs` key.
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json([
+        { ref: "refs/heads/run/abc/step-1", object: { sha: "1".repeat(40) } },
+        { ref: "refs/heads/run/abc/step-2", object: { sha: "2".repeat(40) } },
+      ]),
+    );
+
+    const branches = await createGithubHost().listRefsByPrefix({ owner: "acme", name: "backend" }, "run/abc", "t");
+
+    expect(branches).toEqual(["run/abc/step-1", "run/abc/step-2"]);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.github.com/repos/acme/backend/git/matching-refs/heads/run/abc",
+    );
+  });
+
+  it("returns no branches when the prefix matches nothing", async () => {
+    // matching-refs answers 200 with an empty array, unlike git/ref's 404.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json([]));
+
+    await expect(
+      createGithubHost().listRefsByPrefix({ owner: "acme", name: "backend" }, "run/gone", "t"),
+    ).resolves.toEqual([]);
+  });
+
+  it("surfaces a failed listing as a retryable GithubRequestError", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("", { status: 503, headers: { "retry-after": "30" } }),
+    );
+
+    await expect(
+      createGithubHost().listRefsByPrefix({ owner: "acme", name: "backend" }, "run/abc", "t"),
+    ).rejects.toMatchObject({ status: 503, retryAfterSeconds: 30 });
   });
 });
 

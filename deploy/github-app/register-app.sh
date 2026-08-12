@@ -19,12 +19,21 @@
 #      never copied, never crosses the clipboard. Only the code does.
 #      The webhook secret, app id, and OAuth client id/secret go into .env.
 #
+# The webhook is the one thing this flow cannot always carry: GitHub refuses
+# a manifest whose hook URL is not reachable from the public internet, which
+# every localhost install is. When the hook URL is local, the script registers
+# the App WITHOUT a hook and prints the post-registration steps instead — the
+# App's permissions, which are the part that must not be got wrong, are
+# unaffected.
+#
 # Usage: deploy/github-app/register-app.sh
 # Env overrides: FACTORY_WEB_URL (default http://localhost:3000), and the
 # hook URL may be given explicitly as FACTORY_WEBHOOK_URL (default
-# <FACTORY_WEB_URL>/webhook/github).
+# <FACTORY_WEB_URL>/webhook/github). For a local install, point
+# FACTORY_WEBHOOK_URL at a public tunnel (smee.io, ngrok, cloudflared) to
+# have the hook registered with the App directly.
 #
-# Requires: bash, python3 (for the local callback listener), curl, jq.
+# Requires: bash, python3 (for the local callback listener), curl, jq, openssl.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname -- "$0")/../.." && pwd)"
@@ -39,7 +48,7 @@ REDIRECT_PORT="${FACTORY_MANIFEST_REDIRECT_PORT:-9999}"
 REDIRECT_URL="http://localhost:$REDIRECT_PORT/redirect"
 OAUTH_CALLBACK_URL="$FACTORY_WEB_URL/auth/github/callback"
 
-for tool in curl jq python3; do
+for tool in curl jq openssl python3; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "register-app: $tool is required" >&2
     exit 1
@@ -54,16 +63,48 @@ if [ -f "$PRIVATE_KEY_FILE" ]; then
   exit 1
 fi
 
-# Render the manifest: placeholders are plain tokens, so sed is safe here.
+case "$FACTORY_WEBHOOK_URL" in
+  http://*|https://*) ;;
+  *)
+    echo "register-app: FACTORY_WEBHOOK_URL must be an http:// or https:// URL, got '$FACTORY_WEBHOOK_URL'" >&2
+    exit 1
+    ;;
+esac
+
+# GitHub validates the hook URL at registration time: anything it cannot
+# reach over the public internet is rejected outright ("Hook url is not
+# supported because it isn't reachable over the public Internet"), so a
+# manifest carrying one can never be created. Decide here, before the
+# operator has filled in a form, and register hookless if it is local.
+HOOK_IS_PUBLIC=yes
+case "$FACTORY_WEBHOOK_URL" in
+  *"://localhost"*|*"://127."*|*"://[::1]"*|*"://0.0.0.0"*|*"://10."*|*"://192.168."*|*".local/"*)
+    HOOK_IS_PUBLIC=no
+    ;;
+esac
+
+# Render the manifest with jq: the hookless variant has to DELETE keys, which
+# a placeholder substitution cannot express. `default_events` goes with the
+# hook — GitHub has no events to deliver without one.
 MANIFEST_TMP_FILE="$(mktemp)"
 trap 'rm -f "$MANIFEST_TMP_FILE"' EXIT
-sed \
-  -e "s|__FACTORY_WEB_URL__|$FACTORY_WEB_URL|g" \
-  -e "s|__FACTORY_WEBHOOK_URL__|$FACTORY_WEBHOOK_URL|g" \
-  -e "s|__FACTORY_MANIFEST_REDIRECT_URL__|$REDIRECT_URL|g" \
-  -e "s|__FACTORY_OAUTH_CALLBACK_URL__|$OAUTH_CALLBACK_URL|g" \
+jq \
+  --arg web "$FACTORY_WEB_URL" \
+  --arg hook "$FACTORY_WEBHOOK_URL" \
+  --arg redirect "$REDIRECT_URL" \
+  --arg callback "$OAUTH_CALLBACK_URL" \
+  --arg hookIsPublic "$HOOK_IS_PUBLIC" \
+  '.url = $web
+   | .redirect_url = $redirect
+   | .callback_urls = [$callback]
+   | if $hookIsPublic == "yes" then .hook_attributes.url = $hook
+     else del(.hook_attributes, .default_events) end' \
   "$MANIFEST_FILE" > "$MANIFEST_TMP_FILE"
-MANIFEST_JSON="$(cat "$MANIFEST_TMP_FILE")"
+
+# The manifest rides in an HTML attribute, so every `"` in it must be an
+# entity — unescaped, the browser ends the attribute at the first quote and
+# GitHub receives a single `{`.
+MANIFEST_ATTR_VALUE="$(jq -Rs -r '@html' < "$MANIFEST_TMP_FILE")"
 
 # The callback listener: catches the redirect from GitHub and extracts the
 # code from the query string. python3's http.server logs the full request
@@ -83,7 +124,7 @@ name; everything else is fixed by our manifest. After you press
 <strong>Create GitHub App</strong>, GitHub redirects back to this script's
 local callback.</p>
 <form action="https://github.com/settings/apps/new" method="post">
-  <input type="hidden" name="manifest" value="$MANIFEST_JSON">
+  <input type="hidden" name="manifest" value="$MANIFEST_ATTR_VALUE">
   <button type="submit">Create GitHub App from manifest</button>
 </form>
 EOF
@@ -129,6 +170,13 @@ CLIENT_SECRET="$(printf '%s' "$CONVERSION" | jq -r .client_secret)"
 WEBHOOK_SECRET="$(printf '%s' "$CONVERSION" | jq -r .webhook_secret)"
 APP_SLUG="$(printf '%s' "$CONVERSION" | jq -r .slug)"
 
+# A hookless registration mints no webhook secret. Generate it here so .env
+# holds the value the control plane verifies HMAC with, and the operator
+# pastes the same one into the App's webhook settings.
+if [ -z "$WEBHOOK_SECRET" ] || [ "$WEBHOOK_SECRET" = "null" ]; then
+  WEBHOOK_SECRET="$(openssl rand -hex 32)"
+fi
+
 # .env needs to exist (factory-init creates it); append the App fields if
 # they are not there yet.
 if [ ! -f "$ENV_FILE" ]; then
@@ -157,6 +205,20 @@ echo "  App id:    $APP_ID (written to .env)"
 echo "  OAuth + webhook secrets: written to .env, shown nowhere"
 echo "  Private key: $PRIVATE_KEY_FILE (0600, never printed, never on the clipboard)"
 echo ""
+if [ "$HOOK_IS_PUBLIC" = "no" ]; then
+  echo "The App was registered WITHOUT a webhook: GitHub only accepts a hook URL"
+  echo "it can reach over the public internet, and $FACTORY_WEBHOOK_URL is local."
+  echo "Finish the webhook by hand — factory receives no events until you do:"
+  echo ""
+  echo "  1. Open a public channel to your local control plane, e.g."
+  echo "       npx smee-client --url https://smee.io/<your-channel> \\"
+  echo "         --target $FACTORY_WEBHOOK_URL"
+  echo "  2. At https://github.com/settings/apps/$APP_SLUG/advanced set"
+  echo "       Webhook URL:    https://smee.io/<your-channel>"
+  echo "       Webhook secret: the GITHUB_WEBHOOK_SECRET value now in .env"
+  echo "  3. Under Permissions & events, subscribe to: Push, Pull request."
+  echo ""
+fi
 echo "Next: install the App on the repositories factory will touch, then:"
 echo "  docker compose up -d"
 echo "and log in with your GitHub account — the first user to log in is"

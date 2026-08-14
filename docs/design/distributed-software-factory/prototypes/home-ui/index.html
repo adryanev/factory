@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!--
-  Beranda Factory — hasil enam ronde grilling desain.
+  Beranda Factory — hasil dua belas ronde grilling desain.
 
   Prototipe buangan. Ia menjawab satu pertanyaan: bentuk apa yang dipakai
   surface beranda, yang hari ini masih berupa fallback tanpa gaya di
@@ -56,8 +56,45 @@
                               UI padat demi kerapian angka, 68 call site),
                               dan tangga berat-tanpa-ukuran (layak sebagai
                               pendamping, bukan pengganti).
+    8. Isi rail kanan ....... Warisan — Run, runner pool, biaya. Rail memang
+                              untuk mengawasi pabrik, bukan inspektur kanvas,
+                              bukan antrean berikutnya. Ditolak dua kali:
+                              "kosong saat sehat" (rail hanya muncul saat ada
+                              yang salah) dan "tanpa rail". Artinya pemantauan
+                              ambient berhak atas sepertiga layar walau 95%
+                              waktunya tidak menuntut tindakan.
+    9. Komposisi rail ....... Alarm di kepala — pita alarm di atas rail,
+                              ketiga panel tetap utuh di bawahnya. Alarm
+                              menambah, tidak pernah menggantikan. Ditolak:
+                              urutan panel yang bergeser mengikuti keadaan
+                              (membunuh memori otot), pembubaran batas panel
+                              jadi satu daftar berperingkat, dan kepadatan
+                              tabel penuh.
+   10. Perilaku pita ....... Satu baris — tiap alarm satu baris padat, semua
+                              alarm tetap terlihat setiap saat, detail
+                              dibuang. Ditolak semua yang menyembunyikan atau
+                              memotong: kartu tanpa batas, "satu yang
+                              terburuk + n lagi", pita bertinggi patok yang
+                              menggulir sendiri, dan keping berangka yang
+                              membuang isi sama sekali.
+   11. Isi satu baris ...... Buka di tempat — baris tetap ringkas, tapi bisa
+                              ditekan dan keterangan penuhnya terbuka di
+                              bawahnya tanpa keluar dari rail. Ditolak: fakta
+                              yang memutuskan dipadatkan ke slot kanan (satu
+                              fakta tidak selalu cukup, dan rail cuma 19rem),
+                              kata kerja menggantikan fakta, dan dua baris
+                              yang tidak membuang apa pun.
+   12. Satu alarm itu apa .. Per jenis, isi utuh — kepalanya mengelompok
+                              ("4 Run gagal"), isinya tidak: dibuka jadi
+                              empat baris bernama lengkap dengan attempt-nya.
+                              Pengelompokan jadi kompresi, bukan pembuangan;
+                              jumlah baris pita stabil terhadap beban (6 di
+                              Banjir, 5 di Gawat, 1 di Sibuk). Ditolak: per
+                              jenis yang membuang identitas kejadian, per
+                              kejadian tanpa kelompok (17 baris di Banjir),
+                              per proyek, dan per sebab.
 
-  Aturan yang dipegang sepanjang enam ronde, semuanya dari kode yang sudah
+  Aturan yang dipegang sepanjang dua belas ronde, semuanya dari kode yang
   ada, bukan karangan prototipe ini:
 
     - Token Corpus disalin verbatim dari packages/web/src/tokens/tokens.css.
@@ -73,12 +110,20 @@
       disebut tokens.css, dan fallback diam ke system stack akan menyesatkan
       penilaian.
 
+  Tidak ada ronde yang sedang berjalan. Pemilih desain tinggal satu tombol;
+  tidak ada varian yang tersisa di file ini.
+
   Yang BELUM diputuskan dan masih layak digrill: baris meta di kepala sheet
-  (enam fakta dalam satu baris datar), isi rail kanan, keadaan pertama kali
-  pakai, dan perilaku saat satu orang memegang banyak Project.
+  (enam fakta dalam satu baris datar), keadaan pertama kali pakai, dan
+  perilaku saat satu orang memegang banyak Project.
 
   Data di bawah tiruan, tapi bentuknya mengikuti wire yang asli:
   QuestionState, RunRecord, StepRunRecord, RunnerPoolRecord, RunCostRecord.
+
+  Empat keadaan: Sibuk (1 alarm), Tenang (0), Gawat (5), Banjir (8 — satu
+  region mati dan seluruh akibatnya jatuh bersamaan). Banjir ditambahkan di
+  ronde 11 untuk menguji pita alarm di bawah beban; jangan menilai pusat di
+  sana, ia memakai graph yang sama dengan Gawat.
 -->
 <style>
 /* ==========================================================================
@@ -700,6 +745,81 @@ code { font-family: var(--mono); font-size: 0.92em; letter-spacing: -0.01em; }
 .doc__pin { flex: none; width: 1.05rem; height: 1.05rem; border-radius: 50%; background: var(--attention-wash); border: 1px solid var(--attention-line); color: var(--attention); display: grid; place-items: center; font-size: 0.5625rem; font-weight: 700; font-family: var(--sans); }
 
 
+
+/* ==========================================================================
+   RONDE 8 — rail kanan. Isinya diputuskan: Run · runner · biaya. Yang kalah
+   (inspektur, antrean, kosong-saat-sehat, tanpa rail) sudah dibuang.
+   ========================================================================== */
+.railq { display: flex; align-items: baseline; gap: 0.4rem; padding: 0.3rem 0; font-size: var(--fs-xs); }
+.railq + .railq { border-top: 1px solid var(--border); }
+.railq__k { font-family: var(--mono); font-size: var(--fs-2xs); color: var(--fg-2); }
+.railq__v { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--fg-3); white-space: nowrap; }
+.railq__v b { color: var(--fg); font-weight: 600; }
+
+.steprow { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0; font-size: var(--fs-xs); }
+.steprow + .steprow { border-top: 1px solid var(--border); }
+.steprow__k { font-family: var(--mono); font-size: var(--fs-2xs); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.steprow__m { margin-left: auto; color: var(--fg-3); font-size: var(--fs-2xs); white-space: nowrap; }
+
+.alarm {
+  display: flex; gap: 0.55rem; align-items: flex-start; padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--sunk);
+  font-size: var(--fs-xs); line-height: 1.5;
+}
+.alarm + .alarm { margin-top: 0.5rem; }
+.alarm[data-sev="fail"] { border-color: var(--destructive-line); background: var(--destructive-wash); }
+.alarm[data-sev="warn"] { border-color: color-mix(in srgb, var(--warning) 40%, var(--border)); background: color-mix(in srgb, var(--warning) 8%, var(--panel)); }
+.alarm__t { flex: 1; min-width: 0; }
+.alarm__t b { font-weight: 600; }
+.alarm__s { color: var(--fg-2); font-size: var(--fs-2xs); margin-top: 0.15rem; }
+.allclear { text-align: center; padding: 1.5rem 0.5rem; color: var(--fg-3); font-size: var(--fs-xs); }
+.allclear__m { color: var(--success); margin-bottom: 0.4rem; display: flex; justify-content: center; }
+.allclear b { display: block; color: var(--fg); font-family: var(--display); font-size: var(--fs-base); font-weight: 700; margin-bottom: 0.15rem; }
+
+
+/* ==========================================================================
+   RONDE 10 — pita alarm. Ronde 9 memutuskan alarm menambah, tidak pernah
+   PITA ALARM — hasil ronde 9 sampai 12. Ia menempel di kepala rail dan
+   menambah, tidak pernah menggantikan; ketiga panel tetap utuh di bawahnya.
+   Barisnya ringkas dan bisa dibuka di tempat. Alarm dikelompokkan per jenis,
+   tapi isinya kejadian bernama lengkap.
+   ========================================================================== */
+.railtop { padding: 0.7rem 0 0.75rem; border-bottom: 1px solid var(--border); background: var(--sunk); }
+.railtop__hd {
+  display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.55rem; padding: 0 0.7rem;
+  font-size: var(--fs-2xs); font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--destructive);
+}
+
+.aline {
+  display: flex; align-items: center; gap: 0.5rem; width: 100%; text-align: left; font: inherit;
+  padding: 0.4rem 0.7rem; font-size: var(--fs-xs); background: none; border: 0; cursor: pointer;
+  border-left: 2px solid transparent; color: var(--fg);
+  transition: background var(--dur) var(--ease);
+}
+.aline:hover { background: var(--panel); }
+.aline svg { flex: none; }
+.aline__t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aline__f { margin-left: auto; flex: none; color: var(--fg-3); font-size: var(--fs-2xs); white-space: nowrap; }
+
+.aitem + .aitem { border-top: 1px solid var(--border); }
+.aitem[data-sev="fail"] .aline { border-left-color: var(--destructive); }
+.aitem[data-sev="warn"] .aline { border-left-color: var(--warning); }
+
+/* --- buka di tempat, pemenang ronde 11 --- */
+.aexp {
+  display: none; padding: 0 0.7rem 0.6rem 1.7rem;
+  font-size: var(--fs-2xs); color: var(--fg-2); line-height: 1.55;
+}
+.aitem[data-open] .aexp { display: block; }
+.aitem[data-open] .aline { background: var(--panel); }
+.aline__x { flex: none; color: var(--fg-3); transition: transform var(--dur) var(--ease); }
+.aitem[data-open] .aline__x { transform: rotate(90deg); }
+
+/* --- kejadian tunggal di dalam kelompok yang terbuka --- */
+.akid { display: flex; align-items: center; gap: 0.4rem; padding: 0.24rem 0; font-size: var(--fs-2xs); }
+.akid + .akid { border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.akid__t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-2); }
+.akid__f { margin-left: auto; flex: none; color: var(--fg-3); white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -710,13 +830,14 @@ code { font-family: var(--mono); font-size: 0.92em; letter-spacing: -0.01em; }
   <div class="pk__grab" id="pk-grab">
     <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="5.5" cy="3" r="1.3"/><circle cx="10.5" cy="3" r="1.3"/><circle cx="5.5" cy="8" r="1.3"/><circle cx="10.5" cy="8" r="1.3"/><circle cx="5.5" cy="13" r="1.3"/><circle cx="10.5" cy="13" r="1.3"/></svg>
     <span class="pk__title">Kendali</span>
-    <span class="pk__n" id="pk-n"></span>
+    <span class="pk__n" id="pk-n">1/5</span>
     <span class="sp"></span>
     <button class="btn btn--ghost btn--sm btn--icon" id="pk-toggle" aria-label="Sembunyikan pemilih" aria-expanded="true">
       <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
     </button>
   </div>
   <div class="pk__body">
+    <div class="pk__designs" id="pk-designs"></div>
     <div>
       <div class="pk__label" style="margin-bottom:0.3rem">Keadaan pabrik</div>
       <div class="seg pk__seg" id="pk-states"></div>
@@ -730,6 +851,8 @@ code { font-family: var(--mono); font-size: 0.92em; letter-spacing: -0.01em; }
       <div class="seg" id="pk-theme"></div>
     </div>
     <div class="pk__hint">
+      <span class="kbd">&larr;</span><span class="kbd">&rarr;</span><span>rail</span>
+      <span class="dotsep"></span>
       <span class="kbd">S</span><span>keadaan</span>
       <span class="dotsep"></span>
       <span class="kbd">K</span><span>kind</span>
@@ -912,10 +1035,52 @@ const GRAPHS = {
   },
 };
 
+/* Keadaan Banjir — satu region mati dan seluruh akibatnya jatuh bersamaan.
+   Ada untuk menguji pita alarm di bawah beban, bukan untuk menilai pusat. */
+const RUNS_FLOOD = [
+  { id: 'run_9f01', project: 'Atlas Billing', path: '.factory/pipelines/pemulihan.yaml', ref: 'hotfix/invoice', sha: '6b1c0d4', status: 'awaiting-human', steps: ['succeeded','failed','running','awaiting-human'], turn: 9, attempt: 3, cost: '18.44', ended: false, ageMin: 4380, who: 'bagas' },
+  { id: 'run_7d52', project: 'Lexicon', path: '.factory/pipelines/tinjau-pr.yaml', ref: 'feat/search-api', sha: 'be22f70', status: 'failed', steps: ['succeeded','succeeded','failed','cancelled','cancelled'], turn: 2, attempt: 4, cost: '5.14', ended: true, ageMin: 61, who: 'sa/lexicon-cron' },
+  { id: 'run_3a8c', project: 'Lexicon', path: '.factory/pipelines/prd-ke-pr.yaml', ref: 'main', sha: 'a71f3c9', status: 'failed', steps: ['succeeded','failed','cancelled'], turn: 1, attempt: 2, cost: '2.02', ended: true, ageMin: 88, who: 'kirana' },
+  { id: 'run_d411', project: 'Corpus', path: '.factory/pipelines/uji-malam.yaml', ref: 'main', sha: '0c4a8e1', status: 'unschedulable', steps: ['succeeded','unschedulable','cancelled','cancelled'], turn: 1, attempt: 1, cost: '0.31', ended: true, ageMin: 156, who: 'sa/corpus-cron' },
+  { id: 'run_e77b', project: 'Corpus', path: '.factory/pipelines/tinjau-token.yaml', ref: 'main', sha: '0c4a8e1', status: 'unschedulable', steps: ['unschedulable','cancelled'], turn: 1, attempt: 1, cost: null, ended: true, ageMin: 142, who: 'sa/corpus-cron' },
+  { id: 'run_2b60', project: 'Factory', path: '.factory/pipelines/rilis-runner.yaml', ref: 'main', sha: '92bded5', status: 'failed', steps: ['succeeded','failed','cancelled','cancelled'], turn: 2, attempt: 2, cost: '1.88', ended: true, ageMin: 39, who: 'sa/factory-cron' },
+  { id: 'run_5d1f', project: 'Atlas Billing', path: '.factory/pipelines/uji-integrasi.yaml', ref: 'hotfix/invoice', sha: '6b1c0d4', status: 'failed', steps: ['succeeded','succeeded','failed','cancelled'], turn: 1, attempt: 1, cost: '4.07', ended: true, ageMin: 27, who: 'sa/atlas-cron' },
+  { id: 'run_c019', project: 'Factory', path: '.factory/pipelines/rilis-runner.yaml', ref: 'main', sha: '92bded5', status: 'running', steps: ['succeeded','running','ready','ready'], turn: 1, attempt: 1, cost: '0.63', ended: false, ageMin: 5, who: 'sa/factory-cron' },
+  { id: 'run_88e2', project: 'Atlas Billing', path: '.factory/pipelines/migrasi.yaml', ref: 'feat/invoice-v2', sha: '3d90b12', status: 'ready', steps: ['ready','ready','ready'], turn: 1, attempt: 1, cost: null, ended: false, ageMin: 96, who: 'sa/atlas-cron' },
+];
+const RUNNERS_FLOOD = [
+  { id: 'runner-sg-01', state: 'active', slots: 4, busy: 0, hb: 71, down: true },
+  { id: 'runner-sg-02', state: 'active', slots: 4, busy: 0, hb: 68, down: true },
+  { id: 'runner-sg-03', state: 'active', slots: 4, busy: 0, hb: 64, down: true },
+  { id: 'runner-jkt-01', state: 'active', slots: 2, busy: 2, hb: 2 },
+  { id: 'runner-jkt-02', state: 'active', slots: 4, busy: 4, hb: 3 },
+  { id: 'runner-lab-01', state: 'revoked', slots: 2, busy: 0, hb: 2880 },
+];
+const QUESTIONS_FLOOD = [
+  URGENT,
+  Object.assign({}, QUESTIONS[1], { ageMin: 2760 }),
+  Object.assign({}, QUESTIONS[2], { ageMin: 1810 }),
+];
+const COSTS_FLOOD = [{ name: 'Atlas Billing', v: '344.20' }, { name: 'Lexicon', v: '231.55' }, { name: 'Corpus', v: '151.10' }, { name: 'Factory', v: '38.44' }];
+
+/* Cron yang dilewati. Milik keadaan, bukan diturunkan dari nama graph —
+   Banjir memakai graph yang sama dengan Gawat tapi cron-nya lain. */
+const SKIPS_QUIET = [];
+const BENTROK = { why: 'Run sebelumnya belum selesai' };
+const TAK_ADA_RUNNER = { why: 'Tidak ada runner yang memenuhi label' };
+const SKIPS_INCIDENT = [Object.assign({ name: 'uji-malam', n: 2 }, BENTROK)];
+const SKIPS_FLOOD = [
+  Object.assign({ name: 'uji-malam', n: 4 }, TAK_ADA_RUNNER),
+  Object.assign({ name: 'tinjau-token', n: 3 }, TAK_ADA_RUNNER),
+  Object.assign({ name: 'rilis-runner', n: 2 }, BENTROK),
+  Object.assign({ name: 'uji-integrasi', n: 2 }, TAK_ADA_RUNNER),
+];
+
 const STATES = {
-  sibuk:  { label: 'Sibuk',  questions: QUESTIONS, runs: RUNS_BUSY,     runners: RUNNERS_OK,    costs: COSTS_BUSY,  today: '27.29', month: '488.35', graph: 'busy' },
-  tenang: { label: 'Tenang', questions: [],        runs: RUNS_QUIET,    runners: RUNNERS_QUIET, costs: COSTS_QUIET, today: '3.30',  month: '461.06', graph: 'quiet' },
-  gawat:  { label: 'Gawat',  questions: [URGENT],  runs: RUNS_INCIDENT, runners: RUNNERS_BAD,   costs: COSTS_BAD,   today: '26.54', month: '717.74', graph: 'incident' },
+  sibuk:  { label: 'Sibuk',  questions: QUESTIONS,       runs: RUNS_BUSY,     runners: RUNNERS_OK,    costs: COSTS_BUSY,  today: '27.29', month: '488.35', graph: 'busy',     skips: SKIPS_QUIET },
+  tenang: { label: 'Tenang', questions: [],              runs: RUNS_QUIET,    runners: RUNNERS_QUIET, costs: COSTS_QUIET, today: '3.30',  month: '461.06', graph: 'quiet',    skips: SKIPS_QUIET },
+  gawat:  { label: 'Gawat',  questions: [URGENT],        runs: RUNS_INCIDENT, runners: RUNNERS_BAD,   costs: COSTS_BAD,   today: '26.54', month: '717.74', graph: 'incident', skips: SKIPS_INCIDENT },
+  banjir: { label: 'Banjir', questions: QUESTIONS_FLOOD, runs: RUNS_FLOOD,    runners: RUNNERS_FLOOD, costs: COSTS_FLOOD, today: '41.08', month: '765.29', graph: 'incident', skips: SKIPS_FLOOD },
 };
 
 function counts(s) {
@@ -1225,16 +1390,10 @@ function f5(s) {
    Shell tetap — nav kiri, pusat, rail kanan. Hanya pusat yang digrill.
    ========================================================================== */
 function shell(s, centre) {
-  const c = counts(s);
   return '<div class="k" data-v="4">' + nav(s, 'kendali') +
     '<main class="k__col" style="background:var(--bg)">' + centre + '</main>' +
-    '<aside class="k__rail">' +
-      '<section class="k__panel" style="padding:0">' +
-        '<div class="k__panelhd" style="margin:0;padding:0.7rem 0.875rem;border-bottom:1px solid var(--border)">' +
-        icon('activity', 15) + '<h3>Run</h3><span class="sp"></span><span class="chip">' + s.runs.length + '</span></div>' +
-        runList(s, 6) +
-      '</section>' + runnerPanel(s) + costPanel(s) +
-    '</aside></div>';
+    '<aside class="k__rail">' + railAlarms(s) + '</aside>' +
+  '</div>';
 }
 
 /* Tidak ada yang menunggu: kelima varian jatuh ke graph penuh yang sama.
@@ -1491,28 +1650,188 @@ function a2() {
 }
 
 /* ==========================================================================
+   RONDE 8 — rail kanan. Lima jawaban untuk "rail ini melayani siapa".
+   ========================================================================== */
+
+function panel(ico, title, right, body, opts) {
+  return '<section class="k__panel"' + (opts && opts.flush ? ' style="padding:0"' : '') + '>' +
+    '<div class="k__panelhd"' + (opts && opts.flush ? ' style="margin:0;padding:0.7rem 0.875rem;border-bottom:1px solid var(--border)"' : '') + '>' +
+    icon(ico, 15) + '<h3>' + title + '</h3><span class="sp"></span>' + (right || '') + '</div>' + body + '</section>';
+}
+
+/* --- Isi rail, dibekukan di ronde 8: Run, runner pool, biaya. ----------- */
+function railPanels(s) {
+  return panel('activity', 'Run', '<span class="chip">' + s.runs.length + '</span>', runList(s, 6), { flush: true }) +
+    runnerPanel(s) + costPanel(s);
+}
+
+/* ==========================================================================
+   PITA ALARM — hasil ronde 9 sampai 12, tidak ada varian yang tersisa.
+   ========================================================================== */
+
+/* Kejadian tunggal — satu hal yang salah, belum dikelompokkan. Semua
+   pengelompokan di bawah dibangun dari daftar yang sama ini.
+     kind  jenisnya    t/f/d  judul, fakta ringkas, keterangan penuh     */
+function alarmEvents(s) {
+  const out = [];
+
+  s.runners.filter(function (r) { return r.down; }).forEach(function (r) {
+    out.push({ sev: 'fail', ico: 'server', kind: 'runner-hilang',
+      t: r.id + ' hilang', f: age(r.hb),
+      d: 'heartbeat terakhir ' + age(r.hb) + ' lalu · ' + r.slots + ' slot ikut hilang' });
+  });
+
+  s.runs.filter(function (r) { return r.status === 'failed' || r.status === 'unschedulable'; }).forEach(function (r) {
+    const stuck = r.status === 'unschedulable';
+    out.push({ sev: 'fail', ico: 'alert', kind: stuck ? 'run-kedaluwarsa' : 'run-gagal',
+      t: r.project + ' · ' + r.path.replace('.factory/pipelines/', '').replace('.yaml', ''),
+      f: stuck ? 'kedaluwarsa' : 'attempt ' + r.attempt,
+      d: (stuck ? 'Tidak ada runner yang memenuhi label' : 'Gagal di ' + turnLong(r.turn, r.attempt)) +
+        ' · <code>' + esc(r.id) + '</code> · ' + age(r.ageMin) + ' lalu' });
+  });
+
+  s.skips.forEach(function (k) {
+    out.push({ sev: 'warn', ico: 'clock', kind: 'cron-dilewati',
+      t: k.name + ' dilewati ' + k.n + '×', f: 'cron',
+      d: k.why + ' · jadwal berikutnya tetap dicoba' });
+  });
+
+  s.runners.filter(function (r) { return r.state === 'revoked'; }).forEach(function (r) {
+    out.push({ sev: 'warn', ico: 'server', kind: 'runner-dicabut',
+      t: r.id + ' dicabut', f: '−' + r.slots + ' slot',
+      d: 'slot-nya sudah tidak dihitung dalam kapasitas' });
+  });
+
+  s.questions.filter(function (q) { return q.ageMin > 1440; }).forEach(function (q) {
+    out.push({ sev: 'warn', ico: 'hand', kind: 'question-menua',
+      t: q.project + ' · ' + q.step, f: age(q.ageMin),
+      d: 'menunggu ' + age(q.ageMin) + ' · Run-nya berhenti selama itu' });
+  });
+
+  return out;
+}
+
+const KIND_HEAD = {
+  'runner-hilang': ['runner hilang', 'server'],
+  'run-gagal': ['Run gagal', 'alert'],
+  'run-kedaluwarsa': ['Run kedaluwarsa', 'alert'],
+  'cron-dilewati': ['cron dilewati', 'clock'],
+  'runner-dicabut': ['runner dicabut', 'server'],
+  'question-menua': ['Question menua', 'hand'],
+};
+
+/* Membangun kelompok dari kejadian. `key` menentukan apa yang dianggap satu
+   alarm; `head` menamai kelompoknya. Kelompok berisi satu kejadian tetap
+   dibiarkan utuh supaya tidak ada baris "1 Run gagal" yang konyol. */
+function groupEvents(events, key, head) {
+  const order = [];
+  const bins = {};
+  events.forEach(function (e) {
+    const k = key(e);
+    if (!bins[k]) { bins[k] = []; order.push(k); }
+    bins[k].push(e);
+  });
+  return order.map(function (k) {
+    const items = bins[k];
+    if (items.length === 1) return Object.assign({}, items[0], { items: [] });
+    const h = head(k, items);
+    return {
+      sev: items.some(function (e) { return e.sev === 'fail'; }) ? 'fail' : 'warn',
+      ico: h.ico, t: h.t, f: items.length + ' hal',
+      d: '', items: items,
+    };
+  });
+}
+
+function sevColor(a) { return 'var(--' + (a.sev === 'fail' ? 'destructive' : 'warning') + ')'; }
+function alarmIcon(a, size) { return '<span style="color:' + sevColor(a) + '">' + icon(a.ico, size || 14) + '</span>'; }
+
+/* Bentuk baris dibekukan di ronde 11: ringkas, bisa dibuka di tempat. */
+function alarmItem(a, open) {
+  const body = a.items && a.items.length
+    ? a.items.map(function (e) {
+        return '<div class="akid">' + alarmIcon(e, 12) +
+          '<span class="akid__t">' + esc(e.t) + '</span>' +
+          '<span class="akid__f">' + esc(e.f) + '</span></div>';
+      }).join('')
+    : a.d;
+  return '<div class="aitem" data-sev="' + a.sev + '"' + (open ? ' data-open=""' : '') + '>' +
+    '<button class="aline" type="button">' + alarmIcon(a) +
+    '<span class="aline__t">' + esc(a.t) + '</span>' +
+    '<span class="aline__f">' + esc(a.f) + '</span>' +
+    '<span class="aline__x">' + icon('arrow', 12) + '</span></button>' +
+    '<div class="aexp">' + body + '</div></div>';
+}
+
+function railtop(count, inner) {
+  return '<div class="railtop">' +
+    '<div class="railtop__hd">' + icon('alert', 13) + 'Perlu ditengok · ' + count + '</div>' +
+    inner + '</div>';
+}
+
+/* Pita alarm, dibekukan di ronde 12: dikelompokkan per jenis, dibuka di
+   tempat, isinya kejadian bernama lengkap. Tanpa kejadian, pita tidak ada. */
+function railAlarms(s) {
+  const events = alarmEvents(s);
+  if (events.length === 0) return railPanels(s);
+  const groups = groupEvents(events, function (e) { return e.kind; }, function (k, items) {
+    const h = KIND_HEAD[k];
+    return { t: items.length + ' ' + h[0], ico: h[1] };
+  });
+  return railtop(groups.length, groups.map(function (g, i) { return alarmItem(g, i === 0); }).join('')) +
+    railPanels(s);
+}
+
+/* Baris benar-benar bisa dibuka — ronde 11 memilih perilaku ini, jadi
+   tiruan yang mati akan menyesatkan penilaian. */
+function wireRail() {
+  wireFollow();
+  const rail = document.querySelector('.k__rail');
+  if (!rail) return;
+  rail.addEventListener('click', function (e) {
+    const line = e.target.closest ? e.target.closest('.aline') : null;
+    if (!line) return;
+    const item = line.parentElement;
+    if (item.hasAttribute('data-open')) item.removeAttribute('data-open');
+    else item.setAttribute('data-open', '');
+  });
+}
+
+/* ==========================================================================
    Pemilih
    ========================================================================== */
 const DESIGNS = [
-  { name: 'Kendali', note: 'hasil grilling', render: withCentre(s3), after: wireFollow },
+  { name: 'Beranda', note: 'dua belas ronde, tidak ada varian tersisa', render: withCentre(s3), after: wireRail },
 ];
-const STATE_KEYS = ['sibuk', 'tenang', 'gawat'];
+const STATE_KEYS = ['sibuk', 'tenang', 'gawat', 'banjir'];
 
 let current = 0;
 let stateKey = 'sibuk';
 
 const app = document.getElementById('app');
+const pkDesigns = document.getElementById('pk-designs');
 const pkStates = document.getElementById('pk-states');
 const pkKinds = document.getElementById('pk-kinds');
 const pkTheme = document.getElementById('pk-theme');
 const pkN = document.getElementById('pk-n');
 
 function render() {
+  pkN.textContent = (current + 1) + '/' + DESIGNS.length;
+  Array.prototype.forEach.call(pkDesigns.children, function (b, i) { b.setAttribute('aria-pressed', String(i === current)); });
   app.innerHTML = DESIGNS[current].render(focusKind(STATES[stateKey]));
   if (DESIGNS[current].after) DESIGNS[current].after();
   Array.prototype.forEach.call(pkStates.children, function (b, i) { b.setAttribute('aria-pressed', String(STATE_KEYS[i] === stateKey)); });
   Array.prototype.forEach.call(pkKinds.children, function (b, i) { b.setAttribute('aria-pressed', String(KIND_KEYS[i] === kindKey)); });
 }
+
+DESIGNS.forEach(function (d, i) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'pk__d';
+  b.innerHTML = '<span class="pk__idx">' + (i + 1) + '</span><span>' + d.name + '</span><span class="pk__dnote">' + d.note + '</span>';
+  b.addEventListener('click', function () { current = i; render(); });
+  pkDesigns.appendChild(b);
+});
 
 STATE_KEYS.forEach(function (k) {
   const b = document.createElement('button');
@@ -1554,7 +1873,10 @@ THEMES.forEach(function (t) {
 document.addEventListener('keydown', function (e) {
   const tag = (e.target && e.target.tagName) || '';
   if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-  if (e.key === 's' || e.key === 'S') { stateKey = STATE_KEYS[(STATE_KEYS.indexOf(stateKey) + 1) % STATE_KEYS.length]; render(); }
+  if (e.key === 'ArrowRight') { current = (current + 1) % DESIGNS.length; render(); }
+  else if (e.key === 'ArrowLeft') { current = (current - 1 + DESIGNS.length) % DESIGNS.length; render(); }
+  else if (e.key >= '1' && e.key <= '9' && Number(e.key) <= DESIGNS.length) { current = Number(e.key) - 1; render(); }
+  else if (e.key === 's' || e.key === 'S') { stateKey = STATE_KEYS[(STATE_KEYS.indexOf(stateKey) + 1) % STATE_KEYS.length]; render(); }
   else if (e.key === 'k' || e.key === 'K') { kindKey = KIND_KEYS[(KIND_KEYS.indexOf(kindKey) + 1) % KIND_KEYS.length]; render(); }
 });
 

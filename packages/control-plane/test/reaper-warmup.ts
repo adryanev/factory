@@ -72,6 +72,25 @@ function reaperPortOf(container: ReaperCandidate): number | undefined {
   return container.Ports.find((port) => port.PrivatePort === 8080)?.PublicPort;
 }
 
+/**
+ * The reaper image is AutoRemove: docker removes the container itself the
+ * moment it stops, so the library's `stop()` (stop, then an explicit remove)
+ * races that removal. Docker answers the race differently depending on how far
+ * it got — 409 while the removal is still in flight, 404 once it has already
+ * finished. Both mean the container is gone, which is exactly what teardown
+ * asked for; anything else is a real failure.
+ */
+function containerAlreadyGone(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const statusCode: unknown = (error as { statusCode?: unknown }).statusCode;
+  if (statusCode === 409 || statusCode === 404) {
+    return true;
+  }
+  return error.message.includes("is already in progress") || error.message.includes("no such container");
+}
+
 export default async function warmUpReaper(): Promise<() => Promise<void>> {
   if (process.env["TESTCONTAINERS_RYUK_DISABLED"] === "true") {
     return async () => {};
@@ -113,12 +132,7 @@ export default async function warmUpReaper(): Promise<() => Promise<void>> {
     try {
       await started.stop();
     } catch (error) {
-      // The reaper image is AutoRemove: docker itself removes the container
-      // the moment it stops, so the library's stop() (stop + explicit
-      // remove) can race that removal and get a 409 "removal ... is already
-      // in progress". The container is being removed either way — that IS
-      // the teardown — so the race is not an error, but anything else is.
-      if (!(error instanceof Error) || !error.message.includes("is already in progress")) {
+      if (!containerAlreadyGone(error)) {
         throw error;
       }
     }

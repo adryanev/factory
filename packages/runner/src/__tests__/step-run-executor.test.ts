@@ -452,50 +452,187 @@ describe("step-run executor: the commit point", () => {
     expect(full.git.calls.some((call) => call.startsWith("push"))).toBe(true);
   });
 
-  it("resolveStep resolves an agent Step with the final prompt built from outputs: (AC4)", () => {
-    const agentClaimed = claimFixture({
-      definition:
-        "version: 1\nname: p\nrepo: backend\nsteps:\n  plan:\n    promptFile: .factory/prompts/plan.md\n    outputs:\n      variants:\n        type: array\n        items: { key: string, brief: string }\n",
+  const RUN_DEFINITION = [
+    "version: 1",
+    "name: p",
+    "repo: backend",
+    "steps:",
+    "  build:",
+    "    run: make build",
+  ].join("\n");
+  const AGENT_DEFINITION = [
+    "version: 1",
+    "name: p",
+    "repo: backend",
+    "steps:",
+    "  plan:",
+    "    promptFile: .factory/prompts/plan.md",
+    "    outputs:",
+    "      variants:",
+    "        type: array",
+    "        items: { key: string, brief: string }",
+  ].join("\n");
+  // A valid pipeline — a kind: pull-request Step is a control-plane Step the
+  // Runner must never execute, so resolveStep's guard is what throws.
+  const PULL_REQUEST_DEFINITION = [
+    "version: 1",
+    "name: p",
+    "repo: backend",
+    "steps:",
+    "  review:",
+    "    prompt: r",
+    "    outputs:",
+    "      prTitle: { type: string }",
+    "      prBody: { type: string }",
+    "  pr:",
+    "    after: [review]",
+    "    kind: pull-request",
+    "    base: main",
+    "    title: { step: review, output: prTitle }",
+    "    body: { step: review, output: prBody }",
+  ].join("\n");
+  const FANOUT_DEFINITION = `version: 1
+name: p
+repo: backend
+steps:
+  implement:
+    branches:
+      - key: agent-a
+        agent: codex
+      - key: agent-b
+        agent: claude
+    prompt: do the work
+    outputs:
+      x: { type: string }
+`;
+
+  type ResolveStepCase =
+    | {
+        case: string;
+        definition: unknown;
+        definitionFiles: Record<string, string>;
+        stepKey: string;
+        branchKey: string | null;
+        expected: { kind: "shell"; run?: string } | { kind: "agent"; agent?: string };
+        expectedFragments?: string[];
+        throws?: never;
+      }
+    | {
+        case: string;
+        definition: unknown;
+        definitionFiles: Record<string, string>;
+        stepKey: string;
+        branchKey: string | null;
+        throws: RegExp;
+        expected?: never;
+        expectedFragments?: never;
+      };
+
+  // lewati: id/kosong, whitespace, beda case, separator, panjang — resolveStep hanya menyisipkan id ke pesan error (step-run-executor.ts:100,104,108,131); tidak pernah bercabang pada nilainya
+  // lewati: definition/kosong & whitespace — validitas teks diputuskan validatePipelineDefinition di @factory/shared/src/pipeline/schema.ts (diuji di pipeline/__tests__/validate.test.ts); resolveStep hanya meneruskan (step-run-executor.ts:102-105)
+  // lewati: definition/separator — YAML tidak punya format berseparator; struktur dibatasi schema zod (schema.ts:255-299)
+  // lewati: definition/beda case & karakter di luar alfabet — kosakata kunci dibatasi schema zod (schema.ts), bukan diinterpretasi resolveStep
+  // lewati: definition/panjang — tidak ada batas panjang di schema maupun guard resolveStep
+  // lewati: definitionFiles/lebih dari satu — promptFile dibaca lewat satu akses kunci (step-run-executor.ts:115), bukan iterasi
+  // lewati: definitionFiles/duplikat — kunci sebuah record unik oleh konstruksinya
+  // lewati: definitionFiles/elemen kosong — konten file diserahkan utuh ke renderFinalPrompt di @factory/shared (step-run-executor.ts:114-125); renderer diuji di sana
+  // lewati: stepKey/kosong, whitespace, beda case, panjang — lookup kehadiran kunci di resolveEffectiveStep (schema.ts:233-234); nilai hanya disisipkan ke pesan error (step-run-executor.ts:108)
+  it.each([
+    {
+      case: "step run: menghasilkan step shell",
+      definition: RUN_DEFINITION,
+      definitionFiles: {},
+      stepKey: "build",
+      branchKey: null,
+      expected: { kind: "shell", run: "make build" },
+    },
+    {
+      case: "step agent via promptFile: prompt akhir memuat isi file dan blok format (AC4)",
+      definition: AGENT_DEFINITION,
       definitionFiles: { ".factory/prompts/plan.md": "Plan three variants.\n" },
       stepKey: "plan",
-    });
-    const step = resolveStep(agentClaimed);
-    expect(step.kind).toBe("agent");
-    if (step.kind === "agent") {
-      expect(step.agent).toBe("claude");
+      branchKey: null,
+      expected: { kind: "agent", agent: "claude" },
       // The format-instruction block is appended — the prompt is no longer
       // the verbatim file content, which is exactly why the UI must show the
       // final prompt (AC5).
-      expect(step.finalPrompt).toContain("Plan three variants.");
-      expect(step.finalPrompt).toContain(`<${FACTORY_OUTPUT_TAG}>`);
-      expect(step.finalPrompt).toContain('"kind":"done"');
-    }
-  });
-
-  it("resolveStep throws for a step that is neither run: nor agent", () => {
-    const badClaimed = claimFixture({
-      // A valid pipeline — a kind: pull-request Step is a control-plane Step
-      // the Runner must never execute, so resolveStep's guard is what throws.
-      definition: [
-        "version: 1",
-        "name: p",
-        "repo: backend",
-        "steps:",
-        "  review:",
-        "    prompt: r",
-        "    outputs:",
-        "      prTitle: { type: string }",
-        "      prBody: { type: string }",
-        "  pr:",
-        "    after: [review]",
-        "    kind: pull-request",
-        "    base: main",
-        "    title: { step: review, output: prTitle }",
-        "    body: { step: review, output: prBody }",
-      ].join("\n"),
+      expectedFragments: ["Plan three variants.", `<${FACTORY_OUTPUT_TAG}>`, '"kind":"done"'],
+    },
+    {
+      case: "step kind: pull-request ditolak — bukan run: maupun agent",
+      definition: PULL_REQUEST_DEFINITION,
+      definitionFiles: {},
       stepKey: "pr",
-    });
-    expect(() => resolveStep(badClaimed)).toThrow(/neither a run: step nor an agent step/);
+      branchKey: null,
+      throws: /neither a run: step nor an agent step/,
+    },
+    {
+      case: "cabang fan-out agent-a dijalankan sebagai codex",
+      definition: FANOUT_DEFINITION,
+      definitionFiles: {},
+      stepKey: "implement",
+      branchKey: "agent-a",
+      expected: { kind: "agent", agent: "codex" },
+    },
+    {
+      case: "cabang fan-out agent-b dijalankan sebagai claude",
+      definition: FANOUT_DEFINITION,
+      definitionFiles: {},
+      stepKey: "implement",
+      branchKey: "agent-b",
+      expected: { kind: "agent", agent: "claude" },
+    },
+    {
+      case: "tanpa branchKey, step induk fan-out berlaku",
+      definition: FANOUT_DEFINITION,
+      definitionFiles: {},
+      stepKey: "implement",
+      branchKey: null,
+      expected: { kind: "agent" },
+    },
+    {
+      // The parent Step's fields are the whole story for a branchesFrom
+      // branch — an unknown branchKey falls back to the parent Step.
+      case: "branchKey tak dikenal jatuh ke step induk (semantik branchesFrom)",
+      definition: FANOUT_DEFINITION,
+      definitionFiles: {},
+      stepKey: "implement",
+      branchKey: "agent-c",
+      expected: { kind: "agent", agent: "claude" },
+    },
+    {
+      case: "definisi bukan teks YAML ditolak di pintu masuk",
+      definition: 42,
+      definitionFiles: {},
+      stepKey: "build",
+      branchKey: null,
+      throws: /definition is not YAML text/,
+    },
+    {
+      case: "stepKey yang tak ada di definisi ditolak",
+      definition: RUN_DEFINITION,
+      definitionFiles: {},
+      stepKey: "nope",
+      branchKey: null,
+      throws: /no step 'nope' in the definition/,
+    },
+  ] satisfies ResolveStepCase[])("$case", (row) => {
+    const claimed = {
+      id: "steprun_1",
+      definition: row.definition,
+      definitionFiles: row.definitionFiles,
+      stepKey: row.stepKey,
+      branchKey: row.branchKey,
+    };
+    if ("throws" in row) {
+      expect(() => resolveStep(claimed)).toThrow(row.throws);
+      return;
+    }
+    const step = resolveStep(claimed);
+    expect(step).toMatchObject(row.expected);
+    for (const fragment of row.expectedFragments ?? []) {
+      expect(step).toMatchObject({ finalPrompt: expect.stringContaining(fragment) });
+    }
   });
 
   it("captures onLine output into chunks, redacts the turn's git tokens, and flushes before /result", async () => {
@@ -936,31 +1073,6 @@ describe("agent Steps: the executor flow", () => {
 });
 
 describe("fan-out and Join: the Runner's half (issue #11)", () => {
-  it("resolveStep applies a fan-out branch's overrides — a branch with its own agent runs as itself", () => {
-    const definition = `version: 1
-name: p
-repo: backend
-steps:
-  implement:
-    branches:
-      - key: agent-a
-        agent: codex
-      - key: agent-b
-        agent: claude
-    prompt: do the work
-    outputs:
-      x: { type: string }
-`;
-    const base = { definition, definitionFiles: {}, runId: "run_1", id: "steprun_1" };
-    const codexBranch = resolveStep({ ...base, stepKey: "implement", branchKey: "agent-a" });
-    expect(codexBranch).toMatchObject({ kind: "agent", agent: "codex" });
-    const claudeBranch = resolveStep({ ...base, stepKey: "implement", branchKey: "agent-b" });
-    expect(claudeBranch).toMatchObject({ kind: "agent", agent: "claude" });
-    // The parent Step's fields are the whole story for a branchesFrom branch.
-    const plain = resolveStep({ ...base, stepKey: "implement", branchKey: null });
-    expect(plain).toMatchObject({ kind: "agent" });
-  });
-
   it("a Join claim writes its manifest to the clone root, hands the path to the shell turn spec, and removes it after", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "factory-manifest-test-"));
     try {

@@ -22,7 +22,7 @@ Yang harus dijawab lewat prototype, bukan lewat diskusi:
 5. **Keadaan gagal** — bagaimana C yang gagal ditampilkan, dan seberapa cepat orang bisa sampai ke penyebabnya. Ini keadaan yang paling sering dibuka, jadi jangan dianggap kasus pinggiran.
 6. **Halaman daftar** — sebelum layar ini, ada layar berisi banyak run. Apa yang tampil di sana.
 
-Simpan di `.scratch/distributed-software-factory/prototypes/monitoring-ui/` dan tautkan dari sini. Sekali pakai — yang kita ambil adalah keputusannya, bukan kodenya.
+Simpan di `docs/design/distributed-software-factory/prototypes/monitoring-ui/` dan tautkan dari sini. Sekali pakai — yang kita ambil adalah keputusannya, bukan kodenya.
 
 **Keadaan yang wajib ada di prototype, dari ticket 06** — semuanya sudah diputuskan, jadi ini bahan, bukan pertanyaan:
 

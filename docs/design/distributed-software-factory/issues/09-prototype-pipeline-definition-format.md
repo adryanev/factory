@@ -37,7 +37,7 @@ Dua muatan baru yang wajib ikut termuat, dan keduanya adalah tempat sebuah gaya 
 - **Tiap Step menyatakan repo mana yang ia sentuh**, dan itu harus tetap ringkas untuk Pipeline satu repo — kalau sebuah gaya memaksa setiap Step menuliskan nama repo padahal seluruh Pipeline cuma menyentuh satu, gaya itu berisik.
 - **Pipeline acuan ketiga: lintas repo.** Tambahkan `plan → {frontend, backend} → join` di samping dua acuan yang sudah ada, supaya terlihat bagaimana fan-out ber-repo dan pemilihan repo per Step terbaca dalam satu file.
 
-Simpan di `.scratch/distributed-software-factory/prototypes/pipeline-format/` dan tautkan dari sini. Ini artefak sekali pakai untuk mengambil keputusan, bukan kode yang dipelihara.
+Simpan di `docs/design/distributed-software-factory/prototypes/pipeline-format/` dan tautkan dari sini. Ini artefak sekali pakai untuk mengambil keputusan, bukan kode yang dipelihara.
 
 ## Answer
 

@@ -26,7 +26,7 @@
 # is the first release that understands --single-node /
 # --default-bucket / --default-access-key, and any older version fails on
 # the FIRST UPLOAD, not at boot (verified hands-on; transcript in
-# .scratch/distributed-software-factory/recon-deps.md). `latest` is refused
+# docs/design/distributed-software-factory/recon-deps.md). `latest` is refused
 # for the same reason sandcastle's version is pinned.
 #
 # Migrations are a one-shot service with

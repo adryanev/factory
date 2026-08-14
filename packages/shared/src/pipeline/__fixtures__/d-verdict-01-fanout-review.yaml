@@ -1,4 +1,4 @@
-# Copied from .scratch/distributed-software-factory/prototypes/pipeline-format/d-verdict/01-fanout-review.yaml
+# Copied from docs/design/distributed-software-factory/prototypes/pipeline-format/d-verdict/01-fanout-review.yaml
 # (the winning prototype: frame of style A, branches of style C).
 #
 # PATCHED: added `concurrency: cancel` at the Pipeline level. The prototype

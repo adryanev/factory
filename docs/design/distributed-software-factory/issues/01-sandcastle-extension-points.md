@@ -20,7 +20,7 @@ Baca source di https://github.com/mattpocock/sandcastle dan jawab dengan bukti d
 8. **Secret** — mekanisme `.sandcastle/.env`. Bagaimana variabel sampai ke agent di dalam container, dan apakah ada redaksi (redaction) bawaan pada log.
 9. **Struktur repo** — apakah ini satu paket atau monorepo, seberapa aktif, apakah ada API internal yang jelas tidak stabil.
 
-Keluaran: `.scratch/distributed-software-factory/research/sandcastle-api.md`, dengan tautan ke file dan baris yang jadi dasar tiap temuan, ditutup daftar eksplisit **hal yang sandcastle tidak lakukan** yang harus kita bangun sendiri.
+Keluaran: `docs/design/distributed-software-factory/research/sandcastle-api.md`, dengan tautan ke file dan baris yang jadi dasar tiap temuan, ditutup daftar eksplisit **hal yang sandcastle tidak lakukan** yang harus kita bangun sendiri.
 
 ## Answer
 

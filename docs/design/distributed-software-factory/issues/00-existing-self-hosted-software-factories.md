@@ -89,7 +89,7 @@ Lebih tajam lagi: **mengadopsi Fabro kemungkinan besar berarti membuang sandcast
 
 Riset ini harus menyatakan tegas, untuk tiap rekomendasi: apa yang terjadi pada sandcastle, dan apa yang terjadi pada keputusan stack di Notes. Kalau rekomendasinya menuntut membatalkan salah satu keputusan yang sudah dikunci, katakan itu terang-terangan — jangan diam-diam diakali.
 
-Keluaran: `.scratch/distributed-software-factory/research/existing-solutions.md`.
+Keluaran: `docs/design/distributed-software-factory/research/existing-solutions.md`.
 
 ### Aturan bukti
 

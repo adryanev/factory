@@ -40,7 +40,7 @@ Selesai ketika tidak ada lagi yang perlu diputuskan sebelum implementasi dimulai
 
 **Bahasa**: user berbahasa Indonesia. Jawab dalam Bahasa Indonesia, istilah teknis biarkan dalam bahasa Inggris.
 
-**Output research**: tulis ke `.scratch/distributed-software-factory/research/<nama>.md` dan tautkan dari ticket-nya. Direktori ini belum git repo, jadi tidak ada branch `research/<name>`.
+**Output research**: tulis ke `docs/design/distributed-software-factory/research/<nama>.md` dan tautkan dari ticket-nya. Direktori ini belum git repo, jadi tidak ada branch `research/<name>`.
 
 ## Decisions so far
 

@@ -19,7 +19,7 @@ Pelajari **Woodpecker CI**, **Drone**, **Buildkite**, dan **GitHub Actions** (se
 5. **Akses repo** — bagaimana runner mendapat kredensial untuk clone repo privat: deploy key, PAT, GitHub App installation token, atau token berumur pendek per job. Bandingkan risiko dan beban operasionalnya. Sertakan kasus **git host self-hosted** (Gitea/Forgejo), bukan hanya GitHub.
 6. **Masa hidup** — apakah credential job berumur pendek, dan bagaimana ia dicabut ketika job selesai atau worker dicurigai bocor.
 
-Keluaran: `.scratch/distributed-software-factory/research/secret-handling.md`, ditutup daftar rekomendasi minimum yang tetap aman untuk instalasi self-host oleh satu tim internal — jelaskan apa yang **tidak** perlu kita bangun.
+Keluaran: `docs/design/distributed-software-factory/research/secret-handling.md`, ditutup daftar rekomendasi minimum yang tetap aman untuk instalasi self-host oleh satu tim internal — jelaskan apa yang **tidak** perlu kita bangun.
 
 ## Answer
 

@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!--
-  Beranda Factory — hasil dua belas ronde grilling desain.
+  Beranda Factory — hasil dua belas ronde grilling desain, plus satu
+  keputusan hari-pertama yang diambil di luar ronde.
 
   Prototipe buangan. Ia menjawab satu pertanyaan: bentuk apa yang dipakai
   surface beranda, yang hari ini masih berupa fallback tanpa gaya di
@@ -93,6 +94,18 @@
                               jenis yang membuang identitas kejadian, per
                               kejadian tanpa kelompok (17 baris di Banjir),
                               per proyek, dan per sebab.
+   13. Hari pertama ........ Beranda berubah jadi penyiapan — selama belum
+                              ada Run, seluruh permukaan jadi empat langkah
+                              berurut: daftarkan Runner, buat Project, tulis
+                              Pipeline, jalankan Run. Daftar itu DITURUNKAN
+                              dari keadaan, bukan disimpan: tanpa kolom
+                              onboarding_completed, tanpa migrasi, tanpa
+                              tombol lewati, tanpa tur. Ditolak: Kendali
+                              tetap dengan tiga kotak kosong, dan halaman
+                              penyiapan terpisah lewat pengalihan rute.
+                              Diputuskan saat penulisan ticket, bukan lewat
+                              ronde prototipe — jadi tidak ada varian untuk
+                              keadaan ini di file ini.
 
   Aturan yang dipegang sepanjang dua belas ronde, semuanya dari kode yang
   ada, bukan karangan prototipe ini:
@@ -1801,7 +1814,7 @@ function wireRail() {
    Pemilih
    ========================================================================== */
 const DESIGNS = [
-  { name: 'Beranda', note: 'dua belas ronde, tidak ada varian tersisa', render: withCentre(s3), after: wireRail },
+  { name: 'Beranda', note: 'tidak ada varian tersisa', render: withCentre(s3), after: wireRail },
 ];
 const STATE_KEYS = ['sibuk', 'tenang', 'gawat', 'banjir'];
 

@@ -569,6 +569,26 @@ Tidak ditambahkan: langkah di bawah `--fs-xs` dan di atas `--fs-2xl`. Keduanya d
 
 Aturan tampilan yang ikut terkunci dari prototype: kotak fan-out **meringkas di atas delapan cabang** dengan urutan `failed` → `awaiting` → `unsched` → `running`; panel kanan tetap sehingga **tidak ada URL per StepRun**; status berbentuk, bukan sekadar titik berwarna; notasi giliran **ditulis panjang** (`giliran 4 · attempt 1`) di mana-mana kecuali di nama branch, di mana ia literal dan disalin ke `git checkout`; layar grilling **berdampingan** (percakapan + draf) di desktop, bertumpuk hanya di layar sempit; kotak teks **tidak pernah hilang** walau ada pilihan; **tanpa tombol "Selesai"** di layar grilling.
 
+### Beranda
+
+Hari ini `/` adalah fallback tanpa gaya. Bentuknya diputuskan lewat tiga belas ronde grilling di `prototypes/home-ui/index.html`; alasan tiap keputusan ada di kepala file itu, yang di bawah adalah apa yang dibangun.
+
+**Bentuk keseluruhan.** Tiga zona tetap: nav rail kiri, pusat kerja, rail kanan. Bukan inbox satu kolom, bukan tabel Run, bukan linimasa, bukan kartu per Project.
+
+**Pusat ikut keadaan.** Ada Question menunggu ⇒ pusat **adalah** pertanyaan itu. Tidak ada ⇒ pusat kembali jadi Graph. Graph tidak boleh hilang dalam keadaan mana pun: pertanyaannya muncul sebagai **sheet yang bersandar** ke node `awaiting-human` lewat tali putus-putus, di dalam ruang koordinat Graph, dan **mengikuti** saat kanvas digeser — talinya digambar ulang tiap scroll sehingga ikatannya ke node tidak pernah putus.
+
+**Kendali jawaban menyebut akibatnya**, bukan hanya namanya: "Setujui → `pecah-tugas` jalan, fan-out implementasi lahir 3 cabang". Salah jawab di sini melahirkan fan-out, membuka PR, atau membatalkan Run. Untuk `edit-artifact`, perubahan giliran ini **dibaca sebagai diff dulu** (baris agent, baris manusia, baris dibuang), baru disunting.
+
+**Rail kanan** memuat Run, runner pool, dan biaya. Ia tetap ada dan tetap penuh isi dalam keadaan apa pun — pemantauan ambient berhak atas ruangnya walau sebagian besar waktu tidak menuntut tindakan. Ditolak: rail yang kosong saat sehat, rail yang dihapus, dan urutan panel yang bergeser mengikuti keadaan.
+
+**Pita alarm** menempel di kepala rail dan **menambah, tidak pernah menggantikan**; ketiga panel tetap utuh di bawahnya. Satu alarm satu baris ringkas; semua alarm terlihat setiap saat, tidak ada yang dipotong atau disembunyikan di balik "+n lagi". Baris bisa **ditekan dan terbuka di tempat**, tanpa keluar dari rail. Alarm **dikelompokkan per jenis, isinya per kejadian**: kepala menyebut jumlah ("4 Run gagal"), isinya menyebut yang mana lengkap dengan attempt-nya. Pengelompokan adalah kompresi, bukan pembuangan — karenanya jumlah baris pita stabil terhadap beban, dan pita tidak perlu batas tinggi buatan.
+
+**Hari pertama, beranda adalah daftar penyiapan.** Selama belum ada Run, seluruh permukaan berganti jadi empat langkah berurut: daftarkan Runner → buat Project → tulis Pipeline → jalankan Run. Ini konsekuensi dari aturan "pusat ikut keadaan", bukan pengecualian terhadapnya.
+
+Daftar itu **diturunkan dari keadaan, bukan disimpan**. Sebuah langkah selesai karena datanya ada — ada Runner hidup, ada Project, ada Pipeline, ada Run — bukan karena sebuah flag dicentang. Konsekuensinya mengikat: **tidak ada kolom `onboarding_completed`, tidak ada migrasi, tidak ada tombol lewati, tidak ada "tampilkan lagi nanti", tidak ada tur.** Semuanya menuntut state tersimpan, dan tidak satu pun dibutuhkan kalau daftarnya turunan. Daftar itu hilang sendiri begitu Run pertama ada, dan kembali sendiri kalau prasyaratnya hilang.
+
+`--fs-2xs` dan `--fs-3xl` yang ditangguhkan di atas masuk bersama layar ini — beranda adalah pembaca yang ditunggu.
+
 ## Testing Decisions
 
 Apa yang membuat test bagus di repo ini: **ia menembak perilaku yang terlihat dari luar sebuah seam, dan tidak pernah menyentuh apa yang ada di dalamnya.** Test yang menegaskan bentuk internal — nama fungsi, urutan pemanggilan, isi tabel yang tidak pernah dibaca API — mengunci refactor dan akan dihapus saat ditemukan. Setiap test harus deterministik: jam, jaringan, dan seed acak diinjeksikan, tidak pernah dibaca dari lingkungan.

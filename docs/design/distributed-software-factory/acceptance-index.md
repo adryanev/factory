@@ -494,6 +494,33 @@ Prosa spec di sini longgar, implementasinya benar.
 
 ---
 
+## Issue 111 — Beranda: permukaan kerja harian dan daftar penyiapan hari pertama
+
+**Blocked by:** None — keempat sumber datanya sudah closed (#5 runner pool, #12 cost, #13 Question, #14 Graph)
+
+**Files/areas touched:** `packages/web/src/App.tsx` (routing), layar beranda baru, `tokens/tokens.css`, primitives yang sudah ada
+
+**Acceptance criteria:**
+
+- [ ] `/` menampilkan tiga zona tetap: nav rail kiri, pusat kerja, rail kanan
+- [ ] Ada Question menunggu ⇒ pusat **adalah** pertanyaan itu; tidak ada ⇒ pusat kembali jadi Graph. Graph tidak pernah hilang
+- [ ] Pertanyaan jadi sheet yang **bersandar** ke node `awaiting-human` lewat tali putus-putus di ruang koordinat Graph, dan **mengikuti** saat kanvas digeser
+- [ ] Tiap kendali jawaban menyebut **akibatnya di Graph**, bukan hanya namanya
+- [ ] `edit-artifact` menampilkan diff giliran ini dulu (baris agent, manusia, dibuang) sebelum menyunting
+- [ ] Rail kanan memuat Run, runner pool, biaya; tetap ada dalam keadaan apa pun, urutan panelnya tidak bergeser
+- [ ] Pita alarm di kepala rail **menambah**, tidak menggantikan; ketiga panel tetap utuh di bawahnya
+- [ ] Satu alarm satu baris ringkas, semua terlihat setiap saat — tidak ada "+n lagi", tidak ada batas tinggi bergulir
+- [ ] Baris alarm bisa ditekan dan keterangan penuhnya terbuka **di tempat**
+- [ ] Alarm dikelompokkan **per jenis, isinya per kejadian**; cron dilewati ikut mengelompok seperti jenis lain
+- [ ] Tanpa satu pun kejadian, pita tidak dirender sama sekali
+- [ ] Belum ada Run ⇒ seluruh `/` jadi empat langkah berurut: daftarkan Runner → buat Project → tulis Pipeline → jalankan Run
+- [ ] Status tiap langkah **diturunkan dari query**, bukan flag tersimpan: tanpa kolom `onboarding_completed`, tanpa migrasi, tanpa tombol lewati, tanpa tur
+- [ ] Daftar hilang sendiri saat Run pertama ada, dan **kembali sendiri** kalau prasyaratnya hilang
+- [ ] `grilling/GrillingSession.tsx` punya rute (regresi terhadap #15 yang sudah closed) dan `/questions/waiting` dirutekan
+- [ ] `--fs-2xs` dan `--fs-3xl` diresmikan di `tokens.css` bersama kode yang membacanya
+
+---
+
 ## Summary Table
 
 | Issue | Title | Criteria Count | Blocked by |
@@ -518,3 +545,4 @@ Prosa spec di sini longgar, implementasinya benar.
 | 19 | Sweep retensi | 8 | #7, #10, #13 |
 | 20 | Editor Pipeline visual | 8 | #4, #17 |
 | 21 | Packaging self-host | 12 | #18, #19 |
+| 111 | Beranda: permukaan kerja harian dan daftar penyiapan hari pertama | 16 | — |

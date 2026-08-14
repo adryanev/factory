@@ -1,38 +1,58 @@
 import { describe, expect, it } from "vitest";
 import { ARTIFACT_KINDS, isArtifactKind, normalizeArtifactKey } from "./artifacts.js";
 
+type NormalizeArtifactKeyCase = {
+  case: string;
+  input: string;
+  expected: string;
+};
+
 describe("normalizeArtifactKey", () => {
-  it("lowercases and collapses punctuation into the KEY_PATTERN shape", () => {
-    expect(normalizeArtifactKey("diff")).toBe("diff");
-    expect(normalizeArtifactKey("PRD")).toBe("prd");
-    expect(normalizeArtifactKey("My Report.md")).toBe("my-report.md");
-    expect(normalizeArtifactKey("  leading dots..")).toBe("leading-dots");
-    expect(normalizeArtifactKey("laporan Final v2")).toBe("laporan-final-v2");
-  });
-
-  it("keeps dots and underscores as separators", () => {
-    expect(normalizeArtifactKey("plan.v2_final")).toBe("plan.v2_final");
-  });
-
-  it("caps the length at 64 characters like KEY_PATTERN", () => {
-    const long = "a".repeat(120);
-    expect(normalizeArtifactKey(long)).toHaveLength(64);
-  });
-
-  it("falls back to a stable slug when nothing survives normalization", () => {
-    expect(normalizeArtifactKey("!!!")).toBe("artifact");
-    expect(normalizeArtifactKey("")).toBe("artifact");
+  it.each([
+    { case: "input kosong jatuh ke slug stabil", input: "", expected: "artifact" },
+    { case: "hanya whitespace jatuh ke slug stabil", input: "   ", expected: "artifact" },
+    { case: "huruf besar dilowercase-kan", input: "PRD", expected: "prd" },
+    { case: "campur huruf dan spasi dinormalisasi", input: "laporan Final v2", expected: "laporan-final-v2" },
+    { case: "spasi dikolaps jadi dash, titik dipertahankan", input: "My Report.md", expected: "my-report.md" },
+    { case: "karakter di luar alfabet semuanya → slug stabil", input: "!!!", expected: "artifact" },
+    { case: "sudah berbentuk slug diteruskan apa adanya", input: "diff", expected: "diff" },
+    { case: "titik dan underscore dipertahankan sebagai separator", input: "plan.v2_final", expected: "plan.v2_final" },
+    { case: "separator di awal dibuang", input: ".hidden", expected: "hidden" },
+    { case: "separator berulang di akhir dibuang", input: "  leading dots..", expected: "leading-dots" },
+    { case: "tepat di batas 64 karakter", input: "a".repeat(64), expected: "a".repeat(64) },
+    { case: "satu karakter di atas batas 64", input: "a".repeat(65), expected: "a".repeat(64) },
+    { case: "jauh di atas batas dipotong di 64", input: "a".repeat(120), expected: "a".repeat(64) },
+  ] satisfies NormalizeArtifactKeyCase[])("$case", ({ input, expected }) => {
+    expect(normalizeArtifactKey(input)).toBe(expected);
   });
 });
 
 describe("ARTIFACT_KINDS", () => {
-  it("is the closed six-kind set the UI must cover", () => {
+  // Klaim universal atas himpunan milik kode produksi (klausa 7) — menabelkannya
+  // menyalin daftar hidup ke dalam test; bertahan sebagai prosa.
+  it("adalah himpunan tertutup enam kind yang wajib ditutup UI", () => {
     expect(ARTIFACT_KINDS).toEqual(["diff", "transcript", "document", "structured", "command-output", "binary"]);
   });
 
-  it("isArtifactKind discriminates the closed set", () => {
-    expect(isArtifactKind("diff")).toBe(true);
-    expect(isArtifactKind("binary")).toBe(true);
-    expect(isArtifactKind("video")).toBe(false);
+  type IsArtifactKindCase = {
+    case: string;
+    input: string;
+    expected: boolean;
+  };
+
+  // lewati: kosong/hanya whitespace — ARTIFACT_KINDS di artifacts.ts:15-22 tidak memuat keduanya; satu baris nilai di luar himpunan mewakili sumbu
+  // lewati: case — semua arm huruf kecil di artifacts.ts:15-22 dan includes() di artifacts.ts:27 peka case; varian case adalah nilai di luar himpunan
+  // lewati: separator — ARTIFACT_KINDS di artifacts.ts:15-22 bukan format berseparator
+  // lewati: panjang — tidak ada batas panjang di artifacts.ts
+  it.each([
+    { case: "diff", input: "diff", expected: true },
+    { case: "transcript", input: "transcript", expected: true },
+    { case: "document", input: "document", expected: true },
+    { case: "structured", input: "structured", expected: true },
+    { case: "command-output", input: "command-output", expected: true },
+    { case: "binary", input: "binary", expected: true },
+    { case: "nilai di luar himpunan tertutup", input: "video", expected: false },
+  ] satisfies IsArtifactKindCase[])("$case", ({ input, expected }) => {
+    expect(isArtifactKind(input)).toBe(expected);
   });
 });

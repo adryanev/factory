@@ -17,7 +17,7 @@ Bandingkan setidaknya: **better-auth**, **Lucia** (dan status pemeliharaannya), 
 5. **SSO** — jalur ke OIDC/SAML kalau nanti org butuh, tanpa harus mengganti seluruh pilihan.
 6. **Kematangan** — tanggal rilis terakhir, ukuran komunitas, dan apakah ada tanda proyek ditinggalkan.
 
-Keluaran: `.scratch/distributed-software-factory/research/self-hosted-auth.md`, dengan tabel perbandingan dan satu rekomendasi beserta alasannya. Sebutkan tegas kalau auth manusia dan auth worker sebaiknya dipisah.
+Keluaran: `docs/design/distributed-software-factory/research/self-hosted-auth.md`, dengan tabel perbandingan dan satu rekomendasi beserta alasannya. Sebutkan tegas kalau auth manusia dan auth worker sebaiknya dipisah.
 
 ## Answer
 

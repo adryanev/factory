@@ -1,4 +1,4 @@
-Spec ini menjahit 29 ticket desain di `.scratch/distributed-software-factory/` jadi satu dokumen siap implement. Setiap keputusan di bawah sudah punya alasan tertulis di ticket-nya; yang ada di sini adalah **apa yang dibangun**, bukan pengulangan **kenapa**. Glossary domain mengikat: lihat `CONTEXT.md`.
+Spec ini menjahit 29 ticket desain di `docs/design/distributed-software-factory/` jadi satu dokumen siap implement. Setiap keputusan di bawah sudah punya alasan tertulis di ticket-nya; yang ada di sini adalah **apa yang dibangun**, bukan pengulangan **kenapa**. Glossary domain mengikat: lihat `CONTEXT.md`.
 
 ## Problem Statement
 

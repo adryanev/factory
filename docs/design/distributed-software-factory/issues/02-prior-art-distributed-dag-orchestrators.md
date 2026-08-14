@@ -27,7 +27,7 @@ Pelajari implementasi dan dokumentasi dari: **GitHub Actions self-hosted runner*
 
 Untuk tiap pola, catat juga **biaya**-nya: komponen infra yang dibutuhkan dan kerumitan yang ditimbulkan. Kita membangun untuk tim internal yang self-hosted, bukan skala GitHub.
 
-Keluaran: `.scratch/distributed-software-factory/research/orchestrator-prior-art.md`, ditutup rekomendasi ringkas: pola paling sederhana untuk leasing, heartbeat, join, dan cancel yang masih benar pada skala puluhan worker.
+Keluaran: `docs/design/distributed-software-factory/research/orchestrator-prior-art.md`, ditutup rekomendasi ringkas: pola paling sederhana untuk leasing, heartbeat, join, dan cancel yang masih benar pada skala puluhan worker.
 
 ## Answer
 

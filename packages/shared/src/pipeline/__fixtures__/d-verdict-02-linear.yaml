@@ -1,5 +1,5 @@
 # Copied verbatim from
-# .scratch/distributed-software-factory/prototypes/pipeline-format/d-verdict/02-linear.yaml
+# docs/design/distributed-software-factory/prototypes/pipeline-format/d-verdict/02-linear.yaml
 
 version: 1
 name: Lint, build, test

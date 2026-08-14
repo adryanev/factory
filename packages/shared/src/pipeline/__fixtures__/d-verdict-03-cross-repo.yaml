@@ -1,5 +1,5 @@
 # Copied verbatim from
-# .scratch/distributed-software-factory/prototypes/pipeline-format/d-verdict/03-cross-repo.yaml
+# docs/design/distributed-software-factory/prototypes/pipeline-format/d-verdict/03-cross-repo.yaml
 
 version: 1
 name: Ubah kontrak API, implement di dua repo

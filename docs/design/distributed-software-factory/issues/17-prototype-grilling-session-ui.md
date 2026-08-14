@@ -22,7 +22,7 @@ Yang harus dijawab lewat prototype:
 6. **Selesai** — apa yang menandai sesi berakhir, dan apa yang terjadi setelahnya: PRD jadi artefak, run lanjut ke step berikutnya. Tombolnya seperti apa dan siapa yang menekan.
 7. **Sesi yang salah arah** — bagaimana orang mundur, mengulang dari giliran tertentu, atau membuang sesi.
 
-Simpan di `.scratch/distributed-software-factory/prototypes/grilling-ui/` dan tautkan dari sini. Sekali pakai — yang diambil keputusannya, bukan kodenya.
+Simpan di `docs/design/distributed-software-factory/prototypes/grilling-ui/` dan tautkan dari sini. Sekali pakai — yang diambil keputusannya, bukan kodenya.
 
 **Bahan dari ticket 15**: draf PRD adalah Artifact `kind: document` dengan `key: "prd"`, **immutable dan satu per StepRun** — jadi "draf yang sudah tiga kali direvisi" berarti tiga baris Artifact di tiga StepRun berbeda, bukan satu dokumen yang berubah. Pertanyaan 3 dan 5 harus dirancang di atas bentuk itu: riwayat sudah tersedia gratis sebagai urutan turn, dan `edit-artifact` sebagai `kind` Question keempat sekarang boleh dipakai tanpa keputusan baru. Renderer draf adalah markdown, transkrip juga dirender sebagai markdown.
 

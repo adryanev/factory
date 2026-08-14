@@ -26,3 +26,8 @@ deploy/github-app/register.html
 
 # Editor hook cache: per-session state with machine-local absolute paths
 .impeccable/hook.cache.json
+
+# Agent scratch: drafts on their way to the issue tracker (docs/agents/issue-tracker.md).
+# The published issue is the artifact; the draft is not. Durable design docs belong
+# in docs/design/, not here.
+.scratch/

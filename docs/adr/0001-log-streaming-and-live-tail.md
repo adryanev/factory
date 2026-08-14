@@ -20,7 +20,7 @@ Garage is pinned exactly at `dxflrs/garage:v2.3.0`. The pin is load-bearing:
 any pre-2.3.0 version boots clean and reports a healthy node but fails on the
 first upload ("Layout not ready"); v2.3.0 is the first release whose
 `--single-node --default-bucket --default-access-key` flags remove the manual
-layout step (verified hands-on, see `.scratch/distributed-software-factory/
+layout step (verified hands-on, see `docs/design/distributed-software-factory/
 recon-deps.md`). Garage runs behind its own hostname because SigV4 signs the
 path and the `Host` header, so it cannot share an origin with web + API.
 

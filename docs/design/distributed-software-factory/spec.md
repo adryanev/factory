@@ -561,6 +561,12 @@ DNS: satu hostname untuk web + API, satu lagi untuk blob store. Reverse proxy wa
 
 Token dari design system yang sudah ada di organisasi (primary teal, skala neutral Primer, radius dan skala bayangan/tipografi dari Figma, light dan dark). Warna `--attention` dipersempit maknanya jadi **hanya** "ditulis manusia ke dalam artefak".
 
+**Satu percabangan dari Corpus: separuh atas skala tipe.** `--fs-lg`, `--fs-xl`, dan `--fs-2xl` dinaikkan jadi `1.25 / 1.5 / 1.875rem`, sehingga langkahnya 1.25 · 1.20 · 1.25, bukan 1.13 · 1.11 · 1.20 seperti aslinya. Alasannya bukan estetika rasio: dari 75 pemakaian skala tipe di `packages/web/src`, **68 menumpuk di `--fs-xs` (52) dan `--fs-sm` (16)**, sementara empat langkah teratas dipakai tujuh kali di seluruh produk. Hierarki tinggal di langkah atas, jadi hanya langkah atas yang diperbaiki.
+
+`--fs-xs` dan `--fs-sm` **dibekukan pada nilai Corpus** dan tidak boleh ikut direnggangkan. Keduanya memikul seluruh permukaan operasional yang padat — tabel Run, baris meta, chip, log — yang justru hidup dari kepadatan itu. Konsekuensinya langkah bawah tetap rapat (1.17 dan 1.14), dan detektor desain akan terus menandainya sebagai "flat type hierarchy". Itu keputusan, bukan sisa pekerjaan.
+
+Tidak ditambahkan: langkah di bawah `--fs-xs` dan di atas `--fs-2xl`. Keduanya diminta prototipe beranda (`docs/design/distributed-software-factory/prototypes/home-ui`), tapi belum punya pembaca di kode. Tambahkan bersama kode yang membacanya, jangan mendahului.
+
 Aturan tampilan yang ikut terkunci dari prototype: kotak fan-out **meringkas di atas delapan cabang** dengan urutan `failed` → `awaiting` → `unsched` → `running`; panel kanan tetap sehingga **tidak ada URL per StepRun**; status berbentuk, bukan sekadar titik berwarna; notasi giliran **ditulis panjang** (`giliran 4 · attempt 1`) di mana-mana kecuali di nama branch, di mana ia literal dan disalin ke `git checkout`; layar grilling **berdampingan** (percakapan + draf) di desktop, bertumpuk hanya di layar sempit; kotak teks **tidak pernah hilang** walau ada pilihan; **tanpa tombol "Selesai"** di layar grilling.
 
 ## Testing Decisions

@@ -46,8 +46,12 @@
   letter-spacing: var(--tracking-tight);
 }
 
+/* The one heading that used to sit off the scale entirely (1.35–1.75rem).
+   It stays fluid, but both ends are now steps of the ladder so widening the
+   scale moves it too instead of leaving it stranded between --fs-xl and
+   --fs-2xl. */
 .run-header h1 {
-  font-size: clamp(1.35rem, 2vw, 1.75rem);
+  font-size: clamp(var(--fs-xl), 2vw, var(--fs-2xl));
 }
 
 .run-header__eyebrow {

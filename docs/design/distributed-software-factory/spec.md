@@ -561,7 +561,33 @@ DNS: satu hostname untuk web + API, satu lagi untuk blob store. Reverse proxy wa
 
 Token dari design system yang sudah ada di organisasi (primary teal, skala neutral Primer, radius dan skala bayangan/tipografi dari Figma, light dan dark). Warna `--attention` dipersempit maknanya jadi **hanya** "ditulis manusia ke dalam artefak".
 
+**Satu percabangan dari Corpus: separuh atas skala tipe.** `--fs-lg`, `--fs-xl`, dan `--fs-2xl` dinaikkan jadi `1.25 / 1.5 / 1.875rem`, sehingga langkahnya 1.25 · 1.20 · 1.25, bukan 1.13 · 1.11 · 1.20 seperti aslinya. Alasannya bukan estetika rasio: dari 75 pemakaian skala tipe di `packages/web/src`, **68 menumpuk di `--fs-xs` (52) dan `--fs-sm` (16)**, sementara empat langkah teratas dipakai tujuh kali di seluruh produk. Hierarki tinggal di langkah atas, jadi hanya langkah atas yang diperbaiki.
+
+`--fs-xs` dan `--fs-sm` **dibekukan pada nilai Corpus** dan tidak boleh ikut direnggangkan. Keduanya memikul seluruh permukaan operasional yang padat — tabel Run, baris meta, chip, log — yang justru hidup dari kepadatan itu. Konsekuensinya langkah bawah tetap rapat (1.17 dan 1.14), dan detektor desain akan terus menandainya sebagai "flat type hierarchy". Itu keputusan, bukan sisa pekerjaan.
+
+Tidak ditambahkan: langkah di bawah `--fs-xs` dan di atas `--fs-2xl`. Keduanya diminta prototipe beranda (`docs/design/distributed-software-factory/prototypes/home-ui`), tapi belum punya pembaca di kode. Tambahkan bersama kode yang membacanya, jangan mendahului.
+
 Aturan tampilan yang ikut terkunci dari prototype: kotak fan-out **meringkas di atas delapan cabang** dengan urutan `failed` → `awaiting` → `unsched` → `running`; panel kanan tetap sehingga **tidak ada URL per StepRun**; status berbentuk, bukan sekadar titik berwarna; notasi giliran **ditulis panjang** (`giliran 4 · attempt 1`) di mana-mana kecuali di nama branch, di mana ia literal dan disalin ke `git checkout`; layar grilling **berdampingan** (percakapan + draf) di desktop, bertumpuk hanya di layar sempit; kotak teks **tidak pernah hilang** walau ada pilihan; **tanpa tombol "Selesai"** di layar grilling.
+
+### Beranda
+
+Hari ini `/` adalah fallback tanpa gaya. Bentuknya diputuskan lewat tiga belas ronde grilling di `prototypes/home-ui/index.html`; alasan tiap keputusan ada di kepala file itu, yang di bawah adalah apa yang dibangun.
+
+**Bentuk keseluruhan.** Tiga zona tetap: nav rail kiri, pusat kerja, rail kanan. Bukan inbox satu kolom, bukan tabel Run, bukan linimasa, bukan kartu per Project.
+
+**Pusat ikut keadaan.** Ada Question menunggu ⇒ pusat **adalah** pertanyaan itu. Tidak ada ⇒ pusat kembali jadi Graph. Graph tidak boleh hilang dalam keadaan mana pun: pertanyaannya muncul sebagai **sheet yang bersandar** ke node `awaiting-human` lewat tali putus-putus, di dalam ruang koordinat Graph, dan **mengikuti** saat kanvas digeser — talinya digambar ulang tiap scroll sehingga ikatannya ke node tidak pernah putus.
+
+**Kendali jawaban menyebut akibatnya**, bukan hanya namanya: "Setujui → `pecah-tugas` jalan, fan-out implementasi lahir 3 cabang". Salah jawab di sini melahirkan fan-out, membuka PR, atau membatalkan Run. Untuk `edit-artifact`, perubahan giliran ini **dibaca sebagai diff dulu** (baris agent, baris manusia, baris dibuang), baru disunting.
+
+**Rail kanan** memuat Run, runner pool, dan biaya. Ia tetap ada dan tetap penuh isi dalam keadaan apa pun — pemantauan ambient berhak atas ruangnya walau sebagian besar waktu tidak menuntut tindakan. Ditolak: rail yang kosong saat sehat, rail yang dihapus, dan urutan panel yang bergeser mengikuti keadaan.
+
+**Pita alarm** menempel di kepala rail dan **menambah, tidak pernah menggantikan**; ketiga panel tetap utuh di bawahnya. Satu alarm satu baris ringkas; semua alarm terlihat setiap saat, tidak ada yang dipotong atau disembunyikan di balik "+n lagi". Baris bisa **ditekan dan terbuka di tempat**, tanpa keluar dari rail. Alarm **dikelompokkan per jenis, isinya per kejadian**: kepala menyebut jumlah ("4 Run gagal"), isinya menyebut yang mana lengkap dengan attempt-nya. Pengelompokan adalah kompresi, bukan pembuangan — karenanya jumlah baris pita stabil terhadap beban, dan pita tidak perlu batas tinggi buatan.
+
+**Hari pertama, beranda adalah daftar penyiapan.** Selama belum ada Run, seluruh permukaan berganti jadi empat langkah berurut: daftarkan Runner → buat Project → tulis Pipeline → jalankan Run. Ini konsekuensi dari aturan "pusat ikut keadaan", bukan pengecualian terhadapnya.
+
+Daftar itu **diturunkan dari keadaan, bukan disimpan**. Sebuah langkah selesai karena datanya ada — ada Runner hidup, ada Project, ada Pipeline, ada Run — bukan karena sebuah flag dicentang. Konsekuensinya mengikat: **tidak ada kolom `onboarding_completed`, tidak ada migrasi, tidak ada tombol lewati, tidak ada "tampilkan lagi nanti", tidak ada tur.** Semuanya menuntut state tersimpan, dan tidak satu pun dibutuhkan kalau daftarnya turunan. Daftar itu hilang sendiri begitu Run pertama ada, dan kembali sendiri kalau prasyaratnya hilang.
+
+`--fs-2xs` dan `--fs-3xl` yang ditangguhkan di atas masuk bersama layar ini — beranda adalah pembaca yang ditunggu.
 
 ## Testing Decisions
 

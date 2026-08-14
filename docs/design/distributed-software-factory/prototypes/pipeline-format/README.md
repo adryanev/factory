@@ -1,6 +1,6 @@
 # PROTOTYPE — sekali pakai, jangan dipelihara
 
-Artefak untuk ticket [09](../../issues/09-prototype-pipeline-definition-format.md).
+Artefak untuk ticket [09](../https://github.com/adryanev/factory/issues/87).
 Bukan spec, bukan skema final. Dibuat untuk direaksi lalu dibuang.
 
 Tiga gaya × tiga pipeline acuan yang sama:

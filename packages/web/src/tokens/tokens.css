@@ -59,13 +59,38 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) * 1.4);
 
-  /* ---- type scale — grilling-ui:32-34 ---- */
+  /* ---- type scale ----
+     Forked from Corpus (grilling-ui:32-34) at the top half only. The
+     original ladder stepped by 1.09–1.17 throughout, which reads as no
+     hierarchy at all; that is the one deliberate divergence from the
+     organisation's design system in this file, and spec.md "Bahasa visual"
+     records it.
+
+     What the fork does NOT touch: --fs-xs and --fs-sm keep their Corpus
+     values. They carry 68 of the 75 real call sites in packages/web/src —
+     the dense operating surfaces (tables, meta lines, chips, logs) whose
+     whole value is density. Widening them would inflate every one of those
+     for the sake of a tidier ratio.
+
+     What it does touch: --fs-lg upward, where hierarchy actually lives and
+     where the entire product had only 5 call sites to migrate. Steps are
+     now 1.25 / 1.20 / 1.25 instead of 1.13 / 1.11 / 1.20.
+
+     Note for the design detector: `flat-type-hierarchy` still fires on this
+     block, and it is correct that xs→sm→base step by 1.17 and 1.14. That is
+     the decision, not a leftover. Do not "fix" it by widening the lower
+     steps without re-reading the call-site distribution above.
+
+     Deliberately absent: a step below --fs-xs and one above --fs-2xl. Both
+     were wanted by the beranda prototype (docs/design/.../home-ui), neither
+     has a reader in this package today. Add them with the code that reads
+     them, not before. */
   --fs-xs: 0.75rem;
   --fs-sm: 0.875rem;
   --fs-base: 1rem;
-  --fs-lg: 1.125rem;
-  --fs-xl: 1.25rem;
-  --fs-2xl: 1.5rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.5rem;
+  --fs-2xl: 1.875rem;
   --tracking-tight: -0.025em;
   --tracking-tighter: -0.05em;
 

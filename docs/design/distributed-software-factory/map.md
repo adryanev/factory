@@ -10,7 +10,7 @@ Selesai ketika tidak ada lagi yang perlu diputuskan sebelum implementasi dimulai
 
 ## Notes
 
-**Domain**: orkestrasi terdistribusi untuk AI coding agent. Basisnya [sandcastle](https://github.com/mattpocock/sandcastle) — library TypeScript yang menjalankan coding agent (Claude Code, Codex, Cursor, OpenCode, Copilot) di sandbox Docker/Podman/Vercel, dengan branch strategy untuk menggabungkan hasil kerja agent kembali ke repo host.
+**Domain**: orkestrasi terdistribusi untuk AI coding agent. Basisnya [sandcastle](https://github.com/mattpocock/sandcastle) — library TypeScript yang menjalankan coding agent (Claude Code, Codex, Cursor, OpenCode, Copilot, pi) di sandbox Docker/Podman/Vercel, dengan branch strategy untuk menggabungkan hasil kerja agent kembali ke repo host.
 
 **Keputusan yang sudah dikunci sebelum map ini dibuat** (hasil grilling pembukaan — ini premis, bukan ticket):
 

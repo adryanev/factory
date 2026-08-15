@@ -215,6 +215,14 @@ Validasi **mengikat hanya di control plane saat trigger**. PR check dan editor v
 
 Fan-out **hanya satu jalur, semuanya dinamis atau konstanta eksplisit** — tidak ada `parallelism: N`. Key ditulis eksplisit per elemen dan bertipe berkendala `[a-z0-9][a-z0-9._-]{0,63}`; duplikat menggagalkan Run saat fan-out. Normalisasi slug ditolak: cek duplikat berjalan sebelum normalisasi, jadi `Frontend`/`frontend` akan lolos lalu bertabrakan di remote.
 
+**Submodule dideklarasikan, tidak dideteksi.** Step yang checkout-nya menuntut repo kedua menulis `submodules: [migrations]` — nama `Repository` anggota Project, bukan URL. Deklarasi inilah **satu-satunya** sumber untuk mint token baca; membaca `.gitmodules` sebagai sumber berarti siapa pun yang bisa menulis file itu di sebuah branch memperlebar token repo-nya sendiri. Skema menolak repo yang bukan anggota Project yang sama, dan Runner **membandingkan deklarasi dengan `.gitmodules` setelah checkout** lalu menggagalkan StepRun dengan pesan yang menyebut nama submodule — tanpa itu deklarasi yang basi muncul sebagai direktori kosong dan gagal jauh di hilir. Namanya sengaja sempit: `reads:` akan membuka pelonggaran lintas-repo umum lewat pintu belakang penamaan.
+
+`minBranches: 0` sah dan berarti "cabang boleh nol" — dipakai untuk pekerjaan di repo kedua yang baru diketahui perlu di tengah jalan, yang mengalir sebagai `outputs:` Step hulu (mis. `{ path, content }` file migrasi) ke Step ber-`repo:` lain.
+
+**Manifest Join hadir sebagai file di dalam checkout**, bukan hanya sebagai konteks agent, supaya Step `run:` di hilir Join bisa membacanya tanpa satu pun ekspresi di YAML.
+
+Pasangan berurutan lintas repo — ubah skema di repo submodule, lalu naikkan pointer di repo utama — ditulis sebagai rantai di dalam **satu Pipeline**, dan urutan merge-nya ditegakkan di dalam Run, bukan diserahkan ke manusia setelah PR ada: Step penaik pointer (sebuah Step `run:`) menunggu Question `approval` sampai PR repo submodule di-merge, lalu menaikkan pointer ke SHA **`main`** repo itu — bukan ke SHA branch, yang squash merge akan buat tak terjangkau. Menggantung di situ gratis: `awaiting-human` tidak memegang lease. Konsekuensi yang ikut dinamai di sini: **`ask:` pada Step non-agent berarti gerbang sebelum eksekusi** — Question diterbitkan control plane dan Step-nya tidak pernah diklaim Runner sampai dijawab, berbeda dari Step ber-agent yang bertanya di tengah gilirannya sendiri.
+
 `uses:` (blok definisi yang dipakai ulang) ditunda; penambahannya aditif murni.
 
 ### Kontrak Output
@@ -248,7 +256,7 @@ Satu penghitung `attempt` untuk semua sebab kegagalan (termasuk lease hilang dan
 
 Graph dimaterialisasi **hibrida** — Step non-fan-out di muka, cabang saat hulu sukses — dalam **satu transaksi Postgres**. `ready` digerakkan kejadian, dengan sweep berkala sebagai jaring pengaman.
 
-Tidak ada Runner yang cocok = **antre dan ditandai UI setelah 5 menit**, bukan gagal. `minBranches` bawaan 1 menutup jebakan "`all` atas himpunan kosong bernilai benar". Cabang `awaiting-human` tidak menahan cabang lain; Join `all` boleh menggantung selamanya — cancel jalan keluarnya.
+Tidak ada Runner yang cocok = **antre dan ditandai UI setelah 5 menit**, bukan gagal. `minBranches` bawaan 1 menutup jebakan "`all` atas himpunan kosong bernilai benar". **`minBranches: 0` yang ditulis eksplisit membalik itu dengan sengaja**: nol cabang berarti Join **sukses dan hilirnya tetap dijadwalkan**, bukan `skipped` — tanpa pengecualian ini, jalur "ternyata tidak ada pekerjaan di repo kedua" ikut mematikan seluruh hilirnya, termasuk Step yang membuka PR. Cabang `awaiting-human` tidak menahan cabang lain; Join `all` boleh menggantung selamanya — cancel jalan keluarnya.
 
 Cancel: heartbeat ≤10 detik → SIGTERM ke process group → 30 detik → SIGKILL. **Cancel otoritatif di control plane**: baris langsung `cancelled` sehingga UI berubah seketika; balasan heartbeat hanya meminta Runner berhenti membakar CPU. Branch setengah jadi dibiarkan yatim untuk GC.
 
@@ -430,9 +438,15 @@ Enkripsi **AES-256-GCM dengan AAD = id secret + id Principal pemilik**, sehingga
 
 Env tidak pernah ditulis ke file di dalam sandbox — ia diserahkan langsung ke pemanggilan agent.
 
+**Submodule dijawab dengan token kedua, bukan dengan pelebaran.** Izin sebuah installation token berlaku **seragam** atas seluruh `repository_ids`, jadi "satu token, `write` di repo utama dan `read` di repo submodule" tidak bisa ditulis. Maka repo submodule yang **dideklarasikan** mendapat token terpisah `contents:read`, dan repo utama tetap satu-satunya pemegang `contents:write` — aturan satu StepRun = satu repo bertahan harfiah di sisi tulis, dan repo submodule tidak pernah berada di daftar token yang memegang `write`. Control plane menolak deklarasi ke repo di luar Project, sehingga pelebaran yang bisa ditulis sendiri di sebuah branch tidak pernah melewati batas Project dan bukan eskalasi terhadap pemicunya.
+
+Runner memasang config git untuk Sandbox lewat **`GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`** — berorigin *command line* dan diwarisi seluruh pemanggilan turunan termasuk `git submodule update --recursive`, jadi nol byte kredensial menyentuh disk: `url.https://github.com/.insteadOf=git@github.com:` (universal, karena `.gitmodules` di lapangan merekam URL SSH), `credential.useHttpPath=true` dengan helper yang memilih token tulis untuk repo utama dan token baca untuk submodule, dan `protocol.ssh.allow=never` supaya submodule yang tidak dideklarasikan gagal seketika alih-alih menggantung menunggu kunci yang tidak pernah ada.
+
+Menulis di working tree submodule tidak pernah dibatasi — yang dibatasi hanya push. Perubahan yang harus bertahan mengalir keluar sebagai **Output** ke StepRun ber-`repo:` repo itu, tidak pernah sebagai push kedua.
+
 **Default-deny egress dari Sandbox** adalah kontrol utama; redaksi log **bukan** kontrol keamanan dan dinyatakan begitu. Yang menahan jalur eksfiltrasi lewat push adalah `repository_ids` sempit + **branch protection wajib**, dan factory **hanya membuka PR, tidak pernah merge**. Sandbox tidak pernah melewati `contents:write`; `pull_requests:write` milik control plane saja.
 
-Lima hal yang sengaja tidak dilindungi ditulis eksplisit di dokumentasi keamanan.
+Enam hal yang sengaja tidak dilindungi ditulis eksplisit di dokumentasi keamanan. Yang keenam datang bersama submodule: isi repo submodule bisa disalin agent ke branch repo utama, dan yang menahannya bukan pencegahan melainkan **diff PR yang terbaca**.
 
 ### Artifact dan blob
 
@@ -446,7 +460,7 @@ Engine **Garage** (bukan MinIO — arsip upstream dan penerusnya berlisensi prop
 
 Pengecualian yang dinyatakan: **snapshot definisi inline di Postgres** (`runs.definition` dan `runs.definition_files`), karena ia bukan Artifact, jalur eksekusi membacanya, dan ia harus hidup persis selama baris Run.
 
-Retensi digerakkan state Postgres, bukan lifecycle rule bucket: Artifact 90 hari sejak Run berakhir · Log 30 hari sejak Run berakhir · Branch saat Run berakhir · Session saat StepRun tak lagi `awaiting-human` **dan** Run berakhir. Pola penegakannya seragam: kolom penanda `*_purged_at` nullable pada baris pemiliknya dengan partial index, sehingga sweep jadi indexed scan yang **menyusut sambil bekerja** dan **idempoten**.
+Retensi digerakkan state Postgres, bukan lifecycle rule bucket: Artifact 90 hari sejak Run berakhir · Log 30 hari sejak Run berakhir · Branch saat Run berakhir **dan tidak ada PR terbuka yang bergantung padanya** · Session saat StepRun tak lagi `awaiting-human` **dan** Run berakhir. Ketergantungan itu dua bentuk: branch yang jadi **head** sebuah PR terbuka (menghapusnya menutup PR-nya), dan branch yang **ditunjuk pointer submodule** di head PR terbuka (menghapusnya menggantungkan pointer sebelum siapa pun sempat me-review). Ini satu-satunya predikat retensi yang tidak murni state Postgres — ia menanyakan keadaan PR ke GitHub. Pola penegakannya seragam: kolom penanda `*_purged_at` nullable pada baris pemiliknya dengan partial index, sehingga sweep jadi indexed scan yang **menyusut sambil bekerja** dan **idempoten**.
 
 ### Log
 
@@ -644,7 +658,7 @@ Aditif dan sengaja tidak dibangun sekarang, masing-masing sudah punya bentuk yan
 - **Prioritas dan keadilan** di kolam bersama (satu klausa `ORDER BY` lagi)
 - **Run berparameter (`inputs:`)**
 - **`outputs:` untuk Step `run:`** (dan karenanya fan-out dari keluaran perintah shell)
-- **Integration test lintas repo** — sebuah Step yang butuh source dua repo hidup bersamaan tidak bisa ditulis hari ini; verifikasi lintas repo terjadi setelah PR terbuka
+- **Bacaan lintas repo tanpa tautan submodule** — submodule yang dideklarasikan sudah punya jalur baca (token kedua `contents:read`), tapi sebuah Step yang ingin membaca repo lain semata karena ia ingin, atau yang butuh source dua repo hidup bersamaan untuk integration test, masih tidak bisa ditulis; verifikasi lintas repo terjadi setelah PR terbuka
 - **Trigger Run dari komentar GitHub**
 - **Kuota biaya dan rem otomatis**
 - **Notifikasi untuk Runner offline**
@@ -665,6 +679,8 @@ Aditif dan sengaja tidak dibangun sekarang, masing-masing sudah punya bentuk yan
 **Delapan belas keputusan diambil agent sendirian dan belum pernah dibantah siapa pun** — tersebar di skema DB (enam terakhir: biaya, secret, retensi, dedup, cache definisi, snapshot definisi), seluruh kontrak API Runner, empat sub-pertanyaan kontrak API web, dan enam sub-pertanyaan packaging. Semuanya konsekuensi dari keputusan yang sudah dikunci ticket lain dan tidak satu pun membuka arah baru, tapi tidak satu pun juga sudah melewati orang kedua. Baca sebagai **rekomendasi kuat, bukan keputusan yang sudah diadu** — dan kalau implementasi menemukan salah satunya salah, itu bukan penyimpangan dari spec.
 
 **Satu klaim sudah diverifikasi dan ternyata salah** (probe issue #20/#42, dijalankan 2026-08-12): commit yang dibuat lewat GitHub API dengan installation token **tidak** ditandatangani GitHub selama request menyebut `author` atau `committer`. GitHub hanya menandatangani commit API yang tidak menyebut identitas sama sekali — commit itu lalu ditulis atas nama bot App dengan committer `GitHub <noreply@github.com>`. Karena atribusi ke user penekan tombol adalah inti issue #20, editor menyebut identitas dan commit-nya unsigned. Lihat `docs/adr/0004-pipeline-editor.md`.
+
+**Satu keputusan masih terbuka.** Layanan pendukung di dalam Sandbox — Step yang butuh database, cache, atau antrean untuk menjalankan pekerjaannya (pembangkitan dump skema, integration test) belum punya jalur, dan default-deny egress menutup jalan ke layanan di luar. Lihat [ticket 30](https://github.com/adryanev/factory/issues/113). Ia tidak mengubah satu pun bentuk yang dikunci di sini, tapi rantai submodule tidak lengkap tanpanya.
 
 **Urutan yang disarankan.** Spec ini adalah seluruh sistem, dan seluruh sistem bukan satu unit kerja. Irisan vertikal pertama yang membuktikan arsitekturnya: trigger → materialisasi Graph → `/claim` → agent berjalan → push branch → Output lolos gerbang → `kind: pull-request` membuka PR, dengan fan-out dan Join ikut sejak awal karena keduanya membentuk skema dan kontrak. Human-in-the-loop menyusul sebagai irisan kedua — ia tidak mengubah satu pun bentuk yang dikunci di irisan pertama, ia menambahkan state tanpa lease.
 

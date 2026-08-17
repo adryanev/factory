@@ -28,6 +28,10 @@ bisa dibungkam memberi jawaban berbeda untuk pertanyaan kedua, dan jaraknya jauh
 | pi | **Ya** | **Gagal senyap: keluar 0**, `stopReason: "length"`, jawaban terpotong 1 token | **Tidak** |
 | Codex | **Tidak** | — (kompaksi tetap menyala) | — |
 
+Baris pi berlaku **untuk kedua konfigurasi**: kontrol dengan kompaksi *menyala*
+menghasilkan keluaran yang identik (§6), jadi cacatnya ada di bawah setelan
+kompaksi, bukan di dalamnya.
+
 **Claude Code adalah satu-satunya yang bisa dibungkam *dan* mengaku saat gagal.**
 pi — yang di ticket 132 disebut "bisa diminta diam, paling tegas" dan jadi
 kandidat terkuat — memang paling tegas membungkam, tapi kegagalannya **tidak
@@ -270,17 +274,35 @@ giliran sukses.
 Sebabnya: **provider memotong, tidak menolak.** Permintaan tidak ditolak dengan
 galat context-length; ia diterima dengan input yang dipangkas ke 196.608 token,
 dan modelnya kehabisan ruang keluaran. Dari sudut pandang pi itu henti `"length"`
-yang biasa. Dengan kompaksi menyala, cabang `recoverableLength` di
-`_checkCompaction` akan menangkap henti `length` itu dan memadatkan; dengan
-kompaksi mati, cabang itu tidak pernah dijalankan dan gilirannya berakhir apa
-adanya.
+yang biasa, bukan overflow.
 
-**Ini temuan terpenting riset ini untuk keputusan non-interferensi.** Membungkam
-pi berhasil, tapi menukar interferensi dengan kegagalan yang tidak terdeteksi.
-Kalau factory memakai pi dengan kompaksi dimatikan, ia **wajib** memeriksa
-`stopReason` dan `usage.input` sendiri; kode keluar tidak akan memberi tahu
-apa-apa, dan Orchestrator yang memakai "result terakhir menang" akan menyimpan
-jawaban satu token itu sebagai hasil Step.
+**Dan kontrolnya menunjukkan setelan itu tidak ada bedanya di sini.** Prompt yang
+sama dijalankan lagi dengan `{"compaction":{"enabled":true}}`:
+
+```
+exit 0
+stopReason "length" × 3
+output 1 token
+{"type":"agent_settled"}
+```
+
+Hasil akhirnya **identik**: keluar 0 dengan jawaban satu token. Apakah kompaksi
+benar-benar berjalan di antara tiga percobaan itu **tidak bisa diamati** —
+`--mode json` tidak memancarkan satu pun event `compaction_*` dalam bentuk mana
+pun yang dicoba (lihat paragraf terakhir bagian ini).
+
+Jadi kegagalan senyap ini **bukan akibat `enabled:false`**. Pada bentuk overflow
+ini — input dipotong sisi provider, bukan ditolak — **pi berakhir dengan sampah
+yang tak terdeteksi entah kompaksi dinyalakan atau dimatikan**. Baris pi di tabel
+ringkasan berlaku untuk kedua konfigurasi.
+
+**Ini temuan terpenting riset ini untuk keputusan non-interferensi**, dan bentuk
+tajamnya begini: membungkam pi **berhasil**, tapi keberhasilan itu tidak membeli
+apa yang factory butuhkan, karena **cacatnya ada di bawah setelan kompaksi, bukan
+di dalamnya**. Kalau factory memakai pi — dibungkam atau tidak — ia **wajib**
+memeriksa `stopReason` dan `usage.input` sendiri di tiap giliran; kode keluar
+tidak akan memberi tahu apa-apa, dan Orchestrator yang memakai "result terakhir
+menang" akan menyimpan jawaban satu token itu sebagai hasil Step.
 
 **Yang tidak berhasil diuji**: memaksa **jalur ambang** pi menyala. Empat bentuk
 dicoba (dua giliran `--continue` yang menumpuk konteks, dan

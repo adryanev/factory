@@ -73,7 +73,7 @@ Semua dijalankan di mesin macOS ini, dengan kredensial langganan yang sudah ada
 | Komponen | Versi | Catatan |
 | --- | --- | --- |
 | Claude Code | `2.1.233` | `/opt/homebrew/Caskroom/claude-code@latest/2.1.233/claude` |
-| Codex | `0.147.0` | `/opt/homebrew/Caskroom/codex/0.147.0/bin/codex`; model **`gpt-5.5`** — default `gpt-5.6-sol` **ditolak akun ChatGPT** (`400 invalid_request_error`) |
+| Codex | `0.147.0` | `/opt/homebrew/Caskroom/codex/0.147.0/bin/codex`; model **`gpt-5.5`** — default `gpt-5.6-sol` ditolak dengan `400 invalid_request_error`, sebab belum diisolasi (§8.6). Langganan ChatGPT mesin ini **kedaluwarsa**, tapi auth tetap melayani `gpt-5.5` normal |
 | OpenCode | `1.18.15` | `/opt/homebrew/Cellar/opencode/1.18.15/bin/opencode`; provider `opencode-go`, model gratis `deepseek-v4-flash-free` |
 | pi | `@earendil-works/pi-coding-agent` **0.84.2** | paket yang **hidup**; `@mariozechner/pi-coding-agent` terkonfirmasi deprecated dan beku di `0.73.1` |
 | Node | `v26.5.0` | pi menuntut `>=22.19.0` |
@@ -375,9 +375,17 @@ Yang riset ini tambahkan:
    Jendela terlalu kecil dengan auto-compaction menyala menghasilkan kompaksi
    berulang tanpa akhir (dibunuh pada 420 detik, kode keluar 124), bukan
    `ContextOverflowError`.
-6. **Codex — model default `gpt-5.6-sol` ditolak akun ChatGPT** (`400
-   invalid_request_error`). Sandbox yang memakai auth ChatGPT wajib menyetel model
-   secara eksplisit, atau tiap giliran gagal di permintaan pertama.
+6. **Codex — model default `gpt-5.6-sol` ditolak di mesin ini** dengan `400
+   invalid_request_error`: *"The 'gpt-5.6-sol' model is not supported when using
+   Codex with a ChatGPT account."* **Sebabnya belum diisolasi.** Bunyi pesannya
+   menunjuk jenis auth (akun ChatGPT versus API key), tapi langganan ChatGPT di
+   mesin ini **sedang kedaluwarsa**, jadi tingkat langganan sama masuk akalnya.
+   Keduanya tidak bisa dibedakan tanpa akun kedua yang masih aktif atau API key
+   pembanding. Yang **teramati** dan tidak bergantung pada sebab: Codex bisa gagal
+   di permintaan pertama hanya karena model defaultnya, tanpa ada hubungannya
+   dengan konteks — jadi Sandbox sebaiknya menyetel model secara eksplisit. Auth
+   itu sendiri **tetap hidup**: `gpt-5.5` melayani permintaan dengan normal pada
+   saat yang sama, dan seluruh hasil Codex di laporan ini memakainya.
 
 ---
 

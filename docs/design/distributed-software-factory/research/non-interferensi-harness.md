@@ -73,7 +73,7 @@ Semua dijalankan di mesin macOS ini, dengan kredensial langganan yang sudah ada
 | Komponen | Versi | Catatan |
 | --- | --- | --- |
 | Claude Code | `2.1.233` | `/opt/homebrew/Caskroom/claude-code@latest/2.1.233/claude` |
-| Codex | `0.147.0` | `/opt/homebrew/Caskroom/codex/0.147.0/bin/codex`; model **`gpt-5.5`** — default `gpt-5.6-sol` ditolak dengan `400 invalid_request_error`, sebab belum diisolasi (§8.6). Langganan ChatGPT mesin ini **kedaluwarsa**, tapi auth tetap melayani `gpt-5.5` normal |
+| Codex | `0.147.0` | `/opt/homebrew/Caskroom/codex/0.147.0/bin/codex`; model **`gpt-5.5`** — **satu-satunya dari sembilan model yang dilayani** akun ini; delapan lainnya (termasuk default `gpt-5.6-sol`) ditolak `400`. Langganan ChatGPT mesin ini **kedaluwarsa**; lihat §8.6 |
 | OpenCode | `1.18.15` | `/opt/homebrew/Cellar/opencode/1.18.15/bin/opencode`; provider `opencode-go`, model gratis `deepseek-v4-flash-free` |
 | pi | `@earendil-works/pi-coding-agent` **0.84.2** | paket yang **hidup**; `@mariozechner/pi-coding-agent` terkonfirmasi deprecated dan beku di `0.73.1` |
 | Node | `v26.5.0` | pi menuntut `>=22.19.0` |
@@ -375,17 +375,30 @@ Yang riset ini tambahkan:
    Jendela terlalu kecil dengan auto-compaction menyala menghasilkan kompaksi
    berulang tanpa akhir (dibunuh pada 420 detik, kode keluar 124), bukan
    `ContextOverflowError`.
-6. **Codex — model default `gpt-5.6-sol` ditolak di mesin ini** dengan `400
-   invalid_request_error`: *"The 'gpt-5.6-sol' model is not supported when using
-   Codex with a ChatGPT account."* **Sebabnya belum diisolasi.** Bunyi pesannya
-   menunjuk jenis auth (akun ChatGPT versus API key), tapi langganan ChatGPT di
-   mesin ini **sedang kedaluwarsa**, jadi tingkat langganan sama masuk akalnya.
-   Keduanya tidak bisa dibedakan tanpa akun kedua yang masih aktif atau API key
-   pembanding. Yang **teramati** dan tidak bergantung pada sebab: Codex bisa gagal
-   di permintaan pertama hanya karena model defaultnya, tanpa ada hubungannya
-   dengan konteks — jadi Sandbox sebaiknya menyetel model secara eksplisit. Auth
-   itu sendiri **tetap hidup**: `gpt-5.5` melayani permintaan dengan normal pada
-   saat yang sama, dan seluruh hasil Codex di laporan ini memakainya.
+6. **Codex — pesan galatnya menyalahkan jenis auth, tapi polanya menunjuk
+   entitlement.** Sembilan model dicoba pada akun dan menit yang sama. **Delapan
+   ditolak, satu jalan:**
+
+   | Model | Hasil |
+   | --- | --- |
+   | `gpt-5.5` | **`turn.completed`** |
+   | `gpt-5.6-sol` (default), `gpt-5.6`, `gpt-5.6-codex`, `gpt-5.5-codex`, `gpt-5.4`, `gpt-5.3-codex`, `gpt-5.1-codex`, `o3` | `400 invalid_request_error` — *"The '<model>' model is not supported when using Codex with a ChatGPT account."* |
+
+   Pesannya menyalahkan **jenis auth**, dan itu **menyesatkan**: kalau akun
+   ChatGPT memang tidak boleh memakai model-model ini, `gpt-5.5` juga akan
+   ditolak — ia dilayani lewat akun yang sama persis. Pola "tepat satu model
+   lolos, delapan lainnya ditolak, termasuk `o3` yang sudah tua" juga menutup
+   penjelasan "modelnya terlalu baru". Yang tersisa dan konsisten dengan semua
+   data: **entitlement akun ini hanya mencakup satu model**, dan langganan
+   ChatGPT mesin ini memang **sedang kedaluwarsa**. Belum bisa dibuktikan mutlak
+   tanpa akun aktif sebagai pembanding, tapi arah buktinya sudah tidak berimbang.
+
+   Untuk factory ini masalah operasional yang nyata, bukan sekadar catatan kaki:
+   **langganan yang habis mempersempit himpunan model yang bisa dipakai tanpa
+   suara**, dan tiap giliran yang memakai model lain gagal di **permintaan
+   pertama** dengan pesan yang menunjuk arah yang salah. Sandbox wajib menyetel
+   model secara eksplisit, dan kegagalan ini harus dibedakan dari kegagalan
+   konteks — keduanya sama-sama membunuh giliran di awal.
 
 ---
 

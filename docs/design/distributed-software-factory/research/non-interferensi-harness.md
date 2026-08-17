@@ -351,10 +351,14 @@ dan ia bekerja: seluruh tulisan mendarat di direktori scratch.
 
 ## 8. Koreksi untuk `jendela-konteks-per-alat.md`
 
-Riset ini **tidak** membatalkan dokumen itu; ia menambah dan mempertajam. Tiga
-temuannya yang sudah terbantah lebih dulu di ticket 132 (hook Claude Code menyala
-di `-p`; Codex punya hook lewat `$CODEX_HOME/hooks.json`; OpenCode punya dua hook
-kompaksi) sudah tercatat di komentar resolusi tiket itu dan tidak diulang di sini.
+Riset ini **tidak** membatalkan dokumen itu; ia menambah dan mempertajam.
+
+Koreksinya **dicatat di dokumen itu sendiri**, sebagai catatan amandemen di
+kepalanya — bersama tiga temuan yang sudah terbantah lebih dulu di ticket 132
+(hook Claude Code menyala di `-p`; Codex punya hook lewat `$CODEX_HOME/hooks.json`;
+OpenCode punya dua hook kompaksi). Komentar resolusi saja tidak cukup: pembaca
+yang membuka `jendela-konteks-per-alat.md` langsung harus menemukan
+peringatannya di sana, bukan menelusuri riwayat tiket.
 
 Yang riset ini tambahkan:
 

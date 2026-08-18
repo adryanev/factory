@@ -15,6 +15,33 @@ Daftar lengkap "yang dijamin" ada di [§8](#8-yang-dijamin-lintas-semua-alat).
 Daftar "yang tidak dijamin" — bagian paling menentukan keputusan — ada di
 [§7](#7-yang-tidak-dijamin-lintas-semua-alat).
 
+> **Diamandemen oleh tiket 29 dan tiket 144.** Dokumen ini ditulis dengan
+> **membaca source, tanpa menjalankan**, dan sebagian kesimpulannya sudah
+> terbantah. **Baca catatan ini sebelum memakai §1, §2, atau §3.**
+>
+> **Tiga temuan gugur** ([tiket 29](https://github.com/adryanev/factory/issues/132),
+> diuji dengan menjalankan):
+>
+> 1. **§2.4 — "dokumentasi tidak menyatakan apakah hook menyala di mode `-p`"**:
+>    hook Claude Code **menyala** di `-p`. `SessionStart`, `UserPromptSubmit`,
+>    `PreToolUse`, `Stop`, `SessionEnd`, `PreCompact`, dan `PostCompact` semuanya
+>    menyala di headless, dan `PreCompact` **bisa memblokir** kompaksi proaktif.
+> 2. **§2.4 — "Codex: ada gerbang trust"** benar, tapi tidak lengkap: Codex punya
+>    sistem hook **penuh** lewat `$CODEX_HOME/hooks.json`, yang riset ini tidak
+>    periksa karena hanya menelusuri jalur `-c` yang memang untrusted.
+> 3. **§2.4 — "OpenCode: tidak ada padanan hook PreCompact"**: OpenCode punya
+>    **dua** hook kompaksi, satu membawa `overflow: boolean`. Karena itu
+>    kesimpulan *"tidak ada alat yang menjamin sinyal kompaksi"* benar **hanya
+>    untuk stdout**, bukan secara umum.
+>
+> **Enam koreksi tambahan** dari [tiket 144](https://github.com/adryanev/factory/issues/144),
+> yang menguji klaim dokumen ini dengan menjalankan alatnya — termasuk bahwa
+> `model_context_window` Codex berlaku pada **95%** dari nilai yang disetel, bahwa
+> pemeriksaan mid-turn Codex memakai **konteks aktif** dan bukan total kumulatif,
+> dan bahwa Claude Code membawa penanda mesin **`terminal_reason: "blocking_limit"`**
+> yang melengkapi §2.3. Rinciannya di
+> [`non-interferensi-harness.md` §8](./non-interferensi-harness.md#8-koreksi-untuk-jendela-konteks-per-alatmd).
+
 ---
 
 ## 0. Cakupan, versi, dan sumber

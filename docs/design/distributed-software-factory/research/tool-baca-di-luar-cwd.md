@@ -579,7 +579,21 @@ pernah jalan sama sekali**. Itu setidaknya berisik. Mitigasi termurah: kirim
 **Tidak. Tidak satu pun, di keenam provider. Ini jaminan negatif, dan sebabnya
 struktural: tidak ada parser sandcastle yang membaca hasil tool.**
 
-Diperiksa di ketiga parser yang relevan di `AgentProvider.ts`. **Verified.**
+Diperiksa di **keenam** parser di `AgentProvider.ts`. **Verified.** Tiga yang
+pertama dibahas rinci di bawah; tiga sisanya menutup klaim ini:
+
+- **pi** (`parsePiStreamLine`) hanya memetakan `session`, `message_update`,
+  **`tool_execution_start`**, `agent_error`/`error`, dan `agent_end`. Yang ia
+  baca dari sebuah tool adalah **peristiwa mulainya**, bukan hasilnya.
+- **Copilot** (`parseCopilotStreamLine`) sebentuk: `assistant.message_delta`,
+  **`tool.execution_start`**, `assistant.message`, `result`, `error`.
+- **Cursor** (`parseCursorStreamLine`) menangani `tool_call` — sekali lagi
+  peristiwa mulai — lalu **mendelegasikan sisanya ke `parseStreamJsonLine`**,
+  yaitu parser Claude Code, yang ketiadaan pembacaan `tool_result`-nya
+  dibahas di bawah. Cursor mewarisi lubang yang sama persis.
+
+Tidak satu pun dari keenam memiliki cabang yang membaca isi atau status hasil
+tool.
 
 **OpenCode** — penolakan dibuang secara eksplisit:
 
@@ -674,6 +688,17 @@ path digeser ke dalam worktree, dan symlink terbukti **memperburuk** keadaan
 - **Pengaruh `.gitignore` pada `find`/`grep` pi** terhadap pohon konteks
   sungguhan (§2.4).
 - **Perilaku `glob` OpenCode pada pattern absolut di versi selain 1.18.15.**
+- **Bentuk kegagalan OpenCode bergantung pada stdin, dan itu belum diselesaikan.**
+  Uji penolakan yang pertama, dijalankan **tanpa** `</dev/null`, **menggantung
+  sampai timeout 2 menit** alih-alih menolak — gerbang `external_directory`
+  rupanya menunggu jawaban. Uji yang sama dengan stdin diarahkan ke `/dev/null`
+  langsung menolak dan keluar dengan exit code 0. Sandcastle mengirim prompt
+  OpenCode lewat **argv**, bukan stdin, jadi apa yang stdin proses itu tunjuk di
+  dalam Sandbox — TTY, pipa, atau tertutup — yang menentukan factory mendapat
+  giliran yang **menolak** atau giliran yang **menggantung**. Keduanya buruk
+  dengan cara berbeda: yang satu senyap, yang satu menghabiskan seluruh
+  anggaran waktu Step. Tidak diuji di dalam container. Ini hanya menggigit
+  kalau tuas izin §2.3 hilang; hari ini tidak.
 - **`copyFileIn`/`copyFileOut` untuk provider Sandbox selain Docker**
   (Podman, Daytona, Vercel) terhadap symlink. Hanya Docker yang diuji.
 
